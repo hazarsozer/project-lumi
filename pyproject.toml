@@ -1,0 +1,16 @@
+[project]
+name = "lumi"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "colorama>=0.4.6",
+    "faster-whisper>=1.2.1",
+    "numpy>=2.4.2",
+    "onnxruntime>=1.24.1",
+    "openwakeword>=0.4.0",
+    "scipy>=1.17.0",
+    "sounddevice>=0.5.5",
+    "torch>=2.10.0",
+]
