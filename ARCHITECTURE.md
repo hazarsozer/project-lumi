@@ -1,4 +1,4 @@
-# NenOS: Architecture & Roadmap (v1.0)
+# Project Lumi: Architecture & Roadmap (v1.0)
 
 **Project Goal:** *"Siri on Steroids"* — A local, privacy-first Desktop Assistant
 **Core Philosophy:** *"Architect First"* — Logic before code. Zero Cost. Local Only.
@@ -7,7 +7,7 @@
 
 ## 1. System Architecture: "The Split-Brain"
 
-To ensure the desktop remains responsive (especially during gaming), NenOS is decoupled into two independent processes communicating via ZeroMQ (ZMQ).
+To ensure the desktop remains responsive (especially during gaming), Lumi is decoupled into two independent processes communicating via ZeroMQ (ZMQ).
 
 ### The Body (Frontend)
 
@@ -36,7 +36,7 @@ To ensure the desktop remains responsive (especially during gaming), NenOS is de
 
 The system detects available hardware at startup and selects the appropriate "Edition."
 
-| Feature         | NenOS Light (Low-End / Laptop)       | NenOS Standard (Gamer / Current Target) | NenOS Pro (Workstation)      |
+| Feature         | Lumi Light (Low-End / Laptop)       | Lumi Standard (Gamer / Current Target) | Lumi Pro (Workstation)      |
 | --------------- | ------------------------------------ | --------------------------------------- | ---------------------------- |
 | **VRAM Budget** | < 2 GB                               | < 4 GB (Dynamic Offloading)             | 8 GB+ (Always Loaded)        |
 | **LLM Model**   | Qwen-1.5 (1.8B) or Phi-3 Mini (Int4) | Phi-3.5 Mini or Gemma 2 (2B)            | Llama-3 (8B) or Gemma 2 (9B) |
@@ -119,7 +119,7 @@ The system detects available hardware at startup and selects the appropriate "Ed
 ## 5. Directory Structure
 
 ```plaintext
-NenOS/
+Lumi/
 ├── .venv/                 # Managed by uv
 ├── models/                # GGUF / ONNX models (Ignored)
 ├── src/
