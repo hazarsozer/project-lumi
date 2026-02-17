@@ -1,10 +1,21 @@
-# Python-generated files
+# --- Python Standard ---
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+*.pyc
+.venv/
+.env
 
-# Virtual environments
-.venv
+# --- AI & Models (CRITICAL) ---
+# Ignore all model weights, but keep the folder structure if you want
+models/*
+*.onnx
+*.pt
+*.bin
+*.gguf
+!models/.keep  # (Optional: lets you commit the folder but not the files)
+
+# --- IDEs ---
+.vscode/
+.idea/
+
+# --- System ---
+.DS_Store
