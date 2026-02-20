@@ -34,9 +34,9 @@
 - [x] **Threaded Listener** (Producer-Consumer pattern with `queue`).
 - [x] **Latency Tuning** (Implemented `latency='high'` to fix buffer underruns). ⚠️ **Unstable**
 - [x] **Logic: Double Trigger Fix** (Implemented "Flush & Ignore" cooldown logic). ⚠️ **Needs Calibration**
-- [ ] **Wake Word Accuracy** 🔴 **Critical Issue**
-    - [ ] Train custom "Hey Lumi" model (`openWakeWord`).
-    - [ ] Verify >0.8 confidence score.
+- [x] **Wake Word Accuracy** 🔴 **Critical Issue**
+    - [x] Train custom "Hey Lumi" model (`openWakeWord`).
+    - [x] Verify >0.8 confidence score.
 - [ ] **Voice Activity Detection (VAD)**
     - [ ] Integrate `silero-vad` to detect end-of-speech (Smart Stop).
     - [ ] Calibrate silence threshold for background noise.
