@@ -18,4 +18,13 @@ models/*
 .idea/
 
 # --- System ---
-.DS_Store
+.DS_Storeaudioset/
+audioset_16k/
+fma/
+mit_rirs/
+openwakeword/
+piper-sample-generator/
+*.npy
+*.wav
+my_model.yaml
+.ipynb_checkpoints/
