@@ -2,6 +2,7 @@ import sounddevice as sd
 import numpy as np
 import openwakeword
 from openwakeword.model import Model
+from openwakeword.vad import VAD
 import threading
 import queue
 import time
@@ -11,11 +12,12 @@ SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280
 
 class Ears:
-    def __init__(self, sensitivity: float = 0.5):
+    def __init__(self, sensitivity: float = 0.5, model_paths: list[str] = None):
         '''
         Implementation of the threaded microphone listener.
         Args:
             sensitivity: The sensitivity of the wake word detector.
+            model_paths: Optional list of paths to wake word models.
         '''
 
         self.sensitivity = sensitivity
@@ -47,9 +49,21 @@ class Ears:
         except Exception as e:
             print(f"Warning: could not apply openwakeword AudioFeatures compatibility patch: {e}")
 
+        # If no model paths are provided, try to use the custom hey_lumi model if it exists
+        if model_paths is None:
+            import os
+            custom_model = "models/hey_lumi.onnx"
+            if os.path.exists(custom_model):
+                model_paths = [custom_model]
+            else:
+                model_paths = []  # Empty list will load all default models
+
         # Instantiate the wake word model (will lazily download resources if needed)
-        self.model = Model(inference_framework="onnx")
-        print("Model loaded successfully.")
+        self.model = Model(wakeword_model_paths=model_paths, inference_framework="onnx")
+        print(f"Model loaded successfully. Active models: {list(self.model.models.keys())}")
+
+        # Initialize VAD
+        self.vad = VAD()
 
         # Cooldown timestamp (monotonic seconds) to ignore audio after a wake event
         self._cooldown_until = 0.0
@@ -63,6 +77,75 @@ class Ears:
             print(f"Microphone status: {status}")
 
         self.audio_queue.put(indata.copy())
+
+    def record_command_with_vad(self, timeout=10.0, silence_limit=1.5):
+        '''
+        Records audio from the queue until VAD detects silence or timeout is reached.
+        Args:
+            timeout: Maximum recording time in seconds.
+            silence_limit: How many seconds of silence to wait before stopping.
+        Returns:
+            The recorded audio as a numpy array.
+        '''
+        print("🔴 REC (VAD active)")
+        recorded_chunks = []
+        
+        # Clear the queue first to avoid processing old audio
+        try:
+            while True:
+                self.audio_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        start_time = time.monotonic()
+        last_voice_time = time.monotonic()
+        speech_detected = False
+
+        while True:
+            now = time.monotonic()
+            if now - start_time > timeout:
+                print("Recording timed out.")
+                break
+            
+            try:
+                chunk = self.audio_queue.get(timeout=0.1)
+                
+                # Ensure audio is 1D int16
+                if isinstance(chunk, np.ndarray):
+                    if chunk.ndim == 2:
+                        chunk_flat = chunk[:, 0]
+                    else:
+                        chunk_flat = chunk
+                    chunk_flat = chunk_flat.astype(np.int16, copy=False)
+                
+                recorded_chunks.append(chunk_flat)
+
+                # VAD check
+                # VAD expects 16kHz, 16-bit PCM. chunk_flat should be okay.
+                # openwakeword.VAD.predict expects chunks of specific size (default 480)
+                # our CHUNK_SIZE is 1280 (80ms), which is a multiple of 160.
+                vad_score = self.vad.predict(chunk_flat)
+                
+                if vad_score > 0.5: # Voice detected
+                    if not speech_detected:
+                        print("Speech detected...")
+                        speech_detected = True
+                    last_voice_time = now
+                elif speech_detected and (now - last_voice_time > silence_limit):
+                    print("Silence detected, stopping recording.")
+                    break
+                elif not speech_detected and (now - start_time > 3.0):
+                    # If no speech detected for 3 seconds after wake word, stop
+                    print("No speech detected after wake word.")
+                    break
+
+            except queue.Empty:
+                continue
+
+        if not recorded_chunks:
+            return np.array([], dtype=np.int16)
+        
+        return np.concatenate(recorded_chunks)
 
     def _consumer_loop(self, on_wake):
         '''

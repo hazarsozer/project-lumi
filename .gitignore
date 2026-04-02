@@ -17,6 +17,15 @@ models/*
 .vscode/
 .idea/
 
+# --- AI Tooling (local workflow, not project code) ---
+SUGGESTIONS.md
+GEMINI.md
+CLAUDE.md
+SKILL.md
+
+# --- Notebooks ---
+*.ipynb
+
 # --- System ---
 .DS_Storeaudioset/
 audioset_16k/

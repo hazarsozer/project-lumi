@@ -6,9 +6,9 @@ from audio.scribe import Scribe
 from utils import play_ready_sound
 
 def main():
-    print("Starting NenOS...")
+    print("Starting Lumi...")
     print("Loading audio components...")
-    ears = Ears(sensitivity=0.3)
+    ears = Ears(sensitivity=0.8)
     scribe = Scribe(model_size="tiny.en")
     print("Audio components loaded successfully.")
 
@@ -16,22 +16,20 @@ def main():
         print("Listening for command...")
         play_ready_sound() 
         
-        print("🔴 REC")
-        duration = 4
-        fs = 16000
-        recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
-        sd.wait()
+        # Use VAD for smart recording
+        recording = ears.record_command_with_vad()
+        
+        if recording.size == 0:
+            print("No audio recorded.")
+            return
 
         print("Processing audio...")
-        #Flatten
-        audio_flat = recording.flatten()
-
         #Transcribe
-        text = scribe.transcribe(audio_flat)
+        text = scribe.transcribe(recording)
         print(f"Transcribed text: {text}")
         print("Listening again..")
 
-    print("Waiting for 'Hey Jarvis'..")
+    print("Waiting for 'Hey Lumi'..")
     try:
         ears.start(on_wake_callback=on_wake)
         while True:
