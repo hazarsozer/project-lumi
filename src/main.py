@@ -1,42 +1,33 @@
-import time
-import sounddevice as sd
-import numpy as np
-from audio.ears import Ears
-from audio.scribe import Scribe
-from utils import play_ready_sound
+"""
+Entry point for Project Lumi.
 
-def main():
-    print("Starting Lumi...")
-    print("Loading audio components...")
-    ears = Ears(sensitivity=0.8)
-    scribe = Scribe(model_size="tiny.en")
-    print("Audio components loaded successfully.")
+Bootstraps the application in four steps:
+1. setup_logging()       — configure the root logger (level and format from config)
+2. load_config()         — load config.yaml into a frozen LumiConfig instance
+3. run_startup_checks()  — validate model paths, openwakeword version, microphone
+4. Orchestrator.run()    — start the event loop; blocks until ShutdownEvent
 
-    def on_wake():
-        print("Listening for command...")
-        play_ready_sound() 
-        
-        # Use VAD for smart recording
-        recording = ears.record_command_with_vad()
-        
-        if recording.size == 0:
-            print("No audio recorded.")
-            return
+SIGINT and SIGTERM both post ShutdownEvent to the Orchestrator for graceful exit.
+"""
 
-        print("Processing audio...")
-        #Transcribe
-        text = scribe.transcribe(recording)
-        print(f"Transcribed text: {text}")
-        print("Listening again..")
+import signal
 
-    print("Waiting for 'Hey Lumi'..")
-    try:
-        ears.start(on_wake_callback=on_wake)
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        ears.stop()
-        print("System shutdown.")
+from src.core.config import load_config
+from src.core.events import ShutdownEvent
+from src.core.logging_config import setup_logging
+from src.core.orchestrator import Orchestrator
+from src.core.startup_check import run_startup_checks
+
+
+def main() -> None:
+    setup_logging()
+    config = load_config()
+    run_startup_checks(config)
+    orchestrator = Orchestrator(config)
+    signal.signal(signal.SIGINT, lambda s, f: orchestrator.post_event(ShutdownEvent()))
+    signal.signal(signal.SIGTERM, lambda s, f: orchestrator.post_event(ShutdownEvent()))
+    orchestrator.run()
+
 
 if __name__ == "__main__":
     main()

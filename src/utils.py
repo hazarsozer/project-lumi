@@ -1,3 +1,13 @@
+"""
+Shared utility functions for Project Lumi.
+
+Key public functions:
+    play_ready_sound() — generates and plays a short 880 Hz sine-wave "ping"
+    to indicate that the assistant is ready. Currently uses a blocking
+    sd.play() + sd.wait() call (see TODO item 12 for the planned non-blocking
+    queue refactor).
+"""
+
 import numpy as np
 import sounddevice as sd
 

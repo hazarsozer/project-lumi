@@ -1,0 +1,38 @@
+repos:
+  # ---------------------------------------------------------------------------
+  # black — opinionated Python formatter
+  # Runs before commit and reformats files in-place; the commit is blocked if
+  # any file was changed so the author can review the diff.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        language_version: python3.12
+
+  # ---------------------------------------------------------------------------
+  # ruff — fast Python linter (replaces flake8, isort, pyupgrade, and more)
+  # --fix applies safe auto-fixes; remaining violations block the commit.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  # ---------------------------------------------------------------------------
+  # mypy — static type checker
+  # Runs against the src/ directory only to match the CI gate scope.
+  # The hook is configured to use the project's [tool.mypy] settings from
+  # pyproject.toml automatically.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args: [src/]
+        # Pass additional_dependencies so the hook's isolated venv has the
+        # stubs and runtime libraries that mypy needs to resolve imports.
+        additional_dependencies:
+          - "pyyaml>=6.0"
+          - "types-PyYAML"

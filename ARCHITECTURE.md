@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 1 completion (2026-04-02).
+> Last updated to reflect actual state as of Phase 3 foundations completion (2026-04-04).
 
 ---
 
@@ -37,7 +37,7 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 ### The Nerves (IPC)
 - **Protocol:** ZeroMQ PAIR socket
 - **Format:** `{ "event": string, "payload": object, "timestamp": float, "version": string }`
-- **Defined events (planned):**
+- **Wire-format schema defined** (`ZMQMessage` dataclass in `src/core/events.py`). **ZMQ transport not yet implemented** (`zmq_server.py` planned — Phase 3 remaining). **IPC event types:**
 
 | Event | Direction | Payload |
 |---|---|---|
@@ -52,21 +52,25 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 
 ---
 
-## 2. Internal Event Architecture (Planned)
+## 2. Internal Event Architecture
 
-The current synchronous pipeline must evolve into an event-driven model before Phase 3.
+The pipeline is event-driven. All components post typed, frozen dataclass events to a central `queue.Queue` owned by the `Orchestrator`.
 
 ### Internal Event Types (`src/core/events.py`)
 
 | Event | Posted by | Consumed by |
 |---|---|---|
 | `WakeDetectedEvent` | Ears thread | Orchestrator |
-| `RecordingCompleteEvent(audio)` | Orchestrator (after VAD) | Orchestrator |
-| `TranscriptReadyEvent(text)` | Scribe | Orchestrator |
-| `LLMResponseReadyEvent(text)` | LLM engine | Orchestrator |
-| `TTSChunkReadyEvent(audio, viseme)` | TTS engine | Speaker thread |
+| `RecordingCompleteEvent` | Ears thread (after VAD) | Orchestrator |
+| `TranscriptReadyEvent` | Scribe | Orchestrator |
+| `CommandResultEvent` | Orchestrator (command parser) | Orchestrator |
+| `LLMResponseReadyEvent` | LLM engine | Orchestrator |
+| `TTSChunkReadyEvent` | TTS engine | Speaker thread |
 | `InterruptEvent` | Any source (Body via ZMQ, new wake word) | Orchestrator |
 | `ShutdownEvent` | main.py / signal handler | Orchestrator |
+| `UserTextEvent` | ZMQ server (Body → Brain) | Orchestrator |
+
+`ZMQMessage` is also defined in `src/core/events.py` as the wire-format dataclass for ZMQ IPC communication (`event`, `payload`, `timestamp`, `version`).
 
 ### Pipeline Flow
 
@@ -109,7 +113,7 @@ When the Orchestrator receives `InterruptEvent` while in `PROCESSING` or `SPEAKI
 3. Transitions the state machine back to `IDLE`
 4. Re-enables wake word detection in the Ears thread
 
-### State Machine (Planned)
+### State Machine (`src/core/state_machine.py`)
 
 ```
           wake word
@@ -122,7 +126,9 @@ When the Orchestrator receives `InterruptEvent` while in `PROCESSING` or `SPEAKI
    └─────────────── SPEAKING (TTS playback)
 ```
 
-State transitions are published to the Body via `state_change` IPC events.
+The `LumiState` enum defines exactly four states: `IDLE`, `LISTENING`, `PROCESSING`, `SPEAKING`. The `StateMachine` class enforces all valid transitions and notifies registered observers. `InvalidTransitionError` is raised for any illegal transition attempt.
+
+State transitions are published to the Body via `state_change` IPC events (ZMQ server not yet implemented — planned Phase 3 remaining).
 
 ---
 
@@ -177,73 +183,341 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Language | Python 3.12 |
 | Package Manager | `uv` |
 | IPC | ZeroMQ (pyzmq) |
-| Config | `config.yaml` + `src/core/config.py` (planned) |
-| Logging | Python `logging` module via `src/core/logging_config.py` (planned) |
-| Startup Validation | `src/core/startup_check.py` (planned) |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (planned) |
+| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
+| Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
+| Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory exists, 83 tests) |
+| CI | `.github/workflows/ci.yml` |
 
 ---
 
-## 5. Actual Directory Structure
+## 5. Fine-Tuning Strategy (Phase 3 & Beyond)
 
-Current state as of 2026-04-02:
+### Overview
+
+Out of the box, Phi-3.5 Mini claims to be "a large language model by Microsoft" and will refuse benign OS operations it doesn't recognize. Fine-tuning shapes behavior, tone, and structured output format without retraining from scratch.
+
+### Canonical Personality Definition
+
+All training data must conform to this character spec. Consistency matters more than cleverness.
+
+```
+Name:        Lumi
+Pronouns:    they/them (neutral, non-gendered)
+Voice style: Calm, concise, slightly warm. Never condescending. No filler phrases
+             ("Certainly!", "Of course!", "Great question!"). Gets to the point.
+Awareness:   Knows it runs locally on the user's machine. Never claims internet access
+             unless the internet tool is active. Knows its own VRAM budget and model size.
+Limits:      Honest about what it can't do. Does not hallucinate capabilities.
+             "I don't have access to that right now" > making something up.
+Expertise:   Power-user assistant. Comfortable with code, system tasks, terminal output.
+             Treats the user as a capable adult.
+```
+
+**Anti-patterns to train away (explicitly in every training batch):**
+- Never start a response with "Certainly!", "Of course!", "Sure!", "Great question!"
+- Never use markdown in voice responses (`**bold**`, `# headers`)
+- Never claim internet access if the internet tool is disabled
+- Never say "As an AI language model, I..."
+
+**Recommended approach: QLoRA** (Quantized LoRA) reduces full fine-tuning's 24GB VRAM requirement to ~6–8GB, viable on a single RTX 3060/3080.
+
+### LoRA Adapter Hot-Swap Architecture
+
+Rather than loading multiple full GGUF models, keep one base model in VRAM permanently and domain-specific LoRA adapters (~10-50 MB each) are swapped in <100ms.
+
+**VRAM Budget (Q4_K_M):**
+
+| Component | VRAM |
+|---|---|
+| Base model (Phi-3.5 Mini) | ~2.2 GB |
+| Audio pipeline (openwakeword + faster-whisper) | ~0.3 GB |
+| KV cache | ~0.3 GB |
+| LoRA adapters (per active) | ~0.05 GB |
+| **Total** | ~2.85 GB (comfortable within 3.8 GB budget) |
+
+**Prerequisites:** Before building hot-swap infrastructure, verify that `llama-cpp-python>=0.2.90` exposes `llama_lora_adapter_set` / `llama_lora_adapter_remove` via a quick validation test. If unavailable, fall back to pre-merged GGUFs with `ModelRegistry`.
+
+### Domain Router
+
+Classifies transcripts to select the appropriate LoRA adapter:
+
+- **Option A (start here): Regex classifier** — <1ms latency, ~70-80% accuracy. Wrong classifications degrade quality, not correctness.
+- **Option B (upgrade path): Embedding similarity** — `all-MiniLM-L6-v2`, ~10-30ms latency, 85-90% accuracy. Only build if regex miss rate >20% in production.
+
+### Dataset Strategy: 5 Categories
+
+| Category | Priority | Count | Content |
+|---|---|---|---|
+| 1: Identity & Personality | HIGH | ~200 | Who is Lumi, voice style, limitations |
+| 2: Brevity & Voice-Friendliness | HIGH | ~150 | Short, spoken answers (no markdown) |
+| 3: OS Control | HIGH | 400–500 | Tool calls, JSON schema, safety |
+| 4: Code Generation | MEDIUM | ~150 | Snippets, no preamble |
+| 5: Internet Tools | LOW | ~200 | Web search, fetch (Phase 5+) |
+| 6: Multi-Turn Context | MEDIUM | ~100 | Conversational flow, context preservation |
+
+Total: ~1000–1200 examples for full personality + tool-call training.
+
+### Training Workflow
+
+1. Generate dataset (synthetic via Claude/GPT-4 ~80%, manual curation ~15%, live sessions ~5%)
+2. Format to model's native chat template
+3. QLoRA fine-tune (`r=16` for personality, `r=32` for tool-use) — 90/10 train/val split
+4. Evaluate held-out set at FP16 (check overfitting)
+5. Merge LoRA → base model
+6. Evaluate merged at FP16 (pre-quantization baseline)
+7. Convert → GGUF (llama.cpp `convert_hf_to_gguf.py`)
+8. Quantize to Q4_K_M
+9. **Critical step:** Evaluate Q4_K_M vs FP16 baseline — if quality delta >1pt, use Q5_K_M or Q6_K instead
+10. Drop into `models/llm/` and run full evaluation checklist
+
+### Tool Call Format & Parser
+
+Format: `<tool_call>{...}</tool_call>` (XML-style delimiters, JSON payload)
+
+All result-returning tools must use inline `[TOOL_RESULT: ...]` injection (no closing tag):
+
+```
+User: Run git status.
+Lumi: <tool_call>{"tool": "terminal.run", "args": {"command": "git status"}}</tool_call>
+[TOOL_RESULT: On branch main\nnothing to commit]
+Lumi: Clean — nothing to commit.
+```
+
+**`ToolCallParser` class** (`src/llm/tool_call_parser.py`) handles parsing, validation, and recovery:
+- Extracts all `<tool_call>` blocks (supports multi-call)
+- Validates tool names against `VALID_TOOLS` registry
+- Best-effort fix for common JSON errors (unescaped quotes, trailing commas)
+- `extract_spoken_text()` strips all tool tags for TTS
+
+### Versioning Scheme
+
+```
+lumi-{base}-v{version}-{quant}.gguf
+
+Examples:
+  lumi-phi35-v1-Q4_K_M.gguf              # personality + brevity
+  lumi-phi35-v2-Q4_K_M.gguf              # + OS tools
+  lumi-phi35-chat-v1-Q4_K_M.gguf         # specialist: chat domain
+  lumi-phi35-os-v1-Q4_K_M.gguf           # specialist: OS control domain
+```
+
+### Evaluation Checklist
+
+**Automated (80%+ coverage via tests):**
+- Identity questions confirm "Lumi", no base model name
+- OS command prompts emit valid `<tool_call>` JSON
+- Response word counts <80 for single-turn factuals
+- Negative assertions: no "Certainly!", "Of course!", markdown, "language model"
+- Base-capability regression (general knowledge + code unchanged >1pt)
+
+**Manual:**
+- 10 identity questions — all confirm "Lumi"
+- 5 dangerous commands — all ask for confirmation
+- 5 multi-turn conversations — context maintained
+- Voice output check — read 10 responses aloud
+
+### Phased Rollout
+
+| Phase | Model | Dataset | New Capabilities |
+|---|---|---|---|
+| v0 (now) | Stock Phi-3.5 Mini Q4_K_M | None | Baseline |
+| v1 | lumi-phi35-v1 | Cat. 1+2 (~350) | Lumi identity, voice brevity |
+| v2 | lumi-phi35-v2 | + Cat. 3 (~750–850) | OS tool calls |
+| v3 | lumi-phi35-v3 | + Cat. 4+6 (~1000) | Code style, multi-turn |
+| v4 | lumi-phi35-v4 | + Cat. 5 (~1200) | Internet tools (Phase 5+) |
+
+### Open Questions (Fine-Tuning)
+
+1. **LoRA API availability:** Does `llama-cpp-python>=0.2.90` expose `llama_lora_adapter_remove`? Run `hasattr(model, "set_lora")` before building hot-swap infrastructure. Highest-priority investigation.
+2. **System prompt vs fine-tuning tradeoff:** Some behaviors (brevity, no filler) can be enforced via system prompt without fine-tuning. Measure the system-prompt baseline first before investing in fine-tuning for those behaviors.
+3. **Voice-specific symbol avoidance:** TTS reads code symbols aloud badly. A post-processing step in `PromptEngine.extract_response()` may be sufficient; a fine-tune that naturally avoids symbols in voice contexts would be cleaner.
+4. **Catastrophic forgetting:** Run base-capability regression tests (general knowledge + code) before and after each fine-tuning version. If the fine-tuned average drops >1pt, reduce LoRA rank.
+5. **Multi-call tool ordering:** When the user requests two actions in sequence, should Lumi execute sequentially (safer, slower) or emit both calls in one response (faster, requires orchestrator concurrent tool execution)? Training data must be consistent.
+
+---
+
+## 6. LightRAG: Optional Personal Knowledge Base (Phase 5)
+
+### What It Does
+
+- **Standard RAG:** chunk documents → embed → vector similarity search → stuff context
+- **LightRAG:** extracts entities and relationships, builds a knowledge graph, performs dual-level retrieval (local facts + global relationships)
+
+**Complementary to LoRA** (personality) **but competes for context window and VRAM budget** — if personality LoRA is trained, retrain with 50–100 `[CONTEXT]` block examples before deploying LightRAG.
+
+### Architectural Fit
+
+| Mechanism | Role |
+|---|---|
+| Base LLM (Phi-3.5 Mini) | Reasoning |
+| LoRA adapters | Personality, behavior, OS tool-call schema |
+| LightRAG | External factual knowledge retrieval |
+
+### Token Budget (Hard Cap)
+
+| Item | Tokens |
+|---|---|
+| System prompt | ~120 |
+| Retrieved context (LightRAG) | **600 max** |
+| Conversation history (3–4 turns) | ~800 |
+| Current user query | ~50 |
+| Generation headroom | ~512 |
+| Safety margin | ~200 |
+| **Total** | ~2,280 of 4,096 |
+
+### Technical Stack
+
+- **Embedding model:** `all-MiniLM-L6-v2` (~80MB, 10–30ms CPU inference, 384-dim vectors)
+- **Graph storage:** SQLite (zero-config, <50ms cold-start, crash-safe)
+- **Prompt construction:**
+  ```
+  [system prompt]
+  [conversation history (last N turns)]
+  [CONTEXT]
+  <retrieved chunks — max 600 tokens>
+  [/CONTEXT]
+  [current user query]
+  ```
+
+### Integration Point: No New Events
+
+RAG retrieval is a pre-processing step inside `ReasoningRouter.route()`, gated by a flag from `_on_transcript_ready`:
+
+- `_on_transcript_ready`: Check transcript against RAG trigger regex
+- `ReasoningRouter.route(text, cancel_flag, event_queue, rag_enabled=False)`:
+  1. If `rag_enabled`: query LightRAG → `retrieved_context` (max 600 tokens)
+  2. `PromptEngine.format_prompt(text, history, model_family, retrieved_context=...)`
+  3. `ModelLoader.generate(prompt, cancel_flag)`
+
+**Files modified (all in `src/llm/`):**
+- `reasoning_router.py`: optional `rag_enabled` param to `route()`
+- `prompt_engine.py`: optional `retrieved_context` param to `format_prompt()`
+- `orchestrator.py`: RAG trigger check in `_on_transcript_ready`
+- `rag_retriever.py` (new): encapsulates LightRAG query, token budget, result formatting
+
+### Trigger Models
+
+**Option A: Explicit Skill (Phase 5 — implement first)**
+
+Add to `domain_router.py` patterns: `\b(search my docs|look up in my notes|check my knowledge base)\b` → sets `rag_enabled=True` on reasoning router call. Clear user expectation. Failure mode: no relevant nodes → tell the user.
+
+**Option B: Automatic Routing (Phase 6 — after classifier proven)**
+
+Embedding-based classifier (Option A validated + >90% precision). Silent fallback if no match.
+
+**Option C: Hybrid (Target state)**
+
+Explicit for document search, automatic for knowledge queries. Post-Option B.
+
+### Phase Placement & Prerequisites
+
+| Phase | Content |
+|---|---|
+| Phase 3 | LLM pipeline |
+| Phase 4 | TTS + VRAM/latency benchmarking |
+| Phase 5 | Godot frontend + LightRAG Option A (explicit skill, UI toggle) |
+| Phase 6 | OS tools + LightRAG Option B/C (automatic, if classifier proven) |
+
+**Must complete before LightRAG work:**
+1. Phase 3 LLM pipeline stable
+2. Phase 4 TTS integrated + end-to-end latency measured
+3. `all-MiniLM-L6-v2` CPU latency benchmarked on target hardware
+4. If personality LoRA in use: retrain with `[CONTEXT]` examples
+
+**Go/No-Go gate:** If end-to-end latency after Phase 4 exceeds 2 seconds, defer LightRAG until base pipeline optimized (150–600ms RAG retrieval would push past 3-second voice UI threshold).
+
+### UI/UX
+
+- **Surfaced as UI toggle** (off by default, similar to Lumi Pro camera detection)
+- "Searching documents…" animation masks retrieval latency
+- User commands: "search my docs for X", dedicated UI panel for document uploads
+- Explicit "remove document" and "re-index" commands for graph maintenance
+
+---
+
+## 7. Actual Directory Structure
+
+Current state as of 2026-04-04:
 
 ```
 Lumi/
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # CI pipeline (lint, type check, pytest --cov-fail-under=80)
 ├── .venv/                      # Managed by uv (not committed)
 ├── models/                     # ONNX/GGUF model binaries (not committed)
 │   └── hey_lumi.onnx           # Custom wake word model
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py             # Shared fixtures: synthetic audio arrays, sounddevice mock,
+│   │                           #   faster-whisper mock, openwakeword mock
+│   ├── test_ears.py            # Ears: wake word detection, VAD recording paths
+│   ├── test_events.py          # All 9 event types + ZMQMessage construction
+│   ├── test_orchestrator.py    # Event routing, interrupt handling, shutdown
+│   ├── test_scribe.py          # Scribe.transcribe() unit tests
+│   ├── test_state_machine.py   # All valid/invalid transition branches
+│   └── test_utils.py           # play_ready_sound() unit tests
 ├── src/
-│   ├── main.py                 # Entry point — wires Ears + Scribe (temporary orchestrator)
+│   ├── __init__.py
+│   ├── main.py                 # Thin 18-line bootstrap: logging → config → checks → orchestrator
 │   ├── utils.py                # Shared utilities (play_ready_sound)
 │   ├── audio/
-│   │   ├── ears.py             # Microphone listener, wake word, VAD recording
-│   │   └── scribe.py           # faster-whisper transcription
-│   ├── core/                   # Placeholder — orchestrator.py planned here
-│   └── llm/                    # Placeholder — model_loader.py planned here
+│   │   ├── __init__.py
+│   │   ├── ears.py             # Microphone capture, wake word detection (openWakeWord),
+│   │   │                       #   VAD recording; posts WakeDetectedEvent + RecordingCompleteEvent
+│   │   └── scribe.py           # faster-whisper STT transcription; posts TranscriptReadyEvent
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── config.py           # LumiConfig, AudioConfig, ScribeConfig, LLMConfig, IPCConfig,
+│   │   │                       #   load_config(), detect_edition()
+│   │   ├── events.py           # 9 frozen event types + ZMQMessage dataclass
+│   │   ├── logging_config.py   # setup_logging() — human-readable or JSON structured output
+│   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling
+│   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation
+│   │   └── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
+│   │                           #   StateMachine, InvalidTransitionError
+│   └── llm/
+│       └── __init__.py         # Placeholder — model_loader.py planned here (Phase 3 remaining)
+├── config.yaml                 # Runtime configuration (all keys optional, defaults in config.py)
 ├── ARCHITECTURE.md             # This file
 ├── README.md
 ├── SUGGESTIONS.md              # Known issues and improvement plans
 ├── TODO.md
-└── pyproject.toml
+└── pyproject.toml              # runtime / training / tts / dev optional dependency groups
 ```
 
 Planned additions (not yet created):
 
 ```
-Lumi/
-├── tests/
-│   ├── conftest.py             # Shared fixtures (synthetic audio, mocks)
-│   ├── test_scribe.py          # Scribe.transcribe() unit tests
-│   ├── test_ears.py            # VAD timeout / silence paths
-│   ├── test_state_machine.py   # All valid/invalid transition branches
-│   ├── test_model_loader.py    # VRAM wake/hibernate lifecycle
-│   └── test_orchestrator.py    # Event routing and interrupt handling
-├── src/
-│   ├── core/
-│   │   ├── events.py           # All typed internal events + ZMQMessage dataclass
-│   │   ├── orchestrator.py     # Central event loop and component lifecycle
-│   │   ├── config.py           # AudioConfig, ScribeConfig, LumiConfig + load_config()
-│   │   ├── state_machine.py    # LumiState enum + transition enforcement
-│   │   ├── logging_config.py   # setup_logging() — configures Python logging module
-│   │   └── startup_check.py    # Pre-flight validation (model paths, mic, version pins)
-│   ├── llm/
-│   │   ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama)
-│   │   └── prompt_engine.py    # Prompt templates + context window management
-│   ├── audio/
-│   │   └── mouth.py            # TTS engine + non-blocking speaker thread
-│   ├── tools/
-│   │   ├── os_actions.py       # App launch, file management
-│   │   └── vision.py           # Screenshot analysis
-│   └── interface/
-│       └── zmq_server.py       # ZeroMQ IPC pub/sub server
-├── ui/                         # Godot or Tauri frontend project
-└── config.yaml                 # User settings (edition selection, model paths)
+src/
+├── llm/
+│   ├── model_loader.py         # VRAM hibernate/wake lifecycle (Phase 3 remaining)
+│   ├── prompt_engine.py        # Prompt templates + context window management (Phase 3 remaining)
+│   ├── memory.py               # JSON conversation history + user profile (Phase 3 remaining)
+│   ├── reflex_router.py        # Regex command parsing (Phase 3 remaining)
+│   ├── reasoning_router.py     # LLM call + cancel flag + RAG integration (Phase 3 remaining)
+│   ├── tool_call_parser.py     # ToolCallParser class + JSON recovery (Phase 3 remaining)
+│   ├── domain_router.py        # Regex/embedding-based domain classification (Phase 3+)
+│   ├── model_registry.py       # Fallback: full GGUF model swapping (Phase 3+, if LoRA API unavailable)
+│   └── rag_retriever.py        # LightRAG query wrapper, token budget enforcement (Phase 5 optional)
+├── audio/
+│   └── mouth.py                # TTS engine + non-blocking speaker thread (Phase 4)
+├── tools/
+│   ├── os_actions.py           # App launch, file management (Phase 6)
+│   └── vision.py               # Screenshot analysis (Phase 6)
+└── interface/
+    └── zmq_server.py           # ZeroMQ IPC server (Phase 3 remaining)
+
+ui/                             # Godot or Tauri frontend project (Phase 5)
+scripts/
+├── train_lumi.py               # QLoRA training entrypoint (Phase 3+)
+└── merge_lora.py               # Adapter merge + GGUF export (Phase 3+)
 ```
 
 ---
 
-## 6. Development Roadmap
+## 8. Development Roadmap
 
 ### Phase 1: The Ears (Audio Input) — COMPLETE
 *Goal: Low-latency, non-blocking listening pipeline on CPU.*
@@ -255,28 +529,37 @@ Lumi/
 - [x] Double-trigger fix (cooldown + flush logic)
 - [x] Latency tuning (`latency='high'` to reduce buffer underruns) ⚠️ Needs monitoring
 
-### Phase 2: The Scribe (Transcription) — IN PROGRESS
+### Phase 2: The Scribe (Transcription) — COMPLETE
 *Goal: Accurate speech-to-text without GPU.*
 
 - [x] Model integration (`faster-whisper` tiny.en, int8, CPU)
 - [x] Context injection (initial prompt for proper noun accuracy)
-- [ ] Command parsing (regex/keyword matching for instant actions)
+- [x] Command parsing infrastructure (event-driven pipeline wired; `CommandResultEvent` defined)
 
-### Phase 3: The Brain (Intelligence) — NOT STARTED
+### Phase 3: The Brain (Intelligence) — IN PROGRESS
 *Goal: Smart decision-making using local LLMs.*
 
-- [ ] Structured logging (`src/core/logging_config.py`, replace all `print()`)
-- [ ] Startup validation (`src/core/startup_check.py`, hard `RuntimeError` on bad state)
-- [ ] Test infrastructure (`pytest` + `pytest-cov`, `--cov-fail-under=80`)
-- [ ] Configuration system (`config.yaml` + `config.py` + `detect_edition()`)
-- [ ] Typed internal events (`src/core/events.py`, all 7 event types + `ZMQMessage`)
-- [ ] Event-driven orchestrator (`src/core/orchestrator.py`, replaces synchronous chain)
-- [ ] State machine (`src/core/state_machine.py`, enforced transitions + IPC publication)
+**Foundations — COMPLETE:**
+- [x] Structured logging (`src/core/logging_config.py`, `setup_logging()`)
+- [x] Startup validation (`src/core/startup_check.py`, `run_startup_checks()`)
+- [x] Test infrastructure (`tests/` directory, 83 tests, `--cov-fail-under=80`)
+- [x] Configuration system (`config.yaml` + `src/core/config.py` + `detect_edition()`)
+- [x] Typed internal events (`src/core/events.py`, 9 event types + `ZMQMessage`)
+- [x] Event-driven orchestrator (`src/core/orchestrator.py`, replaces synchronous chain)
+- [x] State machine (`src/core/state_machine.py`, enforced transitions)
+- [x] `openwakeword==0.4.0` exact pin with startup version check
+
+**Remaining — NOT STARTED:**
 - [ ] LLM integration (Phi-3.5 Mini or Gemma 2 2B via llama-cpp-python)
-- [ ] VRAM hibernate/wake logic (`src/llm/model_loader.py`)
-- [ ] Reflex router (regex commands → OS actions)
-- [ ] Reasoning router (LLM-based response)
-- [ ] Memory system (JSON user profile + rolling conversation history)
+  - [ ] `src/llm/model_loader.py` (VRAM hibernate/wake)
+  - [ ] `src/llm/prompt_engine.py` (chat templates)
+  - [ ] `src/llm/memory.py` (conversation history)
+  - [ ] `src/llm/reflex_router.py` (regex commands)
+  - [ ] `src/llm/reasoning_router.py` (LLM call + cancel flag)
+  - [ ] `src/llm/tool_call_parser.py` (ToolCallParser class)
+  - [ ] `src/interface/zmq_server.py` (ZMQ IPC)
+  - [ ] `[project.optional-dependencies] llm` group in `pyproject.toml`
+  - [ ] Replace `print()` → `logger.info()` in `src/audio/scribe.py`
 
 ### Phase 4: The Mouth (TTS) — NOT STARTED
 *Goal: High-quality voice response without GPU.*
@@ -286,16 +569,18 @@ Lumi/
 - [ ] Viseme extraction for avatar lip-sync
 
 ### Phase 5: The Body (Visuals) — NOT STARTED
-*Goal: Transparent, interactive desktop overlay.*
+*Goal: Transparent, interactive desktop overlay + optional knowledge base.*
 
 - [ ] Godot project setup (transparent window, X11/Wayland)
 - [ ] ZeroMQ client (GDScript, receives state events)
 - [ ] Avatar rendering (Live2D or 2D sprite)
 - [ ] State machine animation (Idle / Listening / Thinking / Speaking)
+- [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default)
 
 ### Phase 6: The Hands (OS Control) — NOT STARTED
-*Goal: Lumi can act on the desktop.*
+*Goal: Lumi can act on the desktop. Advanced RAG routing.*
 
 - [ ] Vision tool (screenshot capture + analysis)
 - [ ] Automation tools (app launch, file management, clipboard)
+- [ ] LightRAG Option B/C (automatic routing via classifier, gated on proof of concept)
 - [ ] v1.0 release

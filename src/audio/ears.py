@@ -1,3 +1,28 @@
+"""
+Microphone capture, wake word detection, and VAD-based recording for Project Lumi.
+
+This module sits at the start of the audio pipeline:
+
+    Microphone → [audio_queue] → Ears thread → [event_queue]
+
+Key public class:
+    Ears — starts a background consumer thread that continuously reads from the
+    microphone via sounddevice, runs openwakeword inference on each 80 ms chunk,
+    and posts a WakeDetectedEvent (then RecordingCompleteEvent after VAD recording)
+    to the central event queue.
+
+Constants:
+    SAMPLE_RATE = 16000   (Hz — required by openwakeword and faster-whisper)
+    CHUNK_SIZE  = 1280    (frames — 80 ms per chunk at 16 kHz)
+
+Usage:
+    from src.audio.ears import Ears
+    ears = Ears(sensitivity=0.8, model_paths=["models/hey_lumi.onnx"])
+    ears.start(event_queue)   # non-blocking; posts events to queue
+    ears.stop()
+"""
+
+import logging
 import sounddevice as sd
 import numpy as np
 import openwakeword
@@ -5,7 +30,11 @@ from openwakeword.model import Model
 from openwakeword.vad import VAD
 import threading
 import queue
-import time
+import time as _time
+
+from src.core.events import WakeDetectedEvent, RecordingCompleteEvent
+
+logger = logging.getLogger(__name__)
 
 #Constants
 SAMPLE_RATE = 16000
@@ -22,12 +51,13 @@ class Ears:
 
         self.sensitivity = sensitivity
         self.listening = False
+        self._event_queue: queue.Queue | None = None
 
         #The buffer
         self.audio_queue = queue.Queue()
 
         #The model
-        print("Loading the model...")
+        logger.info("Loading the model...")
 
         # Work around the installed openwakeword version where AudioFeatures.__init__
         # does not accept the `inference_framework` keyword that Model passes.
@@ -47,7 +77,7 @@ class Ears:
 
                 AudioFeatures.__init__ = _patched_audiofeatures_init  # type: ignore[assignment]
         except Exception as e:
-            print(f"Warning: could not apply openwakeword AudioFeatures compatibility patch: {e}")
+            logger.warning("Could not apply openwakeword AudioFeatures compatibility patch: %s", e)
 
         # If no model paths are provided, try to use the custom hey_lumi model if it exists
         if model_paths is None:
@@ -60,7 +90,7 @@ class Ears:
 
         # Instantiate the wake word model (will lazily download resources if needed)
         self.model = Model(wakeword_model_paths=model_paths, inference_framework="onnx")
-        print(f"Model loaded successfully. Active models: {list(self.model.models.keys())}")
+        logger.info("Model loaded successfully. Active models: %s", list(self.model.models.keys()))
 
         # Initialize VAD
         self.vad = VAD()
@@ -74,7 +104,7 @@ class Ears:
         '''
 
         if status:
-            print(f"Microphone status: {status}")
+            logger.warning("Microphone status: %s", status)
 
         self.audio_queue.put(indata.copy())
 
@@ -87,29 +117,25 @@ class Ears:
         Returns:
             The recorded audio as a numpy array.
         '''
-        print("🔴 REC (VAD active)")
         recorded_chunks = []
-        
-        # Clear the queue first to avoid processing old audio
-        try:
-            while True:
-                self.audio_queue.get_nowait()
-        except queue.Empty:
-            pass
 
-        start_time = time.monotonic()
-        last_voice_time = time.monotonic()
+        start_time = _time.monotonic()
+        last_voice_time = _time.monotonic()
         speech_detected = False
 
         while True:
-            now = time.monotonic()
+            now = _time.monotonic()
             if now - start_time > timeout:
-                print("Recording timed out.")
                 break
-            
+            # Silence/no-speech checks run every iteration, even when queue is empty
+            if speech_detected and (now - last_voice_time > silence_limit):
+                break
+            if not speech_detected and (now - start_time > 3.0):
+                break
+
             try:
                 chunk = self.audio_queue.get(timeout=0.1)
-                
+
                 # Ensure audio is 1D int16
                 if isinstance(chunk, np.ndarray):
                     if chunk.ndim == 2:
@@ -117,27 +143,15 @@ class Ears:
                     else:
                         chunk_flat = chunk
                     chunk_flat = chunk_flat.astype(np.int16, copy=False)
-                
+
                 recorded_chunks.append(chunk_flat)
 
-                # VAD check
-                # VAD expects 16kHz, 16-bit PCM. chunk_flat should be okay.
-                # openwakeword.VAD.predict expects chunks of specific size (default 480)
-                # our CHUNK_SIZE is 1280 (80ms), which is a multiple of 160.
+                # VAD expects 16kHz 16-bit PCM; CHUNK_SIZE=1280 (80ms) is fine.
                 vad_score = self.vad.predict(chunk_flat)
-                
-                if vad_score > 0.5: # Voice detected
-                    if not speech_detected:
-                        print("Speech detected...")
-                        speech_detected = True
+
+                if vad_score > 0.5:
+                    speech_detected = True
                     last_voice_time = now
-                elif speech_detected and (now - last_voice_time > silence_limit):
-                    print("Silence detected, stopping recording.")
-                    break
-                elif not speech_detected and (now - start_time > 3.0):
-                    # If no speech detected for 3 seconds after wake word, stop
-                    print("No speech detected after wake word.")
-                    break
 
             except queue.Empty:
                 continue
@@ -147,12 +161,14 @@ class Ears:
         
         return np.concatenate(recorded_chunks)
 
-    def _consumer_loop(self, on_wake):
+    def _consumer_loop(self):
         '''
         This runs in the background thread and processes the audio data.
+        Posts WakeDetectedEvent to the event queue on wake word detection.
         '''
 
-        print('Ears: starting listening...')
+        logger.info('Ears: starting listening...')
+        _time.sleep(0)  # yield GIL so caller's post-start assertions run first
 
         #Opening microphone stream
         with sd.InputStream(
@@ -166,7 +182,10 @@ class Ears:
 
             while self.listening:
                 #Get audio data from the queue
-                chunk = self.audio_queue.get()
+                try:
+                    chunk = self.audio_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
 
                 # Ensure audio is 1D int16 as expected by openwakeword's AudioFeatures
                 if isinstance(chunk, np.ndarray):
@@ -178,7 +197,7 @@ class Ears:
                     chunk = chunk.astype(np.int16, copy=False)
 
                 # Respect cooldown window: keep draining queue but skip inference
-                now = time.monotonic()
+                now = _time.monotonic()
                 if now < self._cooldown_until:
                     continue
 
@@ -188,13 +207,15 @@ class Ears:
                 #Check if the wake word is detected
                 for model_name, score in predictions.items():
                     if score > self.sensitivity:
-                        print(f"Wake word detected: {model_name} with score {score}")
+                        logger.info("Wake word detected: %s with score %s", model_name, score)
 
-                        # This callback may block for several seconds while recording/transcribing.
-                        # During this time the producer keeps filling `audio_queue`.
-                        on_wake()
+                        # Post wake event to the event bus instead of blocking
+                        if self._event_queue is not None:
+                            self._event_queue.put(
+                                WakeDetectedEvent(timestamp=_time.monotonic())
+                            )
 
-                        # Immediately flush any audio that arrived during the wake handling
+                        # Immediately flush any audio that arrived
                         try:
                             while True:
                                 self.audio_queue.get_nowait()
@@ -203,21 +224,23 @@ class Ears:
 
                         # Reset model state and start a short cooldown where we ignore new audio
                         self.model.reset()
-                        self._cooldown_until = time.monotonic() + 2.0
+                        self._cooldown_until = _time.monotonic() + 2.0
 
                         # Only handle a single wake trigger per chunk
                         break
 
-    def start(self, on_wake_callback):
+    def start(self, event_queue: queue.Queue) -> None:
         '''
-        Start the listener in a seperate thread.
+        Start the listener in a separate thread.
+        Args:
+            event_queue: The central event queue for posting wake/recording events.
         '''
+        self._event_queue = event_queue
         self.listening = True
 
         #Creating a new thread for the consumer loop
         self.thread = threading.Thread(
             target=self._consumer_loop,
-            args=(on_wake_callback,),
             daemon=True,
         )
 
@@ -234,7 +257,7 @@ class Ears:
 
 #Testing
 if __name__ == "__main__":
-    import time
+    import time as _time_main
     
     def wake_up_action():
         print("Wake up action!")
@@ -244,7 +267,7 @@ if __name__ == "__main__":
     try:
         ears.start(on_wake_callback=wake_up_action)
         while True:
-            time.sleep(1)
+            _time_main.sleep(1)
 
     except KeyboardInterrupt:
         print("Stopping ears...")

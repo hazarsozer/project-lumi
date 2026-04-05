@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Format / Lint / Type-check / Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install project and dev dependencies
+        # --extra dev installs the [project.optional-dependencies.dev] group
+        # which contains pytest, black, ruff, mypy, etc.
+        run: uv sync --extra dev
+
+      - name: Check formatting (black)
+        run: uv run black --check src/
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/
+
+      - name: Type-check (mypy)
+        run: uv run mypy src/
+
+      - name: Run tests with coverage
+        # --cov-fail-under=80 enforces the project's 80 % minimum coverage gate.
+        # Tests that require hardware (microphone, GPU) are excluded via the
+        # "unit" and "integration" marks; "slow" tests are also skipped in CI
+        # unless the test suite explicitly handles the missing hardware.
+        run: uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80

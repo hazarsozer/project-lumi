@@ -27,7 +27,9 @@ SKILL.md
 *.ipynb
 
 # --- System ---
-.DS_Storeaudioset/
+.DS_Store
+Thumbs.db
+audioset/
 audioset_16k/
 fma/
 mit_rirs/
@@ -37,3 +39,21 @@ piper-sample-generator/
 *.wav
 my_model.yaml
 .ipynb_checkpoints/
+
+# --- Claude Code (local session data, agent definitions) ---
+.claude/
+
+# --- pytest / coverage ---
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- Type checking / linting caches ---
+.mypy_cache/
+.ruff_cache/
+
+# --- Local planning / scratch files ---
+next_session.md
+finetune.md
+useful-agents.md

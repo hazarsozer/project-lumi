@@ -3,40 +3,147 @@ name = "lumi"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-    "acoustics>=0.2.6",
-    "ai-edge-litert>=2.1.2",
-    "audiomentations>=0.43.1",
-    "colorama>=0.4.6",
-    "datasets>=4.5.0",
-    "deep-phonemizer>=0.0.19",
-    "faster-whisper>=1.2.1",
-    "jupyter>=1.1.1",
-    "mutagen>=1.47.0",
-    "numpy>=2.4.2",
-    "onnx>=1.20.1",
-    "onnx-graphsurgeon>=0.5.8",
-    "onnx2tf>=1.28.8",
-    "onnxruntime>=1.24.1",
-    "onnxscript>=0.6.2",
-    "onnxsim>=0.4.36",
-    "openwakeword>=0.4.0",
-    "pip>=26.0.1",
-    "piper-phonemize-cross>=1.2.1",
-    "piper-tts>=1.4.1",
-    "pronouncing>=0.2.0",
-    "scipy>=1.17.0",
-    "setuptools<70",
-    "sng4onnx>=2.0.0",
+    # Audio I/O — required for microphone capture and file playback
     "sounddevice>=0.5.5",
     "soundfile>=0.13.1",
-    "speechbrain>=0.5.16",
+    # Numeric / signal processing — used in ears.py, scribe.py, utils.py
+    "numpy>=2.4.2",
+    "scipy>=1.17.0",
+    # Wake word detection — EXACT PIN; ears.py monkey-patches this version
+    # NOTE: 0.6.0 requires tflite-runtime which has no Python 3.12 wheels.
+    # The monkey-patch in ears.py was written for 0.4.0 (currently installed).
+    "openwakeword==0.4.0",
+    # Speech-to-text transcription — used in scribe.py
+    "faster-whisper>=1.2.1",
+    # ONNX inference runtime — required by openwakeword and faster-whisper
+    "onnxruntime>=1.24.1",
+    # Terminal color output — used in main.py logging
+    "colorama>=0.4.6",
+    # Voice activity detection — required by ears.py pipeline
+    "webrtcvad>=2.0.10",
+    # IPC messaging — planned for Phase 3 inter-process communication
+    "pyzmq>=26.0.0",
+    # YAML config file parsing — direct dep, currently transitively via faster-whisper
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+training = [
+    # PyTorch ecosystem — model training and audio processing
     "torch>=2.10.0",
-    "torch-audiomentations>=0.12.0",
     "torchaudio>=2.10.0",
     "torchcodec>=0.10.0",
     "torchinfo>=1.8.0",
     "torchmetrics>=1.8.2",
-    "webrtcvad>=2.0.10",
+    # Audio augmentation for training data
+    "audiomentations>=0.43.1",
+    "torch-audiomentations>=0.12.0",
+    # Speech processing and model training
+    "speechbrain>=0.5.16",
+    # Dataset management for training pipelines
+    "datasets>=4.5.0",
+    # Jupyter for training notebooks
+    "jupyter>=1.1.1",
+    # Phonemizer and audio utilities for wake word data prep
+    "deep-phonemizer>=0.0.19",
+    "acoustics>=0.2.6",
+    "mutagen>=1.47.0",
+    "pronouncing>=0.2.0",
+    # ONNX conversion and optimization tools
+    "onnx>=1.20.1",
+    "onnx-graphsurgeon>=0.5.8",
+    "onnx2tf>=1.28.8",
+    "onnxscript>=0.6.2",
+    "onnxsim>=0.4.36",
+    "sng4onnx>=2.0.0",
+    "ai-edge-litert>=2.1.2",
+    # setuptools<70 required by older ONNX/speechbrain build tooling
+    "setuptools<70",
 ]
+
+tts = [
+    # Piper TTS engine — Phase 4 fallback (not yet active in runtime)
+    # NOTE: Kokoro-82M ONNX (planned primary TTS engine) to be added here when Phase 4 starts
+    "piper-tts>=1.4.1",
+    "piper-phonemize-cross>=1.2.1",
+]
+
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-mock>=3.12",
+    "pytest-timeout>=2.2",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "black>=24.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: unit tests (no hardware, no ML models)",
+    "integration: integration tests (mocked boundaries)",
+    "slow: tests that take >1s",
+]
+
+# ---------------------------------------------------------------------------
+# Formatter — black
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.mypy_cache
+  | __pycache__
+  | build
+  | dist
+)/
+'''
+
+# ---------------------------------------------------------------------------
+# Linter — ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W — pycodestyle   F — pyflakes   I — isort
+# UP  — pyupgrade     B — bugbear    PLC — pylint convention
+select = ["E", "W", "F", "I", "UP", "B", "PLC"]
+ignore = [
+    # Allow long lines that black cannot shorten (e.g. URLs in comments).
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["B011"]
+
+# ---------------------------------------------------------------------------
+# Type checker — mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+incremental = true
+warn_return_any = true
+warn_unused_ignores = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = [
+    "openwakeword.*",
+    "faster_whisper.*",
+    "sounddevice.*",
+    "soundfile.*",
+    "scipy.*",
+    "colorama.*",
+    "webrtcvad.*",
+    "zmq.*",
+]
+ignore_missing_imports = true

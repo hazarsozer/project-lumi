@@ -1,0 +1,129 @@
+# Project Lumi — runtime configuration
+#
+# All keys are optional.  Missing keys fall back to the typed defaults
+# defined in src/core/config.py.  The application starts correctly even
+# if this file is absent entirely.
+#
+# Supported top-level keys
+# ─────────────────────────────────────────────────────────────────────────────
+
+# edition: Performance tier for the local LLM offload strategy.
+#   "light"    — <2 GB VRAM or CPU-only.  LLM runs fully on CPU.
+#   "standard" — <4 GB VRAM.  Partial GPU offload.
+#   "pro"      — ≥4 GB VRAM (targeting 8 GB+).  Full GPU offload.
+#
+# Omit this key (or set to "auto") to let detect_edition() read VRAM from
+# nvidia-smi automatically.  Set it explicitly to override auto-detection
+# (useful on machines without an NVIDIA GPU, or for testing).
+edition: standard
+
+# log_level: Root logger verbosity.
+#   One of: DEBUG, INFO, WARNING, ERROR, CRITICAL  (case-insensitive)
+log_level: INFO
+
+# json_logs: Structured JSON output for log aggregators (e.g. journald, ELK).
+#   false — human-readable format:  2024-01-01T12:00:00 [INFO] name: msg
+#   true  — one JSON object per line: {"timestamp":…,"level":…,"message":…}
+json_logs: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# audio — microphone capture and wake-word pipeline settings
+# ─────────────────────────────────────────────────────────────────────────────
+audio:
+  # Sample rate in Hz.  Both openwakeword and faster-whisper require 16000.
+  sample_rate: 16000
+
+  # InputStream blocksize in frames.
+  # 1280 frames @ 16 kHz = 80 ms per chunk — recommended for openwakeword.
+  chunk_size: 1280
+
+  # Wake-word detection threshold [0.0–1.0].
+  # Scores above this value from openwakeword trigger the on_wake callback.
+  # Lower values increase recall (more detections, more false positives).
+  # Higher values increase precision (fewer detections, fewer false positives).
+  sensitivity: 0.8
+
+  # Voice Activity Detection threshold [0.0–1.0].
+  # Scores above this value during command recording count as speech.
+  vad_threshold: 0.5
+
+  # Seconds of continuous silence after speech before recording stops.
+  silence_timeout_s: 1.5
+
+  # Hard upper bound on command recording in seconds.
+  recording_timeout_s: 10.0
+
+  # Path to the custom "hey Lumi" ONNX wake-word model.
+  # Relative paths are resolved from the working directory (repo root).
+  wake_word_model_path: models/hey_lumi.onnx
+
+# ─────────────────────────────────────────────────────────────────────────────
+# scribe — faster-whisper speech-to-text settings
+# ─────────────────────────────────────────────────────────────────────────────
+scribe:
+  # Whisper model variant.
+  # "tiny.en" is CPU-friendly and English-only.
+  # Other options: "base", "base.en", "small", "small.en", "medium", "large-v3"
+  model_size: tiny.en
+
+  # Beam search width.  Higher = better accuracy, slower inference.
+  beam_size: 5
+
+  # Quantization strategy passed to WhisperModel.
+  # "int8"   — fastest on CPU, slight quality loss
+  # "float16"— GPU only
+  # "float32"— highest quality, slowest on CPU
+  compute_type: int8
+
+  # Local directory for a pre-downloaded faster-whisper model.
+  # When this directory exists, the engine loads from disk and skips the
+  # Hugging Face download entirely.  Leave as-is to use the model_size
+  # download path, or point to a directory created by:
+  #   uv run python -c "from faster_whisper import WhisperModel;
+  #       WhisperModel('tiny.en', device='cpu', compute_type='int8')"
+  model_path: models/faster-whisper-tiny.en
+
+  # Optional context string prepended to each transcription request.
+  # Helps the model recognise proper nouns (e.g. "Lumi, Firefox, browser").
+  # Set to null / omit to disable.
+  initial_prompt: null
+
+# ─────────────────────────────────────────────────────────────────────────────
+# llm — local large-language-model settings (active in Phase 4+)
+# ─────────────────────────────────────────────────────────────────────────────
+llm:
+  # Path to the GGUF model file on disk.
+  model_path: models/llm/phi-3.5-mini.gguf
+
+  # Number of transformer layers to offload to GPU.
+  # 0 = full CPU inference.  Set to -1 to offload all layers.
+  n_gpu_layers: 0
+
+  # KV-cache context window length in tokens.
+  context_length: 4096
+
+  # Maximum tokens to generate per assistant response.
+  max_tokens: 512
+
+  # Sampling temperature [0.0–2.0].
+  # Lower = more deterministic.  Higher = more creative.
+  temperature: 0.7
+
+  # VRAM budget in gigabytes used at runtime to decide the offload strategy.
+  # The LLM engine will not exceed this limit.
+  vram_budget_gb: 4.0
+
+  # Directory for persistent conversation memory.
+  # Tilde (~) is expanded at use time.
+  memory_dir: ~/.lumi/memory
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ipc — ZeroMQ inter-process communication endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+ipc:
+  # ZMQ transport and host prefix.  The port is appended as ":PORT".
+  # For local-only use keep "tcp://127.0.0.1".
+  address: tcp://127.0.0.1
+
+  # Port number for the ZMQ socket.
+  port: 5555
