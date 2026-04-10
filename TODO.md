@@ -68,22 +68,31 @@
 * **Context:** Several components described in `ARCHITECTURE.md` (like `audio/listener.py`) don't map to the physical file tree (like `audio/ears.py`).
 * **Resolution:** `ARCHITECTURE.md` directory structure updated to reflect actual file paths. All references to `listener.py` removed from documentation. New modules (`orchestrator.py`, `state_machine.py`, `config.py`, `events.py`, `logging_config.py`, `startup_check.py`) created at the paths documented in the architecture.
 
-## 15. No LLM Integration (Phase 3 Remaining)
+## ~~15. No LLM Integration~~ — DONE (Waves 0–3)
 
-* **Context:** Phase 3 foundations are complete but the LLM pipeline has not been started. The system can record and transcribe speech but cannot generate responses.
-* **Scope:** 7 new files, ~1400 lines production code, ~900 lines test code
+* **Context:** Phase 3 LLM pipeline implemented across 4 implementation waves.
+* **What was done:**
+  - `src/llm/model_loader.py` — VRAM hibernate/wake lifecycle via `llama-cpp-python` (8 tests)
+  - `src/llm/prompt_engine.py` — ChatML prompt assembly + token-budget truncation (7 tests)
+  - `src/llm/memory.py` — JSON-persisted conversation history (9 tests)
+  - `src/llm/reflex_router.py` — Regex fast-path: greetings, time queries (8 tests)
+  - `src/llm/reasoning_router.py` — Token-by-token inference with cancel flag (6 tests)
+  - `src/llm/tool_call_parser.py` — `<tool_call>` extractor + JSON recovery (10 tests)
+  - `src/llm/__init__.py` — Public exports for all 6 modules
+  - `pyproject.toml` — `[project.optional-dependencies] llm` group added
+  - `src/audio/scribe.py` — `print()` → `logger.info()`, `__main__` block removed
+  - `src/core/orchestrator.py` — `_handle_transcript()` wired: reflex fast-path + reasoning daemon thread
+* **Remaining (Wave 4):** Coverage gate ≥80% on all `src/llm/` + `src/core/` modules; full code review.
+
+## 18. Phase 3 Wave 4: Coverage Gate + Code Review — OPEN
+
+* **Context:** All LLM modules (Waves 0–3) are implemented and tested in isolation. Wave 4 closes Phase 3 with a full-suite coverage run and a code review of all changed files.
 * **Items:**
-  - `src/llm/model_loader.py` — VRAM hibernate/wake lifecycle via `llama-cpp-python`
-  - `src/llm/prompt_engine.py` — Chat templates (ChatML for Phi-3, Llama3 for Gemma)
-  - `src/llm/memory.py` — JSON conversation history + user profile persistence
-  - `src/llm/reflex_router.py` — Regex-based command parsing (volume, mute, interrupt)
-  - `src/llm/reasoning_router.py` — LLM call + streaming + cancel flag integration
-  - `src/llm/tool_call_parser.py` — Dedicated ToolCallParser class for `<tool_call>` JSON extraction
-  - `src/interface/zmq_server.py` — ZeroMQ IPC socket wiring
-  - `pyproject.toml` — Add `[project.optional-dependencies] llm = ["llama-cpp-python>=0.2.90"]`
-  - `src/audio/scribe.py` — Replace `print()` calls with `logger.info()`
-* **Dependencies:** TDD-first approach. Write test file before implementation. All tests use mocked `llama_cpp.Llama` (no GPU required).
-* **Reference:** See `next_session.md` for full step-by-step implementation plan, field names, lock patterns, and acceptance criteria.
+  - Run `uv run pytest tests/ --cov=src --cov-report=term-missing` and verify ≥80% coverage across `src/llm/` and `src/core/`
+  - Identify any coverage gaps and add targeted tests (especially for `orchestrator._handle_transcript` new paths)
+  - `code-reviewer` agent review of: `orchestrator.py`, `reflex_router.py`, `tool_call_parser.py`, `reasoning_router.py`, `memory.py`, `model_loader.py`, `prompt_engine.py`
+  - Address any CRITICAL or HIGH findings before committing Wave 4
+* **Blocker:** None — all Wave 3 deps are complete.
 
 ## 16. No Fine-Tuning Pipeline
 

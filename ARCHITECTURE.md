@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 3 foundations completion (2026-04-04).
+> Last updated to reflect actual state as of Phase 3 Wave 3 completion (2026-04-10).
 
 ---
 
@@ -438,7 +438,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 
 ## 7. Actual Directory Structure
 
-Current state as of 2026-04-04:
+Current state as of 2026-04-10 (Phase 3 Wave 3 complete):
 
 ```
 Lumi/
@@ -451,16 +451,22 @@ Lumi/
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py             # Shared fixtures: synthetic audio arrays, sounddevice mock,
-│   │                           #   faster-whisper mock, openwakeword mock
+│   │                           #   faster-whisper mock, openwakeword mock, mock_llama_cpp
 │   ├── test_ears.py            # Ears: wake word detection, VAD recording paths
 │   ├── test_events.py          # All 9 event types + ZMQMessage construction
+│   ├── test_memory.py          # ConversationMemory: add_turn, prune, JSON persistence
+│   ├── test_model_loader.py    # ModelLoader: load/unload lifecycle, path validation
 │   ├── test_orchestrator.py    # Event routing, interrupt handling, shutdown
+│   ├── test_prompt_engine.py   # PromptEngine: ChatML format, token budget truncation
+│   ├── test_reasoning_router.py # ReasoningRouter: token-by-token generation, cancel
+│   ├── test_reflex_router.py   # ReflexRouter: greeting + time patterns
 │   ├── test_scribe.py          # Scribe.transcribe() unit tests
 │   ├── test_state_machine.py   # All valid/invalid transition branches
+│   ├── test_tool_call_parser.py # parse_tool_calls: extraction, validation, recovery
 │   └── test_utils.py           # play_ready_sound() unit tests
 ├── src/
 │   ├── __init__.py
-│   ├── main.py                 # Thin 18-line bootstrap: logging → config → checks → orchestrator
+│   ├── main.py                 # Thin bootstrap: logging → config → checks → orchestrator
 │   ├── utils.py                # Shared utilities (play_ready_sound)
 │   ├── audio/
 │   │   ├── __init__.py
@@ -473,18 +479,26 @@ Lumi/
 │   │   │                       #   load_config(), detect_edition()
 │   │   ├── events.py           # 9 frozen event types + ZMQMessage dataclass
 │   │   ├── logging_config.py   # setup_logging() — human-readable or JSON structured output
-│   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling
+│   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling,
+│   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring
 │   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation
 │   │   └── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
 │   │                           #   StateMachine, InvalidTransitionError
 │   └── llm/
-│       └── __init__.py         # Placeholder — model_loader.py planned here (Phase 3 remaining)
+│       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
+│       │                       #   ConversationMemory, ModelLoader, PromptEngine
+│       ├── memory.py           # JSON-persisted conversation history (ConversationMemory)
+│       ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama)
+│       ├── prompt_engine.py    # ChatML prompt assembly + token-budget truncation
+│       ├── reasoning_router.py # Token-by-token LLM inference with cancel flag support
+│       ├── reflex_router.py    # Regex fast-path: greetings, time queries
+│       └── tool_call_parser.py # <tool_call> extractor + JSON recovery (parse_tool_calls)
 ├── config.yaml                 # Runtime configuration (all keys optional, defaults in config.py)
 ├── ARCHITECTURE.md             # This file
 ├── README.md
 ├── SUGGESTIONS.md              # Known issues and improvement plans
 ├── TODO.md
-└── pyproject.toml              # runtime / training / tts / dev optional dependency groups
+└── pyproject.toml              # runtime / llm / training / tts / dev optional dep groups
 ```
 
 Planned additions (not yet created):
@@ -492,12 +506,6 @@ Planned additions (not yet created):
 ```
 src/
 ├── llm/
-│   ├── model_loader.py         # VRAM hibernate/wake lifecycle (Phase 3 remaining)
-│   ├── prompt_engine.py        # Prompt templates + context window management (Phase 3 remaining)
-│   ├── memory.py               # JSON conversation history + user profile (Phase 3 remaining)
-│   ├── reflex_router.py        # Regex command parsing (Phase 3 remaining)
-│   ├── reasoning_router.py     # LLM call + cancel flag + RAG integration (Phase 3 remaining)
-│   ├── tool_call_parser.py     # ToolCallParser class + JSON recovery (Phase 3 remaining)
 │   ├── domain_router.py        # Regex/embedding-based domain classification (Phase 3+)
 │   ├── model_registry.py       # Fallback: full GGUF model swapping (Phase 3+, if LoRA API unavailable)
 │   └── rag_retriever.py        # LightRAG query wrapper, token budget enforcement (Phase 5 optional)
@@ -542,24 +550,29 @@ scripts/
 **Foundations — COMPLETE:**
 - [x] Structured logging (`src/core/logging_config.py`, `setup_logging()`)
 - [x] Startup validation (`src/core/startup_check.py`, `run_startup_checks()`)
-- [x] Test infrastructure (`tests/` directory, 83 tests, `--cov-fail-under=80`)
+- [x] Test infrastructure (`tests/` directory, `--cov-fail-under=80`)
 - [x] Configuration system (`config.yaml` + `src/core/config.py` + `detect_edition()`)
 - [x] Typed internal events (`src/core/events.py`, 9 event types + `ZMQMessage`)
 - [x] Event-driven orchestrator (`src/core/orchestrator.py`, replaces synchronous chain)
 - [x] State machine (`src/core/state_machine.py`, enforced transitions)
 - [x] `openwakeword==0.4.0` exact pin with startup version check
 
-**Remaining — NOT STARTED:**
-- [ ] LLM integration (Phi-3.5 Mini or Gemma 2 2B via llama-cpp-python)
-  - [ ] `src/llm/model_loader.py` (VRAM hibernate/wake)
-  - [ ] `src/llm/prompt_engine.py` (chat templates)
-  - [ ] `src/llm/memory.py` (conversation history)
-  - [ ] `src/llm/reflex_router.py` (regex commands)
-  - [ ] `src/llm/reasoning_router.py` (LLM call + cancel flag)
-  - [ ] `src/llm/tool_call_parser.py` (ToolCallParser class)
-  - [ ] `src/interface/zmq_server.py` (ZMQ IPC)
-  - [ ] `[project.optional-dependencies] llm` group in `pyproject.toml`
-  - [ ] Replace `print()` → `logger.info()` in `src/audio/scribe.py`
+**LLM Modules — COMPLETE (Waves 0–3):**
+- [x] `src/llm/model_loader.py` — VRAM hibernate/wake via llama-cpp-python (8 tests)
+- [x] `src/llm/prompt_engine.py` — ChatML prompt assembly + token-budget truncation (7 tests)
+- [x] `src/llm/memory.py` — JSON-persisted conversation history (9 tests)
+- [x] `src/llm/reflex_router.py` — regex fast-path: greetings, time queries (8 tests)
+- [x] `src/llm/reasoning_router.py` — token-by-token inference with cancel support (6 tests)
+- [x] `src/llm/tool_call_parser.py` — `<tool_call>` extractor + JSON recovery (10 tests)
+- [x] `src/llm/__init__.py` — public exports for all 6 modules
+- [x] `[project.optional-dependencies] llm` group in `pyproject.toml`
+- [x] Replace `print()` → `logger.info()` in `src/audio/scribe.py`
+- [x] `Orchestrator._handle_transcript()` — reflex fast-path + reasoning daemon thread wired
+
+**Remaining:**
+- [ ] Coverage gate ≥80% on all `src/llm/` and `src/core/` modules (Wave 4)
+- [ ] Full code review (Wave 4)
+- [ ] `src/interface/zmq_server.py` — ZMQ IPC socket wiring (Phase 3 remaining)
 
 ### Phase 4: The Mouth (TTS) — NOT STARTED
 *Goal: High-quality voice response without GPU.*

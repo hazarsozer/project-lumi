@@ -19,8 +19,18 @@ import threading
 from typing import Any, Callable
 
 from src.core.config import LumiConfig
-from src.core.events import InterruptEvent, ShutdownEvent
+from src.core.events import (
+    InterruptEvent,
+    LLMResponseReadyEvent,
+    ShutdownEvent,
+    TranscriptReadyEvent,
+)
 from src.core.state_machine import LumiState, StateMachine
+from src.llm.memory import ConversationMemory
+from src.llm.model_loader import ModelLoader
+from src.llm.prompt_engine import PromptEngine
+from src.llm.reasoning_router import ReasoningRouter
+from src.llm.reflex_router import ReflexRouter
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +53,25 @@ class Orchestrator:
         # periodically check this and abort when set.
         self._llm_cancel_flag: threading.Event = threading.Event()
 
+        # LLM subsystem — components are created here; the model itself is
+        # loaded on first use (ModelLoader.load() is deferred until inference).
+        self._reflex_router: ReflexRouter = ReflexRouter()
+        self._model_loader: ModelLoader = ModelLoader()
+        self._prompt_engine: PromptEngine = PromptEngine()
+        self._memory: ConversationMemory = ConversationMemory(
+            config.llm.memory_dir
+        )
+        self._reasoning_router: ReasoningRouter = ReasoningRouter(
+            model_loader=self._model_loader,
+            prompt_engine=self._prompt_engine,
+            memory=self._memory,
+            config=config.llm,
+        )
+
         # Register built-in handlers.
         self.register_handler(ShutdownEvent, self._handle_shutdown)
         self.register_handler(InterruptEvent, self._handle_interrupt)
+        self.register_handler(TranscriptReadyEvent, self._handle_transcript)
 
     @property
     def state_machine(self) -> StateMachine:
@@ -120,6 +146,60 @@ class Orchestrator:
                     handler.__name__,
                     event_type.__name__,
                 )
+
+    def _handle_transcript(self, event: TranscriptReadyEvent) -> None:
+        """Handle TranscriptReadyEvent: route text to reflex or LLM.
+
+        Fast-path: try ReflexRouter first (regex, no model needed).
+        Slow-path: dispatch ReasoningRouter in a daemon thread so the
+        event loop remains unblocked during inference.
+
+        Args:
+            event: The transcript event containing the user's spoken text.
+        """
+        self._state_machine.transition_to(LumiState.PROCESSING)
+        self._llm_cancel_flag.clear()
+
+        # Reflex fast-path — no model required.
+        reflex_response = self._reflex_router.route(event.text)
+        if reflex_response is not None:
+            logger.debug("Reflex hit for %r -> %r", event.text, reflex_response)
+            self._memory.add_turn("user", event.text)
+            self._memory.add_turn("assistant", reflex_response)
+            self.post_event(LLMResponseReadyEvent(text=reflex_response))
+            self._state_machine.transition_to(LumiState.SPEAKING)
+            return
+
+        # Reasoning slow-path — run in a daemon thread so the event loop
+        # remains responsive to InterruptEvents during long inference.
+        def _run_inference() -> None:
+            try:
+                response = self._reasoning_router.generate(
+                    event.text, self._llm_cancel_flag
+                )
+            except InterruptedError:
+                logger.info("LLM generation cancelled for %r", event.text)
+                return
+            except Exception:
+                logger.exception("LLM inference failed for %r", event.text)
+                if self._state_machine.current_state == LumiState.PROCESSING:
+                    self._state_machine.transition_to(LumiState.IDLE)
+                return
+
+            # Guard: if an interrupt already transitioned us out of PROCESSING,
+            # discard the stale response rather than making an invalid transition.
+            if self._state_machine.current_state != LumiState.PROCESSING:
+                logger.debug(
+                    "State changed during inference, discarding response for %r",
+                    event.text,
+                )
+                return
+
+            self.post_event(LLMResponseReadyEvent(text=response))
+            self._state_machine.transition_to(LumiState.SPEAKING)
+
+        thread = threading.Thread(target=_run_inference, daemon=True)
+        thread.start()
 
     def _handle_shutdown(self, event: ShutdownEvent) -> None:
         """Handle ShutdownEvent: stop the event loop.
