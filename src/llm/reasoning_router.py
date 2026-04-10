@@ -95,6 +95,13 @@ class ReasoningRouter:
             if finish_reason in ("stop", "length"):
                 break
 
+        # One final cancel check: if the flag was set during the last token
+        # call, the while loop may have exited via remaining==0 rather than
+        # raising InterruptedError.  Discard the partial response rather than
+        # committing an incomplete assistant turn to memory.
+        if cancel_flag.is_set():
+            raise InterruptedError("Generation cancelled during final token")
+
         response = "".join(collected)
         self._memory.add_turn("user", text)
         self._memory.add_turn("assistant", response)

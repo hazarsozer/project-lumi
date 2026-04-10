@@ -168,3 +168,131 @@ def test_generate_uses_config_max_tokens(mock_llama_cpp: MagicMock, tmp_path: Pa
     if call_kwargs is None:
         call_kwargs = mock_llama_cpp.return_value.call_args
     assert call_kwargs is not None
+
+
+@pytest.mark.unit
+def test_generate_stops_on_empty_token(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """generate() must stop (line 84) when the model returns an empty string token."""
+    responses = [
+        {"choices": [{"text": "hello", "finish_reason": None}]},
+        {"choices": [{"text": "", "finish_reason": None}]},  # empty token triggers break
+    ]
+    call_count = 0
+
+    def _side_effect(*args: object, **kwargs: object) -> dict:
+        nonlocal call_count
+        result = responses[min(call_count, len(responses) - 1)]
+        call_count += 1
+        return result
+
+    mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    result = router.generate("empty token", cancel)
+
+    # Only the first non-empty token should be in the output.
+    assert result == "hello"
+    assert call_count == 2  # first real token + empty token that triggers break
+
+
+@pytest.mark.unit
+def test_generate_stops_on_repeated_token(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """generate() must stop (line 87-88) when the same token is returned twice in a row,
+    treating it as an implicit EOS signal."""
+    # Return "word" twice in a row — the second occurrence must trigger the break.
+    responses = [
+        {"choices": [{"text": "word", "finish_reason": None}]},
+        {"choices": [{"text": "word", "finish_reason": None}]},
+    ]
+    call_count = 0
+
+    def _side_effect(*args: object, **kwargs: object) -> dict:
+        nonlocal call_count
+        result = responses[min(call_count, len(responses) - 1)]
+        call_count += 1
+        return result
+
+    mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    result = router.generate("repeat me", cancel)
+
+    # Only the first token should be in the output; the repeated one causes a break.
+    assert result == "word"
+    # create_completion was called at most twice (first token + duplicate detection).
+    assert call_count <= 2
+
+
+@pytest.mark.unit
+def test_generate_stops_on_finish_reason_stop(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """generate() must stop (line 96) when finish_reason is 'stop'."""
+    responses = [
+        {"choices": [{"text": "done", "finish_reason": "stop"}]},
+    ]
+    call_count = 0
+
+    def _side_effect(*args: object, **kwargs: object) -> dict:
+        nonlocal call_count
+        result = responses[min(call_count, len(responses) - 1)]
+        call_count += 1
+        return result
+
+    mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    result = router.generate("stop me", cancel)
+
+    assert result == "done"
+    assert call_count == 1
+
+
+@pytest.mark.unit
+def test_generate_stops_on_finish_reason_length(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """generate() must stop (line 96) when finish_reason is 'length'."""
+    responses = [
+        {"choices": [{"text": "truncated", "finish_reason": "length"}]},
+    ]
+    call_count = 0
+
+    def _side_effect(*args: object, **kwargs: object) -> dict:
+        nonlocal call_count
+        result = responses[min(call_count, len(responses) - 1)]
+        call_count += 1
+        return result
+
+    mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    result = router.generate("length limit", cancel)
+
+    assert result == "truncated"
+    assert call_count == 1
+
+
+@pytest.mark.unit
+def test_generate_cancel_set_during_final_token_raises(
+    mock_llama_cpp: MagicMock, tmp_path: Path
+) -> None:
+    """cancel_flag set during the last create_completion call must raise InterruptedError.
+
+    Covers the post-loop cancel check: the loop exits normally via finish_reason
+    but the cancel flag was set during that final call, so the partial response
+    must not be committed to memory.
+    """
+    cancel = threading.Event()
+
+    def _complete_and_cancel(*args: object, **kwargs: object) -> dict:
+        # Simulate the cancel flag being set *during* the model call —
+        # after the pre-call check passed but before the loop exits.
+        cancel.set()
+        return {"choices": [{"text": "partial", "finish_reason": "stop"}]}
+
+    mock_llama_cpp.return_value.create_completion.side_effect = _complete_and_cancel
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    with pytest.raises(InterruptedError, match="final token"):
+        router.generate("interrupted at end", cancel)

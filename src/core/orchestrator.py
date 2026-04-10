@@ -53,6 +53,12 @@ class Orchestrator:
         # periodically check this and abort when set.
         self._llm_cancel_flag: threading.Event = threading.Event()
 
+        # Lock that makes the daemon thread's guard-check + transition_to
+        # atomic with _handle_interrupt's set + transition, preventing an
+        # illegal state transition when an interrupt and an inference
+        # completion race each other.
+        self._llm_state_lock: threading.Lock = threading.Lock()
+
         # LLM subsystem — components are created here; the model itself is
         # loaded on first use (ModelLoader.load() is deferred until inference).
         self._reflex_router: ReflexRouter = ReflexRouter()
@@ -61,6 +67,7 @@ class Orchestrator:
         self._memory: ConversationMemory = ConversationMemory(
             config.llm.memory_dir
         )
+        self._memory.load()
         self._reasoning_router: ReasoningRouter = ReasoningRouter(
             model_loader=self._model_loader,
             prompt_engine=self._prompt_engine,
@@ -166,6 +173,7 @@ class Orchestrator:
             logger.debug("Reflex hit for %r -> %r", event.text, reflex_response)
             self._memory.add_turn("user", event.text)
             self._memory.add_turn("assistant", reflex_response)
+            self._memory.save()
             self.post_event(LLMResponseReadyEvent(text=reflex_response))
             self._state_machine.transition_to(LumiState.SPEAKING)
             return
@@ -182,21 +190,27 @@ class Orchestrator:
                 return
             except Exception:
                 logger.exception("LLM inference failed for %r", event.text)
-                if self._state_machine.current_state == LumiState.PROCESSING:
-                    self._state_machine.transition_to(LumiState.IDLE)
+                with self._llm_state_lock:
+                    if self._state_machine.current_state == LumiState.PROCESSING:
+                        self._state_machine.transition_to(LumiState.IDLE)
                 return
 
-            # Guard: if an interrupt already transitioned us out of PROCESSING,
-            # discard the stale response rather than making an invalid transition.
-            if self._state_machine.current_state != LumiState.PROCESSING:
-                logger.debug(
-                    "State changed during inference, discarding response for %r",
-                    event.text,
-                )
-                return
+            # Hold the state lock so this check+transition is atomic with
+            # _handle_interrupt's own set+transition block.  Without the lock,
+            # the interrupt handler could transition to IDLE between the guard
+            # check here and the transition_to(SPEAKING) call below, resulting
+            # in an illegal IDLE→SPEAKING transition.
+            with self._llm_state_lock:
+                if self._state_machine.current_state != LumiState.PROCESSING:
+                    logger.debug(
+                        "State changed during inference, discarding response for %r",
+                        event.text,
+                    )
+                    return
 
-            self.post_event(LLMResponseReadyEvent(text=response))
-            self._state_machine.transition_to(LumiState.SPEAKING)
+                self._memory.save()
+                self.post_event(LLMResponseReadyEvent(text=response))
+                self._state_machine.transition_to(LumiState.SPEAKING)
 
         thread = threading.Thread(target=_run_inference, daemon=True)
         thread.start()
@@ -228,19 +242,24 @@ class Orchestrator:
             return
 
         if current == LumiState.PROCESSING:
-            # Signal LLM workers to abort.
-            self._llm_cancel_flag.set()
-            self._drain_event_types(
-                {"LLMResponseReadyEvent", "TranscriptReadyEvent"}
-            )
+            # Hold the state lock so the inference daemon cannot slip between
+            # its guard check and transition_to(SPEAKING) while we cancel.
+            # Clear the flag *before* transitioning so a new inference thread
+            # started immediately after the interrupt does not see a stale set.
+            with self._llm_state_lock:
+                self._llm_cancel_flag.set()
+                self._drain_event_types(
+                    {"LLMResponseReadyEvent", "TranscriptReadyEvent"}
+                )
+                self._llm_cancel_flag.clear()
+                self._state_machine.transition_to(LumiState.IDLE)
+            return
 
         if current == LumiState.SPEAKING:
             self._drain_event_types({"TTSChunkReadyEvent"})
 
-        # Transition back to IDLE.
+        # SPEAKING → IDLE transition.
         self._state_machine.transition_to(LumiState.IDLE)
-
-        # Clear the cancel flag so future LLM work proceeds normally.
         self._llm_cancel_flag.clear()
 
     def _drain_event_types(self, type_names: set[str]) -> None:

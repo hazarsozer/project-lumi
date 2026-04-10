@@ -117,3 +117,16 @@ def test_load_passes_config_fields_to_llama(mock_llama_cpp: MagicMock, tmp_path:
     loader.load(config)
     # mock_llama_cpp is the class mock; verify it was called
     assert mock_llama_cpp.called
+
+
+@pytest.mark.unit
+def test_load_reraises_non_file_not_found_value_error(mock_llama_cpp: MagicMock) -> None:
+    """load() must re-raise a ValueError that does NOT contain 'does not exist'
+    (line 47 — the bare ``raise`` at the end of the except ValueError block)."""
+    # Configure the mock Llama constructor to raise a ValueError whose message
+    # does NOT contain "does not exist", so the re-raise branch is taken.
+    mock_llama_cpp.side_effect = ValueError("invalid quantization type")
+    config = _default_config()
+    loader = ModelLoader()
+    with pytest.raises(ValueError, match="invalid quantization type"):
+        loader.load(config)

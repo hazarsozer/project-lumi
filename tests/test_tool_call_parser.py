@@ -125,3 +125,20 @@ def test_nested_args_preserved() -> None:
     result = parse_tool_calls(text)
     assert len(result) == 1
     assert result[0]["args"]["content"]["lines"] == [1, 2, 3]
+
+
+@pytest.mark.unit
+def test_non_dict_json_value_is_excluded() -> None:
+    """A tool-call block whose JSON body is a valid non-dict value (e.g. a list or
+    a string) must be excluded from results (line 42 — isinstance check)."""
+    # JSON list inside the delimiter — valid JSON, but not a dict.
+    text_list = _wrap_tool_call('[{"tool": "tool_a", "args": {}}]')
+    assert parse_tool_calls(text_list) == []
+
+    # JSON string inside the delimiter.
+    text_string = _wrap_tool_call('"just a string"')
+    assert parse_tool_calls(text_string) == []
+
+    # JSON number inside the delimiter.
+    text_number = _wrap_tool_call("42")
+    assert parse_tool_calls(text_number) == []
