@@ -186,3 +186,34 @@ def mock_oww_model() -> Generator[MagicMock, None, None]:
          patch("openwakeword.model.Model", return_value=mock_model_instance), \
          patch("openwakeword.vad.VAD", return_value=mock_vad_instance):
         yield mock_cls
+
+
+# ---------------------------------------------------------------------------
+# llama_cpp mock
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def mock_llama_cpp() -> Generator[MagicMock, None, None]:
+    """Patch llama_cpp.Llama to prevent any model loading.
+
+    The mock instance supports:
+    - __call__(prompt, ...) returning {"choices": [{"text": "mock response"}]}
+    - create_completion(...) returning the same structure
+    - Configurable via mock_llama_cpp.return_value to set custom responses
+
+    Yields the mock Llama *class* so tests can configure return values.
+
+    Mocking strategy: ``llama_cpp.Llama`` is patched at the top-level
+    module boundary as well as at the name bound inside
+    ``src.llm.model_loader`` (``from llama_cpp import Llama``).  This
+    mirrors the same dual-patch pattern used for faster-whisper and
+    openwakeword, ensuring the mock is seen regardless of whether the
+    module imports the class directly or via the package namespace.
+    """
+    mock_instance = MagicMock()
+    mock_instance.return_value = {"choices": [{"text": "mock response"}]}
+    mock_instance.create_completion.return_value = {"choices": [{"text": "mock response"}]}
+
+    with patch("llama_cpp.Llama", return_value=mock_instance) as mock_cls:
+        yield mock_cls

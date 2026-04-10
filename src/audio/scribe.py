@@ -74,11 +74,11 @@ class Scribe:
             initial_prompt: Context injection for the transcription model.
         """
         self.initial_prompt = initial_prompt
-        print(f"Loading Whisper model: {model_size} on {device}...")
+        logger.info("Loading Whisper model: %s on %s...", model_size, device)
 
         #Load the model on int8 quantization
         self.model = WhisperModel(model_size, device=device, compute_type="int8")
-        print(f"Whisper model loaded successfully on {device}.")
+        logger.info("Whisper model loaded successfully on %s.", device)
 
     def transcribe(self, audio_data, initial_prompt: str = None):
         """
@@ -104,8 +104,3 @@ class Scribe:
         text = " ".join([segment.text for segment in segments])
         return text.strip()
 
-#Testing
-
-if __name__ == "__main__":
-    scribe = Scribe()
-    print("Test complete!")

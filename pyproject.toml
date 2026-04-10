@@ -70,6 +70,12 @@ tts = [
     "piper-phonemize-cross>=1.2.1",
 ]
 
+llm = [
+    # Local LLM inference — Phase 3. Requires CMake and a C++ compiler to build.
+    # Install with: uv sync --extra llm
+    "llama-cpp-python>=0.2.90",
+]
+
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -145,5 +151,6 @@ module = [
     "colorama.*",
     "webrtcvad.*",
     "zmq.*",
+    "llama_cpp.*",
 ]
 ignore_missing_imports = true
