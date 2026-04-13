@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://lumi_main"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/lumi_client.gd" id="2_client"]
+[ext_resource type="Script" path="res://scripts/avatar_controller.gd" id="3_avatar"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+
+[node name="LumiClient" type="Node" parent="."]
+script = ExtResource("2_client")
+
+[node name="AvatarController" type="Node" parent="."]
+script = ExtResource("3_avatar")
+sprite = NodePath("AnimatedSprite2D")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="AvatarController"]
+position = Vector2(100, 100)

@@ -2,21 +2,29 @@
 
 import threading
 import time
+from unittest.mock import MagicMock, patch
+
 import pytest
 
+from src.audio.speaker import SpeakerThread
 from src.core.config import LumiConfig
 from src.core.events import (
     ShutdownEvent,
     InterruptEvent,
     WakeDetectedEvent,
     TranscriptReadyEvent,
+    UserTextEvent,
+    LLMResponseReadyEvent,
 )
 from src.core.orchestrator import Orchestrator
-from src.core.state_machine import LumiState
+from src.core.state_machine import LumiState, StateMachine
+from src.core.zmq_server import ZMQServer
 
 
 def _make_orchestrator() -> Orchestrator:
-    return Orchestrator(config=LumiConfig())
+    """Create an Orchestrator with a mock SpeakerThread so no audio device is needed."""
+    mock_speaker = MagicMock(spec=SpeakerThread)
+    return Orchestrator(config=LumiConfig(), speaker=mock_speaker)
 
 
 # ---------------------------------------------------------------------------
@@ -181,12 +189,12 @@ def test_interrupt_in_idle_is_ignored() -> None:
 @pytest.mark.unit
 @pytest.mark.timeout(5)
 def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking() -> None:
-    """Reflex hit: LISTENING→PROCESSING, posts LLMResponseReadyEvent, transitions to SPEAKING.
+    """Reflex hit: LISTENING→PROCESSING→SPEAKING→IDLE full lifecycle.
 
-    The LLMResponseReadyEvent is posted inside _handle_transcript (synchronously in
-    the event loop thread) BEFORE ShutdownEvent is processed.  We register an
-    LLMResponseReadyEvent handler that itself posts ShutdownEvent so the loop
-    runs long enough to dispatch LLMResponseReadyEvent before exiting.
+    _handle_transcript posts LLMResponseReadyEvent and transitions to SPEAKING.
+    _handle_llm_response (no TTS configured) then immediately posts
+    SpeechCompletedEvent, which _handle_speech_completed processes before
+    ShutdownEvent arrives — so the final state after run() is IDLE.
     """
     from unittest.mock import patch
     from src.core.events import LLMResponseReadyEvent
@@ -196,7 +204,7 @@ def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking
 
     def _on_llm_response(e: LLMResponseReadyEvent) -> None:
         received_responses.append(e)
-        # Shut down the loop now that we have the response.
+        # Shut down after all handlers for this event have run.
         orch.post_event(ShutdownEvent())
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
@@ -204,9 +212,11 @@ def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking
     with patch.object(orch._reflex_router, "route", return_value="Hello! How can I help you?"):
         orch.state_machine.transition_to(LumiState.LISTENING)
         orch.post_event(TranscriptReadyEvent(text="hello"))
-        orch.run()  # exits when _on_llm_response posts ShutdownEvent
+        orch.run()  # exits when ShutdownEvent is processed
 
-    assert orch.state_machine.current_state == LumiState.SPEAKING
+    # SpeechCompletedEvent (no-TTS synthetic) is queued before ShutdownEvent,
+    # so by the time run() returns the state machine is back at IDLE.
+    assert orch.state_machine.current_state == LumiState.IDLE
     assert len(received_responses) == 1
     assert isinstance(received_responses[0], LLMResponseReadyEvent)
     assert received_responses[0].text == "Hello! How can I help you?"
@@ -250,7 +260,9 @@ def test_handle_transcript_reasoning_path_posts_response_and_transitions_to_spea
     assert len(received_responses) == 1
     assert isinstance(received_responses[0], LLMResponseReadyEvent)
     assert received_responses[0].text == "Paris is the capital of France."
-    assert orch.state_machine.current_state == LumiState.SPEAKING
+    # _handle_llm_response (no TTS) posts SpeechCompletedEvent before ShutdownEvent,
+    # so the full lifecycle completes and state returns to IDLE.
+    assert orch.state_machine.current_state == LumiState.IDLE
 
 
 # ---------------------------------------------------------------------------
@@ -417,3 +429,78 @@ def test_handle_transcript_stale_state_response_discarded() -> None:
 
     # The stale-state guard must have discarded the response.
     assert received_responses == []
+
+
+# ---------------------------------------------------------------------------
+# ZMQServer integration — observer wiring, UserTextEvent, shutdown
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+@pytest.mark.timeout(3)
+def test_zmq_server_receives_state_change() -> None:
+    """Injected ZMQServer.on_state_change is called when a state transition fires.
+
+    The Orchestrator registers on_state_change as a StateMachine observer for
+    injected instances.  We verify this by triggering a LISTENING transition
+    and asserting the mock was called.
+    """
+    mock_speaker = MagicMock(spec=SpeakerThread)
+    mock_zmq = MagicMock(spec=ZMQServer)
+
+    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, zmq_server=mock_zmq)
+
+    # Trigger a valid state transition.
+    orch.state_machine.transition_to(LumiState.LISTENING)
+
+    mock_zmq.on_state_change.assert_called_once_with(LumiState.IDLE, LumiState.LISTENING)
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(5)
+def test_user_text_routes_to_llm() -> None:
+    """UserTextEvent posted to the orchestrator invokes the LLM/router path.
+
+    Uses a reflex hit so the test does not require a real model.  Asserts that
+    an LLMResponseReadyEvent is generated, mirroring the TranscriptReadyEvent
+    reflex-hit test.
+    """
+    mock_speaker = MagicMock(spec=SpeakerThread)
+    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker)
+
+    received_responses: list[object] = []
+
+    def _on_llm_response(e: LLMResponseReadyEvent) -> None:
+        received_responses.append(e)
+        orch.post_event(ShutdownEvent())
+
+    orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
+
+    with patch.object(
+        orch._reflex_router, "route", return_value="Hi from reflex!"
+    ):
+        orch.state_machine.transition_to(LumiState.LISTENING)
+        orch.post_event(UserTextEvent(text="hello from body"))
+        orch.run()
+
+    assert len(received_responses) == 1
+    assert isinstance(received_responses[0], LLMResponseReadyEvent)
+    assert received_responses[0].text == "Hi from reflex!"
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(3)
+def test_shutdown_stops_zmq_server() -> None:
+    """ShutdownEvent causes the Orchestrator to call zmq_server.stop().
+
+    Injects a mock ZMQServer, runs the event loop until ShutdownEvent is
+    processed, and asserts that stop() was called exactly once.
+    """
+    mock_speaker = MagicMock(spec=SpeakerThread)
+    mock_zmq = MagicMock(spec=ZMQServer)
+
+    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, zmq_server=mock_zmq)
+
+    orch.post_event(ShutdownEvent())
+    orch.run()
+
+    mock_zmq.stop.assert_called_once()

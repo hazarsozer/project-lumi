@@ -2,35 +2,42 @@
 Shared utility functions for Project Lumi.
 
 Key public functions:
-    play_ready_sound() — generates and plays a short 880 Hz sine-wave "ping"
-    to indicate that the assistant is ready. Currently uses a blocking
-    sd.play() + sd.wait() call (see TODO item 12 for the planned non-blocking
-    queue refactor).
+    play_ready_sound(speaker) — generates a short 880 Hz sine-wave "ping"
+    and enqueues it onto the SpeakerThread for non-blocking playback.
 """
 
-import numpy as np
-import sounddevice as sd
+from __future__ import annotations
 
-def play_ready_sound():
+import logging
+
+import numpy as np
+
+from src.audio.speaker import SpeakerThread
+
+logger = logging.getLogger(__name__)
+
+# Canonical sample rate used throughout the audio pipeline.
+_SAMPLE_RATE: int = 24_000
+
+
+def play_ready_sound(speaker: SpeakerThread) -> None:
+    """Enqueue a short 880 Hz ping onto the speaker thread (non-blocking).
+
+    Generates a 0.2-second sine wave at 880 Hz, applies a linear fade-out to
+    avoid a click at the end, and enqueues the chunk on *speaker*.
+
+    Args:
+        speaker: The active :class:`~src.audio.speaker.SpeakerThread` instance.
     """
-    Plays a futuristic 'On' tone (A4, 440Hz).
-    Simple sine wave generation to avoid loading external WAV files.
-    """
-    fs = 44100
     duration = 0.2  # seconds
-    frequency = 880 # High pitch "ping"
-    
-    # Generate array
-    t = np.linspace(0, duration, int(fs * duration), False)
-    # Simple sine wave with fade out to avoid "click"
-    note = np.sin(frequency * t * 2 * np.pi)
-    
-    # Ensure it's float32 for sounddevice
-    audio = note.astype(np.float32) * 0.5 # 0.5 volume
-    
-    # Play and Wait (Blocking is intentional here)
+    frequency = 880  # Hz — high-pitch "ping"
+
+    t = np.linspace(0, duration, int(_SAMPLE_RATE * duration), endpoint=False)
+    # Sine wave with linear fade-out to avoid a DC-offset click at the tail.
+    fade = np.linspace(1.0, 0.0, len(t), dtype=np.float32)
+    audio = (np.sin(frequency * t * 2.0 * np.pi) * 0.5 * fade).astype(np.float32)
+
     try:
-        sd.play(audio, fs)
-        sd.wait()
-    except Exception as e:
-        print(f"⚠️ Could not play sound: {e}")
+        speaker.enqueue(audio, utterance_id="ready-sound", is_final=True)
+    except Exception:
+        logger.warning("Could not enqueue ready sound", exc_info=True)

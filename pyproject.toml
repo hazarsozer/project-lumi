@@ -64,8 +64,12 @@ training = [
 ]
 
 tts = [
-    # Piper TTS engine — Phase 4 fallback (not yet active in runtime)
-    # NOTE: Kokoro-82M ONNX (planned primary TTS engine) to be added here when Phase 4 starts
+    # Kokoro-82M ONNX TTS — primary TTS engine (Phase 4)
+    # CPU-only inference; model files downloaded separately (~80 MB).
+    # Install with: uv sync --extra tts
+    "kokoro-onnx>=0.4.0",
+    # onnxruntime already in runtime deps (>=1.24.1); listed here for clarity.
+    # Piper TTS — fallback engine (not yet active in runtime)
     "piper-tts>=1.4.1",
     "piper-phonemize-cross>=1.2.1",
 ]
@@ -152,5 +156,6 @@ module = [
     "webrtcvad.*",
     "zmq.*",
     "llama_cpp.*",
+    "kokoro_onnx.*",
 ]
 ignore_missing_imports = true

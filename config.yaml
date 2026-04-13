@@ -118,9 +118,33 @@ llm:
   memory_dir: ~/.lumi/memory
 
 # ─────────────────────────────────────────────────────────────────────────────
+# tts — Kokoro ONNX text-to-speech settings (Phase 4)
+# ─────────────────────────────────────────────────────────────────────────────
+tts:
+  # Whether TTS is active.  Set to false to run in silent mode without
+  # loading any model files (useful for headless or CI environments).
+  enabled: true
+
+  # Kokoro voice identifier.  "af_heart" is the default English voice.
+  # Other available voices depend on the bundled voices.bin file.
+  voice: af_heart
+
+  # Path to the Kokoro ONNX model file.
+  # Download from: https://github.com/thewh1teagle/kokoro-onnx/releases
+  model_path: models/tts/kokoro-v1_0.onnx
+
+  # Path to the Kokoro voices binary file.
+  # Download voices.bin alongside the ONNX model from the releases page above.
+  voices_path: models/tts/voices.bin
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ipc — ZeroMQ inter-process communication endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 ipc:
+  # Whether the IPC server is active.  Set to true to enable the TCP server
+  # and connect to the Godot frontend.  Keep false for audio-only / CI runs.
+  enabled: false
+
   # ZMQ transport and host prefix.  The port is appended as ":PORT".
   # For local-only use keep "tcp://127.0.0.1".
   address: tcp://127.0.0.1

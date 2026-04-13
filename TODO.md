@@ -30,10 +30,17 @@
 * **What was done:** `src/core/startup_check.py` runs `run_startup_checks()` before the event loop starts. Hard failures (missing model, wrong openwakeword version, no microphone) raise `RuntimeError` with human-readable messages. Soft failures (missing STT/LLM model directories) log a warning and continue.
 * **Remaining:** Safe try-except fallback to `IDLE` for localized runtime errors (e.g., transient VAD dropouts, audio device disconnection) is not yet implemented.
 
-## 8. No IPC Contract — PARTIALLY DONE
+## ~~8. No IPC Contract~~ — DONE
 * **Context:** The planned ZeroMQ integration with the Godot frontend lacks a formal schema.
-* **What was done:** `ZMQMessage` frozen dataclass added to `src/core/events.py` with fields `event`, `payload`, `timestamp`, `version`. IPC event table documented in `ARCHITECTURE.md`.
-* **Remaining:** `src/interface/zmq_server.py` not yet created. ZMQ socket wiring and internal routing via `ZMQMessage` not yet implemented.
+* **What was done:**
+  - `ZMQMessage` frozen dataclass added to `src/core/events.py` with fields `event`, `payload`, `timestamp`, `version`. IPC event table documented in `ARCHITECTURE.md`.
+  - `src/core/ipc_transport.py` — raw TCP server (stdlib `socket`, 4-byte big-endian length prefix, single-client, two daemon threads). No pyzmq dependency.
+  - `src/core/zmq_server.py` — event translation bridge: translates outbound internal events → JSON wire frames; translates inbound frames → `InterruptEvent` / `UserTextEvent` posted to orchestrator queue.
+  - `src/core/state_machine.py` — `unregister_observer()` added.
+  - `src/core/config.py` — `IPCConfig.enabled: bool = False` added; set to `true` in `config.yaml` to activate.
+  - `src/core/orchestrator.py` — ZMQServer injection, `_handle_user_text` handler wired, shutdown cleanup.
+  - `src/main.py` — ZMQServer auto-created inside Orchestrator when `config.ipc.enabled`.
+  - `tests/test_ipc_transport.py` (7 tests), `tests/test_zmq_server.py` (16 tests), `tests/test_ipc_protocol_conformance.py` (6 integration tests).
 
 ## ~~9. No Explicit State Machine~~ — DONE
 * **Context:** Ad-hoc boolean flags tracking whether Lumi is listening or processing are scattered everywhere.
@@ -84,6 +91,41 @@
   - `src/core/orchestrator.py` — `_handle_transcript()` wired: reflex fast-path + reasoning daemon thread
 * **Remaining (Wave 4):** Coverage gate ≥80% on all `src/llm/` + `src/core/` modules; full code review.
 
+## ~~19. Phase 4 TTS Integration~~ — DONE
+
+* **Wave 1 (speaker.py) — DONE:** `src/audio/speaker.py` SpeakerThread with resampling, daemon pattern, SpeechCompletedEvent on final chunk. `tests/test_speaker.py` created.
+* **Wave 2 (mouth.py) — DONE:** `src/audio/mouth.py` KokoroTTS with sentence-level streaming, prepare()/synthesize()/cancel()/is_busy. Pre-cancel race fixed. `tests/test_mouth.py` created. Orchestrator wired (tts= param, _handle_llm_response, interrupt SPEAKING branch).
+* **Wave 3 (config + docs) — DONE:** `TTSConfig` added to `config.py` and `LumiConfig`. `tts:` section added to `config.yaml`. `_check_tts_model()` soft check added to `startup_check.py`.
+* **Note:** Viseme extraction for lip-sync is deferred to Phase 6 (VisemeEvent is posted, but phoneme data not yet extracted from Kokoro output).
+
+## ~~20. Phase 5 IPC Transport + Godot Frontend~~ — DONE
+
+* **Context:** Transparent Godot 4 overlay connected to the Python Brain via raw TCP.
+* **What was done:**
+  - `src/core/ipc_transport.py` — `IPCTransport`: raw TCP server, 4-byte big-endian uint32 length prefix, single-client model, two daemon threads (`ipc-accept`, `ipc-recv`), two-lock design (`_send_lock` + `_client_lock`), stdlib `socket` only (no pyzmq).
+  - `src/core/zmq_server.py` — `ZMQServer`: event translation bridge; outbound `on_state_change`, `on_tts_start`, `on_tts_viseme`, `on_tts_stop`, `on_transcript`, `on_error`; inbound `interrupt` → `InterruptEvent`, `user_text` → `UserTextEvent`.
+  - `src/core/state_machine.py` — `unregister_observer()` added.
+  - `src/core/config.py` — `IPCConfig.enabled: bool = False`; set `ipc.enabled: true` in `config.yaml` to activate the IPC server.
+  - `src/core/orchestrator.py` — ZMQServer injection, `_handle_user_text` handler, shutdown cleanup.
+  - `src/main.py` — ZMQServer auto-created inside Orchestrator when `config.ipc.enabled`.
+  - `ui/` — Godot 4 project: `project.godot`, `scenes/main.tscn`, `scenes/avatar.tscn`, `scripts/ipc_protocol.gd`, `scripts/lumi_client.gd`, `scripts/avatar_controller.gd`, `scripts/main.gd`.
+  - `tests/test_ipc_transport.py` (7 tests), `tests/test_zmq_server.py` (16 tests), `tests/test_ipc_protocol_conformance.py` (6 integration tests, `@pytest.mark.integration`).
+  - Total test count: **284 passing**.
+* **Deferred to Phase 6:** Real avatar artwork (placeholder colored-circle sprites used), LightRAG Option A, LLM token streaming to Godot, viseme extraction.
+
+## 21. Phase 6: The Hands (OS Control) — NOT STARTED
+
+* **Goal:** Lumi can act on the desktop, stream tokens to the Godot overlay, and optionally query personal documents.
+* **Items:**
+  - Vision tool (`src/tools/vision.py`) — screenshot capture + analysis
+  - Automation tools (`src/tools/os_actions.py`) — app launch, file management, clipboard
+  - Real avatar artwork replacing Phase 5 placeholder sprites in `ui/assets/sprites/`
+  - LLM token streaming to Godot frontend (live text rendering as tokens arrive via `LLMTokenEvent`)
+  - Viseme extraction from Kokoro phoneme output (`VisemeEvent` fully wired for lip-sync)
+  - LightRAG Option A (`src/llm/rag_retriever.py`, explicit skill trigger, UI toggle, off by default)
+  - LightRAG Option B/C (automatic embedding classifier, gated on >90% precision proof)
+  - v1.0 release
+
 ## 18. Phase 3 Wave 4: Coverage Gate + Code Review — OPEN
 
 * **Context:** All LLM modules (Waves 0–3) are implemented and tested in isolation. Wave 4 closes Phase 3 with a full-suite coverage run and a code review of all changed files.
@@ -110,9 +152,9 @@
 * **Phased rollout:** v1 (identity + brevity), v2 (+ OS tools), v3 (+ code + multi-turn), v4 (+ internet tools)
 * **Reference:** See `ARCHITECTURE.md` Section 5 for full strategy: LoRA config table, dataset category specs, training workflow, tool palette, proof-of-concept experiment gate, and open questions.
 
-## 17. LightRAG Personal Knowledge Base (Phase 5 Optional)
+## 17. LightRAG Personal Knowledge Base (Phase 6 Optional)
 
-* **Context:** Optional user-facing feature approved for Phase 5. Users can feed Lumi personal documents (notes, manuals, wikis) and query them via natural language. Not a core mechanic — UI toggle, off by default. Orthogonal to LoRA but competes for context window and 150–600ms latency.
+* **Context:** Optional user-facing feature deferred from Phase 5 to Phase 6. Users can feed Lumi personal documents (notes, manuals, wikis) and query them via natural language. Not a core mechanic — UI toggle, off by default. Orthogonal to LoRA but competes for context window and 150–600ms latency.
 * **Prerequisites:** Phase 3 and 4 complete, end-to-end latency benchmarked, `all-MiniLM-L6-v2` CPU latency benchmarked on target hardware. **Critical:** If personality LoRA in use, retrain with 50–100 `[CONTEXT]` block examples before deploying LightRAG.
 * **Items:**
   - `src/llm/rag_retriever.py` (new) — Encapsulates LightRAG query, enforces 600-token hard cap, formats results
@@ -121,7 +163,7 @@
   - `src/core/orchestrator.py` — RAG trigger check in `_on_transcript_ready` (regex pattern: "search my docs", "look up in notes", etc.)
   - SQLite graph storage — zero-config, single-file, <50ms cold-start (no Neo4j, no in-memory)
   - Embedding model — `all-MiniLM-L6-v2` (~80MB, ~10-30ms CPU inference, 384-dim vectors), load once and keep in RAM while enabled
-  - Trigger model — **Option A (Phase 5):** Explicit skill via regex (clear expectation, no hallucination). **Option B/C (Phase 6):** Automatic via embedding classifier (gated on >90% precision proof).
+  - Trigger model — **Option A (Phase 6):** Explicit skill via regex (clear expectation, no hallucination). **Option B/C (Phase 6+):** Automatic via embedding classifier (gated on >90% precision proof).
   - UI toggle (Godot frontend) — off by default, "searching documents…" animation during retrieval masks latency
   - Document commands — explicit "remove document" and "re-index" exposed to user for graph maintenance
 * **Token budget (hard cap):**

@@ -23,8 +23,11 @@ Constraints:
 
 from __future__ import annotations
 
+import importlib.metadata as _meta
 import logging
 from pathlib import Path
+
+from src.core.config import LumiConfig
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +44,7 @@ def _check_openwakeword_version() -> None:
     a hard crash at runtime rather than a clear error at startup.
     """
     try:
-        import importlib.metadata as meta
-
-        installed = meta.version("openwakeword")
+        installed = _meta.version("openwakeword")
     except Exception as exc:
         raise RuntimeError(
             f"Cannot determine installed openwakeword version: {exc}\n"
@@ -125,6 +126,39 @@ def _check_llm_model(model_path: str) -> None:
         logger.info("LLM model file found: %s", model_path)
 
 
+def _check_tts_model(model_path: str, voices_path: str) -> None:
+    """Log a warning if TTS model files are missing.
+
+    KokoroTTS falls back to silent mode when model files are absent, so
+    this is a soft failure — the assistant can still wake, transcribe, and
+    route commands without TTS playback.
+    """
+    model = Path(model_path)
+    voices = Path(voices_path)
+
+    if not model.is_file():
+        logger.warning(
+            "TTS model file not found: '%s'. "
+            "KokoroTTS will run in silent mode until the file is present. "
+            "Download from the kokoro-onnx releases page and place at the "
+            "configured path, or update config.yaml → tts.model_path.",
+            model_path,
+        )
+    else:
+        logger.info("TTS model file found: %s", model_path)
+
+    if not voices.is_file():
+        logger.warning(
+            "TTS voices file not found: '%s'. "
+            "KokoroTTS will run in silent mode until the file is present. "
+            "Download voices.bin from the kokoro-onnx releases page and "
+            "place at the configured path, or update config.yaml → tts.voices_path.",
+            voices_path,
+        )
+    else:
+        logger.info("TTS voices file found: %s", voices_path)
+
+
 def _check_microphone() -> None:
     """Raise RuntimeError if no input (microphone) device is available.
 
@@ -164,7 +198,7 @@ def _check_microphone() -> None:
     )
 
 
-def run_startup_checks(config: "LumiConfig") -> None:  # noqa: F821
+def run_startup_checks(config: LumiConfig) -> None:
     """Run all startup validation checks for Project Lumi.
 
     Args:
@@ -172,20 +206,15 @@ def run_startup_checks(config: "LumiConfig") -> None:  # noqa: F821
                 load_config().
 
     Raises:
+        TypeError: If *config* is not a LumiConfig instance.
         RuntimeError: On any hard failure (see module docstring for the
                       complete list).  The error message is human-readable
                       and includes remediation instructions.
     """
-    # Import here (not at module level) to avoid the circular-import
-    # constraint — startup_check.py must not import config.py at module
-    # level if config.py might import startup_check.py in the future.
-    # Using a forward-reference string annotation on the parameter type
-    # keeps mypy happy without a runtime import.
-    from src.core.config import LumiConfig  # noqa: PLC0415
-
-    assert isinstance(config, LumiConfig), (
-        f"run_startup_checks expects LumiConfig, got {type(config).__name__}"
-    )
+    if not isinstance(config, LumiConfig):
+        raise TypeError(
+            f"run_startup_checks expects LumiConfig, got {type(config).__name__}"
+        )
 
     logger.info("--- Project Lumi startup checks ---")
 
@@ -197,5 +226,7 @@ def run_startup_checks(config: "LumiConfig") -> None:  # noqa: F821
     # Soft failures — warn but continue.
     _check_stt_model(config.scribe.model_path)
     _check_llm_model(config.llm.model_path)
+    if config.tts.enabled:
+        _check_tts_model(config.tts.model_path, config.tts.voices_path)
 
     logger.info("--- Startup checks complete ---")

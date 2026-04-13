@@ -108,3 +108,19 @@ class StateMachine:
         """
         with self._lock:
             self._observers.append(callback)
+
+    def unregister_observer(
+        self, callback: Callable[[LumiState, LumiState], None]
+    ) -> None:
+        """Remove a previously registered observer callback.
+
+        No-op if the callback is not currently registered; does not raise.
+
+        Args:
+            callback: The callable to remove.
+        """
+        with self._lock:
+            try:
+                self._observers.remove(callback)
+            except ValueError:
+                pass

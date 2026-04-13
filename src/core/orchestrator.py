@@ -16,16 +16,23 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import uuid
 from typing import Any, Callable
 
+from src.audio.mouth import KokoroTTS
+from src.audio.speaker import SpeakerThread
 from src.core.config import LumiConfig
 from src.core.events import (
     InterruptEvent,
     LLMResponseReadyEvent,
     ShutdownEvent,
+    SpeechCompletedEvent,
     TranscriptReadyEvent,
+    UserTextEvent,
+    VisemeEvent,
 )
 from src.core.state_machine import LumiState, StateMachine
+from src.core.zmq_server import ZMQServer
 from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
@@ -42,7 +49,14 @@ class Orchestrator:
         config: The application configuration.
     """
 
-    def __init__(self, config: LumiConfig) -> None:
+    def __init__(
+        self,
+        config: LumiConfig,
+        *,
+        speaker: SpeakerThread | None = None,
+        tts: KokoroTTS | None = None,
+        zmq_server: ZMQServer | None = None,
+    ) -> None:
         self._config: LumiConfig = config
         self._event_queue: queue.Queue[Any] = queue.Queue()
         self._state_machine: StateMachine = StateMachine()
@@ -75,10 +89,58 @@ class Orchestrator:
             config=config.llm,
         )
 
+        # Speaker output thread — injectable for testing; created here otherwise.
+        self._speaker: SpeakerThread = (
+            speaker if speaker is not None else SpeakerThread(self._event_queue)
+        )
+        self._speaker.start()
+
+        # TTS engine — injectable for testing; None means no TTS (state machine
+        # still transitions correctly via a synthetic SpeechCompletedEvent).
+        self._tts: KokoroTTS | None = tts
+
+        # Guards _current_utterance_id so _handle_interrupt can atomically
+        # read and cancel the active utterance.
+        self._tts_state_lock: threading.Lock = threading.Lock()
+        self._current_utterance_id: str | None = None
+
         # Register built-in handlers.
         self.register_handler(ShutdownEvent, self._handle_shutdown)
         self.register_handler(InterruptEvent, self._handle_interrupt)
         self.register_handler(TranscriptReadyEvent, self._handle_transcript)
+        self.register_handler(LLMResponseReadyEvent, self._handle_llm_response)
+        self.register_handler(SpeechCompletedEvent, self._handle_speech_completed)
+        self.register_handler(UserTextEvent, self._handle_user_text)
+
+        # ZMQServer wiring — optional; injected for testing or when IPC is
+        # enabled.  If not injected but config.ipc.enabled is True, create it
+        # here using the orchestrator's own queue and state machine so that
+        # inbound events from the Godot frontend are posted to this event loop.
+        # When created internally, ZMQServer.__init__ registers on_state_change
+        # as a state observer.  When injected (e.g. in tests), the caller is
+        # responsible for ensuring the state machine is shared — the Orchestrator
+        # registers on_state_change explicitly so injected instances also receive
+        # state transition forwarding.
+        self._zmq_server: ZMQServer | None = zmq_server
+        if self._zmq_server is None and config.ipc.enabled:
+            self._zmq_server = ZMQServer(
+                config.ipc, self._event_queue, self._state_machine
+            )
+            self._zmq_server.start()
+
+        if self._zmq_server is not None:
+            # Injected instances have not had on_state_change registered against
+            # this orchestrator's state machine; do it here.  For auto-created
+            # instances ZMQServer.__init__ already registered, so we avoid
+            # double registration by only registering for the injected path.
+            if zmq_server is not None:
+                self._state_machine.register_observer(
+                    self._zmq_server.on_state_change
+                )
+            self.register_handler(VisemeEvent, self._zmq_server.on_tts_viseme)
+            self.register_handler(SpeechCompletedEvent, self._zmq_server.on_tts_stop)
+            self.register_handler(TranscriptReadyEvent, self._zmq_server.on_transcript)
+            self.register_handler(LLMResponseReadyEvent, self._zmq_server.on_tts_start)
 
     @property
     def state_machine(self) -> StateMachine:
@@ -215,6 +277,131 @@ class Orchestrator:
         thread = threading.Thread(target=_run_inference, daemon=True)
         thread.start()
 
+    def _handle_user_text(self, event: UserTextEvent) -> None:
+        """Handle UserTextEvent: route typed text to reflex or LLM.
+
+        Mirrors _handle_transcript but the text arrives pre-formed from the
+        Godot frontend — no STT step required.
+
+        Fast-path: try ReflexRouter first (regex, no model needed).
+        Slow-path: dispatch ReasoningRouter in a daemon thread so the
+        event loop remains unblocked during inference.
+
+        Args:
+            event: The user-text event containing text from the frontend.
+        """
+        self._state_machine.transition_to(LumiState.PROCESSING)
+        self._llm_cancel_flag.clear()
+
+        # Reflex fast-path — no model required.
+        reflex_response = self._reflex_router.route(event.text)
+        if reflex_response is not None:
+            logger.debug("Reflex hit for %r -> %r", event.text, reflex_response)
+            self._memory.add_turn("user", event.text)
+            self._memory.add_turn("assistant", reflex_response)
+            self._memory.save()
+            self.post_event(LLMResponseReadyEvent(text=reflex_response))
+            self._state_machine.transition_to(LumiState.SPEAKING)
+            return
+
+        # Reasoning slow-path — run in a daemon thread so the event loop
+        # remains responsive to InterruptEvents during long inference.
+        def _run_inference() -> None:
+            try:
+                response = self._reasoning_router.generate(
+                    event.text, self._llm_cancel_flag
+                )
+            except InterruptedError:
+                logger.info("LLM generation cancelled for %r", event.text)
+                return
+            except Exception:
+                logger.exception("LLM inference failed for %r", event.text)
+                with self._llm_state_lock:
+                    if self._state_machine.current_state == LumiState.PROCESSING:
+                        self._state_machine.transition_to(LumiState.IDLE)
+                return
+
+            with self._llm_state_lock:
+                if self._state_machine.current_state != LumiState.PROCESSING:
+                    logger.debug(
+                        "State changed during inference, discarding response for %r",
+                        event.text,
+                    )
+                    return
+
+                self._memory.save()
+                self.post_event(LLMResponseReadyEvent(text=response))
+                self._state_machine.transition_to(LumiState.SPEAKING)
+
+        thread = threading.Thread(target=_run_inference, daemon=True)
+        thread.start()
+
+    def _handle_llm_response(self, event: LLMResponseReadyEvent) -> None:
+        """Handle LLMResponseReadyEvent: pass text to TTS for synthesis.
+
+        Generates a fresh utterance_id, records it for cancel targeting,
+        then launches synthesis in a daemon thread so the event loop
+        stays responsive.  When TTS is unavailable, posts SpeechCompletedEvent
+        directly so the state machine can transition back to IDLE.
+
+        Args:
+            event: The LLM response event containing the text to speak.
+        """
+        utterance_id = str(uuid.uuid4())
+
+        tts = self._tts
+
+        # Prepare KokoroTTS BEFORE starting the thread so that a cancel() call
+        # arriving between thread start and synthesize() executing its first lock
+        # acquisition can correctly target the utterance (see KokoroTTS.prepare()).
+        with self._tts_state_lock:
+            self._current_utterance_id = utterance_id
+            if tts is not None:
+                tts.prepare(utterance_id)
+
+        if tts is None:
+            # No TTS engine configured — fire completion immediately.
+            logger.debug(
+                "No TTS engine; posting SpeechCompletedEvent for utterance_id=%s",
+                utterance_id,
+            )
+            self.post_event(SpeechCompletedEvent(utterance_id=utterance_id))
+            return
+
+        def _run_tts() -> None:
+            tts.synthesize(event.text, utterance_id)
+
+        thread = threading.Thread(
+            target=_run_tts, daemon=True, name="TTSSynthesisThread"
+        )
+        thread.start()
+        logger.debug(
+            "TTS synthesis started for utterance_id=%s (%.40r…)",
+            utterance_id,
+            event.text,
+        )
+
+    def _handle_speech_completed(self, event: SpeechCompletedEvent) -> None:
+        """Handle SpeechCompletedEvent: transition from SPEAKING to IDLE.
+
+        Args:
+            event: The speech-completion event carrying the utterance identifier.
+        """
+        current = self._state_machine.current_state
+        if current == LumiState.SPEAKING:
+            with self._tts_state_lock:
+                self._current_utterance_id = None
+            self._state_machine.transition_to(LumiState.IDLE)
+            logger.info(
+                "Speech completed (utterance_id=%s), returning to IDLE",
+                event.utterance_id,
+            )
+        else:
+            logger.debug(
+                "SpeechCompletedEvent received in state %s, ignoring",
+                current.value,
+            )
+
     def _handle_shutdown(self, event: ShutdownEvent) -> None:
         """Handle ShutdownEvent: stop the event loop.
 
@@ -222,6 +409,9 @@ class Orchestrator:
             event: The shutdown event.
         """
         logger.info("Shutdown requested")
+        self._speaker.stop()
+        if self._zmq_server is not None:
+            self._zmq_server.stop()
         self._shutdown = True
 
     def _handle_interrupt(self, event: InterruptEvent) -> None:
@@ -256,7 +446,11 @@ class Orchestrator:
             return
 
         if current == LumiState.SPEAKING:
-            self._drain_event_types({"TTSChunkReadyEvent"})
+            with self._tts_state_lock:
+                if self._tts is not None and self._current_utterance_id is not None:
+                    self._tts.cancel(self._current_utterance_id)
+            self._speaker.flush()
+            self._drain_event_types({"TTSChunkReadyEvent", "SpeechCompletedEvent"})
 
         # SPEAKING → IDLE transition.
         self._state_machine.transition_to(LumiState.IDLE)

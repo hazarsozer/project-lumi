@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 3 Wave 3 completion (2026-04-10).
+> Last updated to reflect actual state as of Phase 5 completion (2026-04-13).
 
 ---
 
@@ -13,9 +13,9 @@
 Lumi is decoupled into two independent processes that communicate via ZeroMQ. This ensures the desktop (especially games and renderers) remains fully responsive regardless of what Lumi's brain is doing.
 
 ```
-┌──────────────────────────────┐        ZeroMQ PAIR              ┌──────────────────────┐
+┌──────────────────────────────┐        Raw TCP (length-prefix)  ┌──────────────────────┐
 │         THE BRAIN            │ ◄──────────────────────────────► │       THE BODY       │
-│      (Python Backend)        │  JSON: {event, payload,         │  (Godot / Tauri UI)  │
+│      (Python Backend)        │  JSON: {event, payload,         │  (Godot 4 UI)        │
 │                              │         timestamp, version}     │                      │
 │  Ears → Orchestrator → LLM   │                                  │  Avatar + Animations │
 │  Scribe → TTS → OS Tools     │                                  │  State Overlay       │
@@ -35,9 +35,13 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 - **Target:** < 200MB RAM, negligible GPU at all times
 
 ### The Nerves (IPC)
-- **Protocol:** ZeroMQ PAIR socket
+- **Protocol:** Raw TCP, 4-byte big-endian uint32 length prefix + UTF-8 JSON body
+- **Transport class:** `IPCTransport` (`src/core/ipc_transport.py`) — single-client, two daemon threads (`ipc-accept`, `ipc-recv`), stdlib `socket` only (no pyzmq)
+- **Event bridge:** `ZMQServer` (`src/core/zmq_server.py`) — sits on top of `IPCTransport`, translates outbound internal events to JSON wire frames, translates inbound JSON frames to internal events posted to the orchestrator queue
+- **Enabled by:** `config.ipc.enabled: true` in `config.yaml` (default `false`; keep `false` for headless / CI runs)
+- **Default endpoint:** `tcp://127.0.0.1:5555`
 - **Format:** `{ "event": string, "payload": object, "timestamp": float, "version": string }`
-- **Wire-format schema defined** (`ZMQMessage` dataclass in `src/core/events.py`). **ZMQ transport not yet implemented** (`zmq_server.py` planned — Phase 3 remaining). **IPC event types:**
+- **Wire-format schema:** `ZMQMessage` dataclass in `src/core/events.py`. **IPC event types:**
 
 | Event | Direction | Payload |
 |---|---|---|
@@ -66,6 +70,9 @@ The pipeline is event-driven. All components post typed, frozen dataclass events
 | `CommandResultEvent` | Orchestrator (command parser) | Orchestrator |
 | `LLMResponseReadyEvent` | LLM engine | Orchestrator |
 | `TTSChunkReadyEvent` | TTS engine | Speaker thread |
+| `VisemeEvent` | TTS engine (mouth.py) | Orchestrator / ZMQ server (lip-sync) |
+| `SpeechCompletedEvent` | SpeakerThread / KokoroTTS | Orchestrator |
+| `LLMTokenEvent` | LLM reasoning router | Orchestrator (streaming tokens) |
 | `InterruptEvent` | Any source (Body via ZMQ, new wake word) | Orchestrator |
 | `ShutdownEvent` | main.py / signal handler | Orchestrator |
 | `UserTextEvent` | ZMQ server (Body → Brain) | Orchestrator |
@@ -128,7 +135,7 @@ When the Orchestrator receives `InterruptEvent` while in `PROCESSING` or `SPEAKI
 
 The `LumiState` enum defines exactly four states: `IDLE`, `LISTENING`, `PROCESSING`, `SPEAKING`. The `StateMachine` class enforces all valid transitions and notifies registered observers. `InvalidTransitionError` is raised for any illegal transition attempt.
 
-State transitions are published to the Body via `state_change` IPC events (ZMQ server not yet implemented — planned Phase 3 remaining).
+State transitions are published to the Body via `state_change` IPC events. `ZMQServer` registers itself as a `StateMachine` observer so every transition is forwarded automatically when the IPC server is enabled.
 
 ---
 
@@ -173,20 +180,22 @@ Hardware is auto-detected at startup to select the appropriate edition.
 ### Frontend — The Body (Phase 5)
 | Component | Technology |
 |---|---|
-| Renderer | Godot 4 (transparent overlay) |
-| IPC Client | GDScript ZeroMQ client |
-| Avatar | Live2D (Standard) / 3D VRM (Pro) |
+| Renderer | Godot 4 (transparent 200×200 overlay, borderless, X11/Wayland) |
+| IPC Client | `LumiClient` (GDScript `StreamPeerTCP`, auto-reconnect every 2 s) |
+| Frame protocol | `ipc_protocol.gd` — 4-byte length-prefix encode/decode |
+| Avatar | `AvatarController` drives `AnimatedSprite2D` from Brain state events; placeholder colored-circle sprites in `ui/assets/sprites/` |
+| Avatar (Phase 6) | Real artwork replacing placeholder sprites; Live2D (Standard) / 3D VRM (Pro) |
 
 ### Infrastructure
 | Component | Technology |
 |---|---|
 | Language | Python 3.12 |
 | Package Manager | `uv` |
-| IPC | ZeroMQ (pyzmq) |
-| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
+| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq) |
+| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory exists, 83 tests) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory exists, 284 tests) |
 | CI | `.github/workflows/ci.yml` |
 
 ---
@@ -337,7 +346,7 @@ Examples:
 
 ---
 
-## 6. LightRAG: Optional Personal Knowledge Base (Phase 5)
+## 6. LightRAG: Optional Personal Knowledge Base (Phase 6)
 
 ### What It Does
 
@@ -416,8 +425,8 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 |---|---|
 | Phase 3 | LLM pipeline |
 | Phase 4 | TTS + VRAM/latency benchmarking |
-| Phase 5 | Godot frontend + LightRAG Option A (explicit skill, UI toggle) |
-| Phase 6 | OS tools + LightRAG Option B/C (automatic, if classifier proven) |
+| Phase 5 | Godot frontend + IPC transport (complete; LightRAG deferred) |
+| Phase 6 | OS tools + LightRAG Option A (explicit skill) + Option B/C (automatic, if classifier proven) |
 
 **Must complete before LightRAG work:**
 1. Phase 3 LLM pipeline stable
@@ -438,7 +447,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 
 ## 7. Actual Directory Structure
 
-Current state as of 2026-04-10 (Phase 3 Wave 3 complete):
+Current state as of 2026-04-13 (Phase 5 complete):
 
 ```
 Lumi/
@@ -453,17 +462,22 @@ Lumi/
 │   ├── conftest.py             # Shared fixtures: synthetic audio arrays, sounddevice mock,
 │   │                           #   faster-whisper mock, openwakeword mock, mock_llama_cpp
 │   ├── test_ears.py            # Ears: wake word detection, VAD recording paths
-│   ├── test_events.py          # All 9 event types + ZMQMessage construction
+│   ├── test_events.py          # All event types + ZMQMessage construction
+│   ├── test_ipc_protocol_conformance.py  # Integration: wire protocol round-trips (6 tests, @pytest.mark.integration)
+│   ├── test_ipc_transport.py   # IPCTransport: bind, send, recv, stop (7 tests)
 │   ├── test_memory.py          # ConversationMemory: add_turn, prune, JSON persistence
 │   ├── test_model_loader.py    # ModelLoader: load/unload lifecycle, path validation
+│   ├── test_mouth.py           # KokoroTTS: synthesize, cancel, is_busy
 │   ├── test_orchestrator.py    # Event routing, interrupt handling, shutdown
 │   ├── test_prompt_engine.py   # PromptEngine: ChatML format, token budget truncation
 │   ├── test_reasoning_router.py # ReasoningRouter: token-by-token generation, cancel
 │   ├── test_reflex_router.py   # ReflexRouter: greeting + time patterns
 │   ├── test_scribe.py          # Scribe.transcribe() unit tests
+│   ├── test_speaker.py         # SpeakerThread: playback, resampling, SpeechCompletedEvent
 │   ├── test_state_machine.py   # All valid/invalid transition branches
 │   ├── test_tool_call_parser.py # parse_tool_calls: extraction, validation, recovery
-│   └── test_utils.py           # play_ready_sound() unit tests
+│   ├── test_utils.py           # play_ready_sound() unit tests
+│   └── test_zmq_server.py      # ZMQServer: outbound events, inbound parsing, lifecycle (16 tests)
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                 # Thin bootstrap: logging → config → checks → orchestrator
@@ -472,18 +486,28 @@ Lumi/
 │   │   ├── __init__.py
 │   │   ├── ears.py             # Microphone capture, wake word detection (openWakeWord),
 │   │   │                       #   VAD recording; posts WakeDetectedEvent + RecordingCompleteEvent
-│   │   └── scribe.py           # faster-whisper STT transcription; posts TranscriptReadyEvent
+│   │   ├── mouth.py            # KokoroTTS: sentence-level streaming, prepare()/synthesize()/cancel()/is_busy;
+│   │   │                       #   posts TTSChunkReadyEvent, VisemeEvent
+│   │   ├── scribe.py           # faster-whisper STT transcription; posts TranscriptReadyEvent
+│   │   └── speaker.py          # SpeakerThread: daemon audio playback with resampling;
+│   │                           #   posts SpeechCompletedEvent on final chunk
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── config.py           # LumiConfig, AudioConfig, ScribeConfig, LLMConfig, IPCConfig,
+│   │   ├── config.py           # LumiConfig, AudioConfig, ScribeConfig, LLMConfig, TTSConfig, IPCConfig,
 │   │   │                       #   load_config(), detect_edition()
-│   │   ├── events.py           # 9 frozen event types + ZMQMessage dataclass
+│   │   ├── events.py           # Frozen event types + ZMQMessage dataclass
+│   │   ├── ipc_transport.py    # IPCTransport: single-client TCP server, 4-byte length-prefix framing,
+│   │   │                       #   two daemon threads (ipc-accept, ipc-recv), stdlib socket only
 │   │   ├── logging_config.py   # setup_logging() — human-readable or JSON structured output
 │   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling,
-│   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring
+│   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring,
+│   │   │                       #   ZMQServer injection, _handle_user_text handler
 │   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation
-│   │   └── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
-│   │                           #   StateMachine, InvalidTransitionError
+│   │   ├── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
+│   │   │                       #   StateMachine, InvalidTransitionError, unregister_observer()
+│   │   └── zmq_server.py       # ZMQServer: event translation bridge over IPCTransport;
+│   │                           #   Brain → Body (state_change, transcript, tts_start, tts_viseme,
+│   │                           #   tts_stop, error); Body → Brain (interrupt, user_text)
 │   └── llm/
 │       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
 │       │                       #   ConversationMemory, ModelLoader, PromptEngine
@@ -493,6 +517,20 @@ Lumi/
 │       ├── reasoning_router.py # Token-by-token LLM inference with cancel flag support
 │       ├── reflex_router.py    # Regex fast-path: greetings, time queries
 │       └── tool_call_parser.py # <tool_call> extractor + JSON recovery (parse_tool_calls)
+├── ui/                         # Godot 4 frontend project
+│   ├── project.godot           # Godot project descriptor
+│   ├── assets/
+│   │   └── sprites/            # Placeholder colored-circle sprites (Phase 5); real art in Phase 6
+│   ├── scenes/
+│   │   ├── avatar.tscn         # AnimatedSprite2D scene
+│   │   └── main.tscn           # Root scene (wires client signals)
+│   ├── scripts/
+│   │   ├── avatar_controller.gd # Drives AnimatedSprite2D from Brain state events
+│   │   ├── ipc_protocol.gd     # 4-byte length-prefix frame encode/decode
+│   │   ├── lumi_client.gd      # StreamPeerTCP client with auto-reconnect (2 s retry)
+│   │   └── main.gd             # Root scene logic: wires signals, Escape → interrupt
+│   ├── README.md               # Godot setup and running instructions
+│   └── TESTING.md              # Manual test checklist for Godot frontend
 ├── config.yaml                 # Runtime configuration (all keys optional, defaults in config.py)
 ├── ARCHITECTURE.md             # This file
 ├── README.md
@@ -508,16 +546,10 @@ src/
 ├── llm/
 │   ├── domain_router.py        # Regex/embedding-based domain classification (Phase 3+)
 │   ├── model_registry.py       # Fallback: full GGUF model swapping (Phase 3+, if LoRA API unavailable)
-│   └── rag_retriever.py        # LightRAG query wrapper, token budget enforcement (Phase 5 optional)
-├── audio/
-│   └── mouth.py                # TTS engine + non-blocking speaker thread (Phase 4)
+│   └── rag_retriever.py        # LightRAG query wrapper, token budget enforcement (Phase 6 optional)
 ├── tools/
 │   ├── os_actions.py           # App launch, file management (Phase 6)
 │   └── vision.py               # Screenshot analysis (Phase 6)
-└── interface/
-    └── zmq_server.py           # ZeroMQ IPC server (Phase 3 remaining)
-
-ui/                             # Godot or Tauri frontend project (Phase 5)
 scripts/
 ├── train_lumi.py               # QLoRA training entrypoint (Phase 3+)
 └── merge_lora.py               # Adapter merge + GGUF export (Phase 3+)
@@ -572,28 +604,39 @@ scripts/
 **Remaining:**
 - [ ] Coverage gate ≥80% on all `src/llm/` and `src/core/` modules (Wave 4)
 - [ ] Full code review (Wave 4)
-- [ ] `src/interface/zmq_server.py` — ZMQ IPC socket wiring (Phase 3 remaining)
 
-### Phase 4: The Mouth (TTS) — NOT STARTED
+### Phase 4: The Mouth (TTS) — COMPLETE
 *Goal: High-quality voice response without GPU.*
 
-- [ ] TTS engine (Kokoro-82M ONNX)
-- [ ] Non-blocking audio playback (queued speaker thread)
-- [ ] Viseme extraction for avatar lip-sync
+- [x] TTS engine (Kokoro-82M ONNX) — `src/audio/mouth.py`, KokoroTTS with sentence streaming
+- [x] Non-blocking audio playback (SpeakerThread, `src/audio/speaker.py`)
+- [x] TTS config keys (`TTSConfig` in `config.py`, `tts:` section in `config.yaml`, startup check)
+- [ ] Viseme extraction for avatar lip-sync (VisemeEvent defined; phoneme data not yet extracted from Kokoro output — Phase 6)
 
-### Phase 5: The Body (Visuals) — NOT STARTED
-*Goal: Transparent, interactive desktop overlay + optional knowledge base.*
+### Phase 5: The Body (Visuals) — COMPLETE
+*Goal: Transparent, interactive desktop overlay + IPC transport to Python Brain.*
 
-- [ ] Godot project setup (transparent window, X11/Wayland)
-- [ ] ZeroMQ client (GDScript, receives state events)
-- [ ] Avatar rendering (Live2D or 2D sprite)
-- [ ] State machine animation (Idle / Listening / Thinking / Speaking)
-- [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default)
+- [x] `src/core/ipc_transport.py` — raw TCP server, 4-byte big-endian length prefix, single-client, two daemon threads
+- [x] `src/core/zmq_server.py` — event translation bridge: internal events ↔ JSON wire protocol
+- [x] `src/core/state_machine.py` — `unregister_observer()` added
+- [x] `src/core/config.py` — `IPCConfig.enabled` field added (default `false`)
+- [x] `src/core/orchestrator.py` — ZMQServer injection, `_handle_user_text` handler, shutdown cleanup
+- [x] `src/main.py` — ZMQServer auto-created when `config.ipc.enabled = true`
+- [x] Godot 4 frontend scaffold (`ui/`) — transparent 200×200 borderless overlay, `StreamPeerTCP` client, avatar controller, IPC protocol GDScript
+- [x] `tests/test_ipc_transport.py` — 7 tests
+- [x] `tests/test_zmq_server.py` — 16 tests
+- [x] `tests/test_ipc_protocol_conformance.py` — 6 integration tests
+- [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default — deferred to Phase 6)
+- [ ] Real avatar artwork (placeholder colored-circle sprites used — deferred to Phase 6)
 
 ### Phase 6: The Hands (OS Control) — NOT STARTED
-*Goal: Lumi can act on the desktop. Advanced RAG routing.*
+*Goal: Lumi can act on the desktop. Real avatar art. Advanced RAG routing.*
 
 - [ ] Vision tool (screenshot capture + analysis)
 - [ ] Automation tools (app launch, file management, clipboard)
+- [ ] Real avatar artwork replacing Phase 5 placeholder sprites
+- [ ] LLM token streaming to Godot frontend (live text rendering as tokens arrive)
+- [ ] Viseme extraction from Kokoro phoneme output (VisemeEvent fully wired for lip-sync)
+- [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default)
 - [ ] LightRAG Option B/C (automatic routing via classifier, gated on proof of concept)
 - [ ] v1.0 release

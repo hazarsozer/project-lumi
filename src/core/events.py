@@ -10,7 +10,9 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -34,8 +36,6 @@ class RecordingCompleteEvent:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, RecordingCompleteEvent):
             return NotImplemented
-        import numpy as np
-
         if isinstance(self.audio, np.ndarray) and isinstance(other.audio, np.ndarray):
             return bool(np.array_equal(self.audio, other.audio))
         return self.audio is other.audio
@@ -68,32 +68,72 @@ class LLMResponseReadyEvent:
 class TTSChunkReadyEvent:
     """Fired by the TTS engine for each audio chunk to play.
 
-    The audio field holds a numpy ndarray. Typed as ``object`` for the
-    same frozen-dataclass hash reason as RecordingCompleteEvent.
+    audio holds a numpy ndarray (float32, mono, at TTS sample rate).
+    Typed as ``object`` for the same frozen-dataclass hash reason as
+    RecordingCompleteEvent.
     """
 
-    audio: object  # np.ndarray
-    viseme: str
-    duration_ms: int
+    audio: object        # np.ndarray float32 mono
+    sample_rate: int     # Hz — e.g. 24000 for Kokoro
+    chunk_id: int        # monotonically increasing within one utterance
+    is_final: bool       # True on the last chunk of an utterance
+    utterance_id: str    # identifies the utterance; used for interrupt-triggered drains
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, TTSChunkReadyEvent):
             return NotImplemented
-        import numpy as np
-
         if isinstance(self.audio, np.ndarray) and isinstance(other.audio, np.ndarray):
             return bool(
                 np.array_equal(self.audio, other.audio)
-                and self.viseme == other.viseme
-                and self.duration_ms == other.duration_ms
+                and self.sample_rate == other.sample_rate
+                and self.chunk_id == other.chunk_id
+                and self.is_final == other.is_final
+                and self.utterance_id == other.utterance_id
             )
         return (
             self.audio is other.audio
-            and self.viseme == other.viseme
-            and self.duration_ms == other.duration_ms
+            and self.sample_rate == other.sample_rate
+            and self.chunk_id == other.chunk_id
+            and self.is_final == other.is_final
+            and self.utterance_id == other.utterance_id
         )
 
     __hash__ = None  # type: ignore[assignment]
+
+
+@dataclass(frozen=True)
+class VisemeEvent:
+    """Fired by the TTS engine for each phoneme/viseme in an utterance.
+
+    Used by the Godot frontend to animate avatar lip-sync.
+    """
+
+    utterance_id: str  # binds this viseme to its utterance
+    phoneme: str       # IPA or ARPAbet phoneme string
+    start_ms: int      # offset from utterance start, milliseconds
+    duration_ms: int   # phoneme duration, milliseconds
+
+
+@dataclass(frozen=True)
+class SpeechCompletedEvent:
+    """Fired by the speaker thread after the last TTS chunk finishes playing.
+
+    Signals the Orchestrator to transition from SPEAKING back to IDLE.
+    """
+
+    utterance_id: str
+
+
+@dataclass(frozen=True)
+class LLMTokenEvent:
+    """Fired by ReasoningRouter for each generated token (streaming display).
+
+    Used by the Godot frontend to show a typing indicator or live transcript.
+    Not consumed by the Orchestrator's main dispatch loop.
+    """
+
+    token: str
+    utterance_id: str
 
 
 @dataclass(frozen=True)
@@ -122,6 +162,6 @@ class ZMQMessage:
     """Wire-format message for ZMQ IPC communication."""
 
     event: str
-    payload: dict  # type: ignore[type-arg]
+    payload: dict[str, object]
     timestamp: float
     version: str = "1.0"

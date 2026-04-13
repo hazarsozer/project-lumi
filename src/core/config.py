@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -122,8 +122,34 @@ class LLMConfig:
 
 
 @dataclass(frozen=True)
+class TTSConfig:
+    """Configuration for the Kokoro ONNX text-to-speech engine (mouth.py).
+
+    Defaults match the values expected by KokoroTTS at Phase 4 entry.
+    """
+
+    # Whether TTS is active.  Set to false to run in silent mode without
+    # loading any model files (useful for headless or CI environments).
+    enabled: bool = True
+
+    # Kokoro voice identifier passed to kokoro_onnx.Kokoro.create().
+    # "af_heart" is the default English voice bundled with the model.
+    voice: str = "af_heart"
+
+    # Path to the Kokoro ONNX model file.
+    model_path: str = "models/tts/kokoro-v1_0.onnx"
+
+    # Path to the Kokoro voices binary file.
+    voices_path: str = "models/tts/voices.bin"
+
+
+@dataclass(frozen=True)
 class IPCConfig:
     """ZeroMQ IPC endpoint configuration (consumed by ipc-engineer)."""
+
+    # Whether the IPC server is active.  Set to false to disable the
+    # TCP server entirely (useful for headless or CI environments).
+    enabled: bool = False
 
     # ZMQ transport + host prefix — port is appended as ":PORT".
     address: str = "tcp://127.0.0.1"
@@ -143,6 +169,7 @@ class LumiConfig:
     audio: AudioConfig = field(default_factory=AudioConfig)
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    tts: TTSConfig = field(default_factory=TTSConfig)
     ipc: IPCConfig = field(default_factory=IPCConfig)
 
     # Root-logger level forwarded to setup_logging().
@@ -235,11 +262,9 @@ def _merge_section(defaults: Any, overrides: dict[str, Any]) -> dict[str, Any]:
     Returns:
         A dict containing only valid field names with merged values.
     """
-    import dataclasses
-
     merged: dict[str, Any] = {
         f.name: getattr(defaults, f.name)
-        for f in dataclasses.fields(defaults)
+        for f in fields(defaults)
     }
     for key, value in overrides.items():
         if key in merged:
@@ -299,13 +324,16 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     llm_cfg = LLMConfig(
         **_merge_section(LLMConfig(), raw.get("llm", {}))
     )
+    tts_cfg = TTSConfig(
+        **_merge_section(TTSConfig(), raw.get("tts", {}))
+    )
     ipc_cfg = IPCConfig(
         **_merge_section(IPCConfig(), raw.get("ipc", {}))
     )
 
     # Top-level scalar overrides.
     top_defaults = LumiConfig()
-    edition = raw.get("edition", detect_edition())
+    edition = raw["edition"] if "edition" in raw else detect_edition()
     log_level = raw.get("log_level", top_defaults.log_level)
     json_logs = raw.get("json_logs", top_defaults.json_logs)
 
@@ -314,6 +342,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         audio=audio_cfg,
         scribe=scribe_cfg,
         llm=llm_cfg,
+        tts=tts_cfg,
         ipc=ipc_cfg,
         log_level=log_level,
         json_logs=json_logs,

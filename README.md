@@ -11,15 +11,15 @@
 
 ## Current Status
 
-**Phase 1 and Phase 2 complete. Phase 3 foundations complete; LLM integration not started.**
+**Phases 1–5 complete. Phase 6 (OS tools, real avatar art, LLM streaming) not started.**
 
 | Phase | Name | Status |
 |---|---|---|
 | 1 | The Ears (Audio Input) | COMPLETE |
 | 2 | The Scribe (Transcription) | COMPLETE |
-| 3 | The Brain (Intelligence) | IN PROGRESS |
-| 4 | The Mouth (TTS) | NOT STARTED |
-| 5 | The Body (Visuals) | NOT STARTED |
+| 3 | The Brain (Intelligence) | COMPLETE |
+| 4 | The Mouth (TTS) | COMPLETE |
+| 5 | The Body (Visuals + IPC) | COMPLETE |
 | 6 | The Hands (OS Control) | NOT STARTED |
 
 ---
@@ -32,10 +32,13 @@
 - Context injection reduces mis-transcriptions ("Firefox" vs "Fire folks")
 - Event-driven pipeline: `Ears` posts `WakeDetectedEvent` to a central queue; `Orchestrator` dispatches all events
 - Thread-safe state machine enforces `IDLE → LISTENING → PROCESSING → SPEAKING` transitions
+- Local LLM responses via `llama-cpp-python` (Phi-3.5 Mini / Gemma 2 2B); reflex fast-path for greetings and time queries
+- Kokoro-82M ONNX TTS synthesis with non-blocking `SpeakerThread` playback
 - Typed configuration loaded from `config.yaml` with auto-detected hardware edition
 - Startup validation halts on missing wake word model, wrong openwakeword version, or no microphone
 - Structured logging (human-readable or JSON) via `src/core/logging_config.py`
-- 83 tests with 80% coverage gate enforced in CI
+- **Godot 4 transparent overlay** (`ui/`) connects to the Python Brain via raw TCP on port 5555; drives an animated avatar from Brain state events. Set `ipc.enabled: true` in `config.yaml` to activate the IPC server.
+- 284 tests with 80% coverage gate enforced in CI
 
 ---
 
@@ -55,56 +58,62 @@
 - [x] Context injection for accuracy
 - [x] Command parsing infrastructure (event-driven pipeline wired; `CommandResultEvent` defined)
 
-### Phase 3: The Brain — In Progress
+### Phase 3: The Brain — Complete
 
-**Foundations complete:**
 - [x] Structured logging (`logging_config.py`, `setup_logging()`)
 - [x] Startup validation (`startup_check.py`, hard fail on missing models / wrong versions)
-- [x] Test infrastructure (83 tests, `pytest` + `pytest-cov`, 80% coverage gate)
+- [x] Test infrastructure (`pytest` + `pytest-cov`, 80% coverage gate)
 - [x] Configuration system + hardware edition auto-detection (`config.yaml` + `config.py`)
 - [x] Event-driven orchestrator (`orchestrator.py`, replaces synchronous pipeline)
 - [x] State machine (`state_machine.py`, `IDLE → LISTENING → PROCESSING → SPEAKING`)
 - [x] `openwakeword==0.4.0` exact pin with startup version check
-
-**Not yet started:**
-- [ ] LLM integration (Phi-3.5 Mini / Gemma 2 2B via llama-cpp-python)
-- [ ] VRAM hibernate/wake (load on demand, offload when idle)
-- [ ] Reflex router + Reasoning router
-- [ ] Memory (JSON user profile + conversation history)
-- [ ] ZMQ server (`zmq_server.py`)
+- [x] LLM integration (Phi-3.5 Mini / Gemma 2 2B via llama-cpp-python)
+- [x] VRAM hibernate/wake lifecycle (`ModelLoader`)
+- [x] Reflex router + Reasoning router
+- [x] Memory (JSON conversation history, `ConversationMemory`)
 
 **Fine-tuning roadmap (Phase 3+):** QLoRA-based fine-tuning with LoRA adapter hot-swap architecture (<100ms domain switch). Personality injection, OS tool-call training, and multi-turn context. See [ARCHITECTURE.md § 5](ARCHITECTURE.md#5-fine-tuning-strategy-phase-3--beyond) for full strategy.
 
-### Phase 4: The Mouth
+### Phase 4: The Mouth — Complete
 
-- [ ] Kokoro-82M ONNX TTS
-- [ ] Non-blocking audio playback
-- [ ] Viseme extraction for lip-sync
+- [x] Kokoro-82M ONNX TTS (`src/audio/mouth.py`, `KokoroTTS`)
+- [x] Non-blocking audio playback (`SpeakerThread`, `src/audio/speaker.py`)
+- [x] TTS config keys (`TTSConfig`, `tts:` section in `config.yaml`, startup check)
+- [ ] Viseme extraction for lip-sync (deferred to Phase 6)
 
-### Phase 5: The Body
+### Phase 5: The Body — Complete
 
-- [ ] Godot transparent overlay (X11/Wayland)
-- [ ] ZeroMQ client in GDScript
-- [ ] Avatar + state machine animations
-- [ ] LightRAG personal knowledge base (optional, UI toggle, off by default). Users feed Lumi documents; query via natural language. See [ARCHITECTURE.md § 6](ARCHITECTURE.md#6-lightrag-optional-personal-knowledge-base-phase-5) for details.
+- [x] Raw TCP IPC server (`src/core/ipc_transport.py`, 4-byte length-prefix framing)
+- [x] Event bridge (`src/core/zmq_server.py`, `ZMQServer` — translates internal events ↔ JSON wire protocol)
+- [x] Godot 4 transparent overlay (`ui/`) — 200×200 borderless window, X11/Wayland
+- [x] `StreamPeerTCP` IPC client (`ui/scripts/lumi_client.gd`) with auto-reconnect
+- [x] Avatar controller (`ui/scripts/avatar_controller.gd`) drives `AnimatedSprite2D` from Brain state events
+- [x] Enable with `ipc.enabled: true` in `config.yaml` (default `false`)
+- [ ] LightRAG personal knowledge base (deferred to Phase 6). See [ARCHITECTURE.md § 6](ARCHITECTURE.md#6-lightrag-optional-personal-knowledge-base-phase-5) for details.
 
-### Phase 6: The Hands
+### Phase 6: The Hands — Not Started
 
 - [ ] Vision tool (screenshot analysis)
 - [ ] Automation tools (app launch, file management)
+- [ ] Real avatar artwork (replacing Phase 5 placeholder sprites)
+- [ ] LLM token streaming to Godot frontend
+- [ ] Viseme extraction for lip-sync
+- [ ] LightRAG personal knowledge base (optional, UI toggle, off by default)
 - [ ] v1.0 release
 
 ---
 
 ## Architecture Overview
 
-Lumi uses a "Split-Brain" design: a Python backend handles all intelligence and audio processing; a Godot/Tauri frontend renders the avatar overlay. They communicate via ZeroMQ.
+Lumi uses a "Split-Brain" design: a Python backend handles all intelligence and audio processing; a Godot 4 frontend renders the avatar overlay. They communicate over raw TCP with 4-byte length-prefix framing.
 
 ```
-Python Backend  ◄──── ZeroMQ ────►  Godot Frontend
-(Ears, Brain,                       (Avatar, Animations,
- Scribe, Mouth)                      Overlay)
+Python Backend  ◄──── Raw TCP (length-prefix) ────►  Godot 4 Frontend
+(Ears, Brain,          JSON wire frames               (Avatar, Animations,
+ Scribe, Mouth)        127.0.0.1:5555                  Overlay)
 ```
+
+To connect the frontend, set `ipc.enabled: true` in `config.yaml`, start the Python Brain first, then open `ui/project.godot` in Godot 4 and press F5.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
@@ -119,12 +128,12 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | Wake Word | openWakeWord (custom ONNX model) |
 | VAD | Silero VAD v5 |
 | STT | faster-whisper (int8, CPU) |
-| LLM (planned) | llama-cpp-python, Phi-3.5 Mini or Gemma 2 2B |
+| LLM | llama-cpp-python, Phi-3.5 Mini or Gemma 2 2B |
 | Fine-tuning (planned) | QLoRA + llama.cpp GGUF export |
-| TTS (planned) | Kokoro-82M ONNX |
-| Knowledge retrieval (planned) | LightRAG (optional, Phase 5) with all-MiniLM-L6-v2 embeddings |
-| Frontend (planned) | Godot 4 |
-| IPC (planned) | ZeroMQ |
+| TTS | Kokoro-82M ONNX |
+| Knowledge retrieval (planned) | LightRAG (optional, Phase 6) with all-MiniLM-L6-v2 embeddings |
+| Frontend | Godot 4 (`ui/`; set `ipc.enabled: true` to activate) |
+| IPC | Raw TCP, 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; no pyzmq) |
 | Testing | pytest + pytest-cov (80% coverage gate) |
 | Logging | Python `logging` module (`src/core/logging_config.py`) |
 
@@ -132,4 +141,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 ## Pre-Alpha Notice
 
-This is a work-in-progress. The pipeline is event-driven as of Phase 3 foundations. The next milestone is LLM integration. See [TODO.md](TODO.md) for all identified issues and their planned solutions.
+This is a work-in-progress. The full audio-to-speech pipeline (Phases 1–4) and the Godot 4 frontend IPC transport (Phase 5) are complete. The next milestone is Phase 6: OS automation tools, real avatar artwork, and LLM token streaming to the overlay. See [TODO.md](TODO.md) for all identified issues and their planned solutions.

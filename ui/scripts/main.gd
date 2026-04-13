@@ -1,0 +1,46 @@
+extends Node
+
+@onready var client: LumiClient = $LumiClient
+@onready var avatar: AvatarController = $AvatarController
+
+
+func _ready() -> void:
+	client.message_received.connect(_on_message)
+	client.connected_to_brain.connect(_on_connected)
+	client.disconnected_from_brain.connect(_on_disconnected)
+
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):  # Escape key
+		client.send_interrupt()
+
+
+func _on_connected() -> void:
+	print("main.gd: connected to Brain")
+
+
+func _on_disconnected() -> void:
+	print("main.gd: disconnected from Brain")
+	avatar.on_state_change("idle")
+
+
+func _on_message(event_name: String, payload: Dictionary) -> void:
+	match event_name:
+		"state_change":
+			if payload.has("state"):
+				avatar.on_state_change(payload["state"])
+			else:
+				push_warning("main.gd: state_change missing 'state' key")
+		"tts_viseme":
+			if payload.has("viseme") and payload.has("duration_ms"):
+				avatar.on_viseme(payload["viseme"], payload["duration_ms"])
+			else:
+				push_warning("main.gd: tts_viseme missing required keys")
+		"tts_stop":
+			avatar.on_tts_stop()
+		"transcript":
+			print("Transcript: %s" % payload.get("text", ""))
+		"error":
+			push_warning("Brain error [%s]: %s" % [payload.get("code", "?"), payload.get("message", "?")])
+		_:
+			push_warning("main.gd: unhandled event '%s'" % event_name)
