@@ -111,6 +111,15 @@ class ZMQServer:
         logger.info("ZMQServer starting transport.")
         self._transport.start()
 
+    @property
+    def bound_port(self) -> int | None:
+        """Return the actual port the transport is bound to, or None if not started.
+
+        Useful when IPCConfig.port is 0 (OS-assigned): start() the server,
+        then read bound_port to discover the assigned port.
+        """
+        return self._transport.bound_port
+
     def stop(self) -> None:
         """Stop the transport and unregister the state observer.
 
@@ -119,15 +128,7 @@ class ZMQServer:
         logger.info("ZMQServer stopping transport.")
         self._transport.stop()
 
-        # StateMachine.unregister_observer may not exist in all versions of the
-        # codebase; check before calling to avoid AttributeError at shutdown.
-        if hasattr(self._state_machine, "unregister_observer"):
-            self._state_machine.unregister_observer(self.on_state_change)  # type: ignore[attr-defined]
-        else:
-            logger.debug(
-                "StateMachine does not implement unregister_observer; "
-                "skipping observer removal."
-            )
+        self._state_machine.unregister_observer(self.on_state_change)
 
     # ------------------------------------------------------------------
     # Outbound handlers (Brain → Body)

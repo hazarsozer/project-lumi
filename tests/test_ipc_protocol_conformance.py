@@ -31,7 +31,6 @@ import queue
 import socket
 import struct
 import time
-import threading
 from contextlib import contextmanager
 from typing import Any, Generator
 
@@ -210,14 +209,6 @@ class FakeGodotClient:
 
 
 @pytest.fixture()
-def free_port() -> int:
-    """Ask the OS for an available TCP port on 127.0.0.1."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture()
 def event_queue() -> queue.Queue[Any]:
     """A fresh event queue for each test."""
     return queue.Queue()
@@ -231,16 +222,18 @@ def state_machine() -> StateMachine:
 
 @pytest.fixture()
 def ipc_stack(
-    free_port: int,
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
 ) -> Generator[tuple[ZMQServer, int], None, None]:
-    """Start a real IPCTransport + ZMQServer on a free port.
+    """Start a real IPCTransport + ZMQServer on an OS-assigned port.
 
-    Yields ``(zmq_server, port)``.  Tears down both in a ``finally`` block
+    Uses port=0 so the OS assigns a free port atomically during bind(),
+    eliminating the TOCTOU race of the probe-then-bind pattern.
+
+    Yields ``(zmq_server, bound_port)``.  Tears down in a ``finally`` block
     so sockets are always closed even when the test body raises.
     """
-    config = IPCConfig(address="tcp://127.0.0.1", port=free_port)
+    config = IPCConfig(address="tcp://127.0.0.1", port=0)
     server = ZMQServer(
         config=config,
         event_queue=event_queue,
@@ -250,7 +243,9 @@ def ipc_stack(
         server.start()
         # Let the accept loop bind and start listening before tests connect.
         time.sleep(0.05)
-        yield server, free_port
+        port = server.bound_port
+        assert port is not None, "ZMQServer.bound_port is None after start()"
+        yield server, port
     finally:
         server.stop()
 

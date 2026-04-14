@@ -105,6 +105,11 @@ class Orchestrator:
         self._current_utterance_id: str | None = None
 
         # Register built-in handlers.
+        # NOTE: TranscriptReadyEvent and SpeechCompletedEvent each receive a
+        # second handler below (on_transcript / on_tts_stop) when a ZMQServer
+        # is present.  Both registrations are intentional: the internal handler
+        # runs first (state transitions), then the ZMQ forwarder sends the event
+        # to Godot.  This ordering is guaranteed by registration order in _dispatch.
         self.register_handler(ShutdownEvent, self._handle_shutdown)
         self.register_handler(InterruptEvent, self._handle_interrupt)
         self.register_handler(TranscriptReadyEvent, self._handle_transcript)
@@ -283,6 +288,13 @@ class Orchestrator:
         Mirrors _handle_transcript but the text arrives pre-formed from the
         Godot frontend — no STT step required.
 
+        State guard: accepts events from IDLE or LISTENING only.  Events
+        arriving in PROCESSING or SPEAKING are dropped; the caller (Godot)
+        should wait for state_change→idle before sending new text.  When the
+        machine is IDLE, this handler performs the IDLE→LISTENING→PROCESSING
+        double-step because the wake-word pipeline that normally drives that
+        transition is not involved in the text-input path.
+
         Fast-path: try ReflexRouter first (regex, no model needed).
         Slow-path: dispatch ReasoningRouter in a daemon thread so the
         event loop remains unblocked during inference.
@@ -290,6 +302,19 @@ class Orchestrator:
         Args:
             event: The user-text event containing text from the frontend.
         """
+        current = self._state_machine.current_state
+        if current not in (LumiState.IDLE, LumiState.LISTENING):
+            logger.debug(
+                "UserTextEvent received in state %s; dropping.", current.value
+            )
+            return
+
+        # Text input bypasses the wake-word pipeline.  If we are IDLE, step
+        # through LISTENING first so the LISTENING→PROCESSING transition below
+        # is always valid.
+        if current == LumiState.IDLE:
+            self._state_machine.transition_to(LumiState.LISTENING)
+
         self._state_machine.transition_to(LumiState.PROCESSING)
         self._llm_cancel_flag.clear()
 

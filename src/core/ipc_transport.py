@@ -64,6 +64,7 @@ class IPCTransport:
     def __init__(self, host: str, port: int) -> None:
         self._host = host
         self._port = port
+        self._bound_port: int | None = None
 
         self._shutdown: threading.Event = threading.Event()
         self._send_lock: threading.Lock = threading.Lock()
@@ -99,9 +100,10 @@ class IPCTransport:
         server_sock.listen(1)
         server_sock.setblocking(False)
         self._server_sock = server_sock
+        self._bound_port = server_sock.getsockname()[1]
 
         logger.info(
-            "IPCTransport listening on %s:%d", self._host, self._port
+            "IPCTransport listening on %s:%d", self._host, self._bound_port
         )
 
         self._accept_thread = threading.Thread(
@@ -194,6 +196,16 @@ class IPCTransport:
         """Return True if a client socket is currently active."""
         with self._client_lock:
             return self._client_sock is not None
+
+    @property
+    def bound_port(self) -> int | None:
+        """Return the actual port the server is bound to, or None if not started.
+
+        Useful when the transport was started with port=0 (OS-assigned port):
+        pass port=0 to avoid a TOCTOU race between probing for a free port and
+        binding, then read the assigned port via this property.
+        """
+        return self._bound_port
 
     # ------------------------------------------------------------------
     # Private threads

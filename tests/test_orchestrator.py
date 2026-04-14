@@ -478,7 +478,8 @@ def test_user_text_routes_to_llm() -> None:
     with patch.object(
         orch._reflex_router, "route", return_value="Hi from reflex!"
     ):
-        orch.state_machine.transition_to(LumiState.LISTENING)
+        # Post from IDLE (the production case: Godot sends text while idle).
+        # _handle_user_text must step through IDLE→LISTENING→PROCESSING itself.
         orch.post_event(UserTextEvent(text="hello from body"))
         orch.run()
 

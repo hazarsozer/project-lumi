@@ -62,19 +62,16 @@ def _recv_exactly(sock: socket.socket, n: int) -> bytes:
 
 
 @pytest.fixture()
-def free_port() -> int:
-    """Ask the OS for an available TCP port on 127.0.0.1."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+def transport() -> Generator[IPCTransport, None, None]:
+    """Create, start, and (in teardown) stop an IPCTransport on an OS-assigned port.
 
-
-@pytest.fixture()
-def transport(free_port: int) -> Generator[IPCTransport, None, None]:
-    """Create, start, and (in teardown) stop an IPCTransport on ``free_port``."""
-    t = IPCTransport("127.0.0.1", free_port)
+    Passes port=0 so the OS binds to any free port atomically, eliminating the
+    TOCTOU race that existed when we probed for a free port and then rebound to it.
+    Read the actual port via ``transport.bound_port`` after start().
+    """
+    t = IPCTransport("127.0.0.1", 0)
     t.start()
-    # Brief wait for the accept loop to bind and start listening.
+    # Brief wait for the accept loop to start listening.
     time.sleep(0.05)
     try:
         yield t
@@ -95,10 +92,10 @@ def _connect(port: int) -> socket.socket:
 
 
 @pytest.mark.integration
-def test_send_receive_roundtrip(transport: IPCTransport, free_port: int) -> None:
+def test_send_receive_roundtrip(transport: IPCTransport) -> None:
     """Server sends a message; raw client reads length prefix + payload."""
     payload = b'{"event": "state_change", "payload": {"state": "idle"}}'
-    client = _connect(free_port)
+    client = _connect(transport.bound_port)
     try:
         # Give _accept_loop time to accept the connection and set _client_sock.
         time.sleep(0.05)
@@ -113,12 +110,12 @@ def test_send_receive_roundtrip(transport: IPCTransport, free_port: int) -> None
 
 
 @pytest.mark.integration
-def test_receive_callback_fires(transport: IPCTransport, free_port: int) -> None:
+def test_receive_callback_fires(transport: IPCTransport) -> None:
     """Raw client sends a length-prefixed frame; on_message callback fires."""
     received_q: queue.Queue[bytes] = queue.Queue()
     transport.set_on_message(received_q.put)
 
-    client = _connect(free_port)
+    client = _connect(transport.bound_port)
     try:
         time.sleep(0.05)  # Wait for accept
 
@@ -133,7 +130,7 @@ def test_receive_callback_fires(transport: IPCTransport, free_port: int) -> None
 
 
 @pytest.mark.integration
-def test_partial_read_handling(transport: IPCTransport, free_port: int) -> None:
+def test_partial_read_handling(transport: IPCTransport) -> None:
     """Server reassembles a 100-byte payload sent one byte at a time."""
     received_q: queue.Queue[bytes] = queue.Queue()
     transport.set_on_message(received_q.put)
@@ -141,7 +138,7 @@ def test_partial_read_handling(transport: IPCTransport, free_port: int) -> None:
     payload = b"x" * 100
     frame = _encode_frame(payload)
 
-    client = _connect(free_port)
+    client = _connect(transport.bound_port)
     try:
         time.sleep(0.05)  # Wait for accept
 
@@ -159,13 +156,13 @@ def test_partial_read_handling(transport: IPCTransport, free_port: int) -> None:
 
 
 @pytest.mark.integration
-def test_client_disconnect_reconnect(transport: IPCTransport, free_port: int) -> None:
+def test_client_disconnect_reconnect(transport: IPCTransport) -> None:
     """First client disconnects; second client can send and receive."""
     received_q: queue.Queue[bytes] = queue.Queue()
     transport.set_on_message(received_q.put)
 
     # First client connects then disconnects.
-    first = _connect(free_port)
+    first = _connect(transport.bound_port)
     time.sleep(0.05)
     first.close()
 
@@ -173,7 +170,7 @@ def test_client_disconnect_reconnect(transport: IPCTransport, free_port: int) ->
     time.sleep(0.1)
 
     # Second client connects.
-    second = _connect(free_port)
+    second = _connect(transport.bound_port)
     try:
         time.sleep(0.05)  # Wait for accept
 
@@ -192,9 +189,9 @@ def test_client_disconnect_reconnect(transport: IPCTransport, free_port: int) ->
 
 
 @pytest.mark.integration
-def test_stop_joins_threads(free_port: int) -> None:
+def test_stop_joins_threads() -> None:
     """After stop(), both internal threads are no longer alive."""
-    t = IPCTransport("127.0.0.1", free_port)
+    t = IPCTransport("127.0.0.1", 0)
     t.start()
     time.sleep(0.05)
 
@@ -211,9 +208,9 @@ def test_stop_joins_threads(free_port: int) -> None:
 
 
 @pytest.mark.integration
-def test_send_without_client_does_not_raise(free_port: int) -> None:
+def test_send_without_client_does_not_raise() -> None:
     """send() before any client has connected must not raise."""
-    t = IPCTransport("127.0.0.1", free_port)
+    t = IPCTransport("127.0.0.1", 0)
     t.start()
     time.sleep(0.05)
     try:
@@ -224,14 +221,14 @@ def test_send_without_client_does_not_raise(free_port: int) -> None:
 
 
 @pytest.mark.integration
-def test_large_message(transport: IPCTransport, free_port: int) -> None:
+def test_large_message(transport: IPCTransport) -> None:
     """1 MB payload survives a round-trip with byte-exact integrity."""
     received_q: queue.Queue[bytes] = queue.Queue()
     transport.set_on_message(received_q.put)
 
     payload = b"A" * (1024 * 1024)  # 1 MiB
 
-    client = _connect(free_port)
+    client = _connect(transport.bound_port)
     try:
         time.sleep(0.05)  # Wait for accept
 
