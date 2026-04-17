@@ -195,8 +195,8 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq) |
 | Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
-| Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 363 tests) |
+| Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — hard/soft checks; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 534 tests) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)
@@ -507,8 +507,14 @@ Lumi/
 │   ├── test_rag_retriever.py   # RAGRetriever: timeout, cancel, char-budget (12 tests)
 │   ├── test_rag_intent.py      # route_rag_intent: patterns, edge cases (13 tests)
 │   ├── test_prompt_engine_rag.py  # rag_context injection (7 tests)
+│   ├── test_orchestrator_recovery.py # Orchestrator: memory.save() crash → IDLE recovery (5 tests)
 │   ├── test_reasoning_router_rag.py # use_rag flag, _maybe_retrieve (7 tests)
-│   └── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
+│   ├── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
+│   ├── test_vram_mutex_concurrent.py # _VRAM_LOCK mutual exclusion under concurrency (3 tests)
+│   └── integration/
+│       ├── __init__.py
+│       ├── fake_godot_client.py    # Test helper: real TCP client simulating Godot Body
+│       └── test_ipc_full_turn.py  # Full-turn IPC integration tests over real TCP (6 tests)
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                 # Thin bootstrap: logging → config → checks → orchestrator
@@ -533,7 +539,8 @@ Lumi/
 │   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling,
 │   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring,
 │   │   │                       #   ZMQServer injection, _handle_user_text handler
-│   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation
+│   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation;
+│   │   │                       #   _check_llm_package(), _check_tts_package(), _check_rag_packages()
 │   │   ├── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
 │   │   │                       #   StateMachine, InvalidTransitionError, unregister_observer()
 │   │   └── zmq_server.py       # ZMQServer: event translation bridge over IPCTransport;
@@ -544,7 +551,7 @@ Lumi/
 │       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
 │       │                       #   ConversationMemory, ModelLoader, PromptEngine
 │       ├── memory.py           # JSON-persisted conversation history (ConversationMemory)
-│       ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama)
+│       ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama); module-level _VRAM_LOCK shared with ScreenshotTool
 │       ├── prompt_engine.py    # ChatML prompt assembly + token-budget truncation
 │       ├── reasoning_router.py # Token-by-token LLM inference with cancel flag; use_rag flag;
 │       │                       #   posts RAGRetrievalEvent after retrieval
@@ -682,7 +689,7 @@ scripts/
 - [x] Viseme extraction — `src/audio/viseme_map.py` (8 groups); `VisemeEvent` posted from `mouth.py`
 - [x] Orchestrator two-pass tool-call loop + `utterance_id` threading
 - [x] Godot: `text_bubble.gd`/`.tscn` for streaming display; per-viseme-group mouth animations
-- [x] 363 tests passing, 4 skipped; `vision.py` at 86% coverage
+- [x] 534 tests passing, 4 skipped; `vision.py` at 86% coverage
 - [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
 - [ ] LightRAG Option A (deferred to Phase 7)
 - [ ] v1.0 release
@@ -708,7 +715,7 @@ scripts/
 - [x] `scripts/ingest_docs.py` — CLI to chunk, embed, and store documents
 - [x] `scripts/measure_rag_latency.py` — end-to-end latency benchmark (gate: p95 < 2.0 s)
 - [x] Base latency gate: p95 = 0.431 s (threshold 1.7 s) — PASS
-- [x] 527 tests passing, 4 skipped
+- [x] 534 tests passing, 4 skipped
 - [x] RAG disabled by default (`config.rag.enabled: false`)
 - [ ] Godot citation panel UI (deferred — Wave 4 Godot)
 - [ ] Real avatar artwork (placeholder colored-circle sprites still in use)

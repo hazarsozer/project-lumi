@@ -54,14 +54,8 @@
 * **Context:** The audio pipeline currently calls the wake callback synchronously, blocking the main stream for up to 13 seconds. Phase 3 (LLM) and 4 (TTS) will increase this to 38 seconds of "deafness".
 * **Resolution:** `ears.py` refactored — `start(event_queue)` replaces the synchronous callback. `WakeDetectedEvent` is posted to the queue. `src/core/events.py` defines all 9 event types. `Orchestrator._handle_interrupt()` sets an LLM cancel flag, drains pending events by type name, and transitions back to `IDLE`.
 
-## 12. `play_ready_sound()` Blocks the Audio Thread — OPEN
-* **Context:** Generating the startup sound utilizes a synchronous `sd.wait()` call, blocking the pipeline for 200ms.
-* **Why it matters:** It introduces noticeable latency when trying to execute rapid commands.
-* **Current state:** `src/utils.py` still uses blocking `sd.play()` + `sd.wait()`. The non-blocking queue refactor was not implemented in Phase 3 foundations.
-* **Step-by-step Actions:**
-  1. **Create Output Queue:** Create a dedicated audio output thread with its own playback queue.
-  2. **Post sound events:** Refactor `play_ready_sound()` to accept an `output_queue: queue.Queue` and post a playback event instead of blocking.
-  3. **Scale for Phase 4:** Expand this thread to act as the eventual handler for TTS streaming.
+## ~~12. `play_ready_sound()` Blocks the Audio Thread~~ — DONE
+* **Resolution:** `src/utils.py` `play_ready_sound(speaker)` enqueues a 0.2s 880 Hz sine-wave ping onto the `SpeakerThread` via `speaker.enqueue()` — fully non-blocking. `sd.play()`/`sd.wait()` removed. Verified by 7 unit tests in `tests/test_utils.py`.
 
 ## ~~13. No VRAM Resource Manager~~ — DONE
 * **Context:** The core idea of offloading LLMs to system RAM to keep VRAM free for gaming is completely unhandled right now.
@@ -111,7 +105,7 @@
 
 ## ~~21. Phase 6: The Hands (OS Control)~~ — DONE
 
-* **What was done (363 tests, 4 skipped, 0 failures):**
+* **What was done (534 tests, 4 skipped, 0 failures):**
   - `src/tools/` package — `Tool` Protocol, `ToolRegistry`, `ToolExecutor` (allowlist + `threading.Event` timeout)
   - OS tools: `AppLaunchTool` (allowlist + `shutil.which`), `ClipboardTool` (xclip), `FileInfoTool` (`Path.parts` traversal guard), `WindowListTool` (wmctrl)
   - `src/tools/vision.py` — `ScreenshotTool` with grim→scrot→Pillow fallback, moondream2 GGUF description, 30s idle unload, VRAM mutex with LLM; 86% coverage
@@ -157,7 +151,7 @@
 
 ## ~~22. Phase 7: RAG Personal Knowledge Base~~ — DONE
 
-* **What was built (527 tests, 4 skipped, 0 failures):**
+* **What was built (534 tests, 4 skipped, 0 failures):**
   - `src/rag/` package — `DocumentStore` (SQLite FTS5 + sqlite-vec kNN, WAL mode),
     `Chunker` (sliding-window), `Embedder` (all-MiniLM-L6-v2, 384-dim CPU),
     `Loader` (.txt/.md/.pdf/.html), `reciprocal_rank_fusion()` (RRF k=60),
@@ -201,3 +195,22 @@
   - **Total: ~2,280 of 4,096**
 * **Go/No-Go gate:** If end-to-end latency after Phase 4 exceeds 2 seconds, defer LightRAG until base pipeline optimized (adding 150–600ms retrieval would push past 3-second voice UI threshold).
 * **Reference:** See `ARCHITECTURE.md` Section 6 for full analysis: mitigations (latency masking, embedding lifecycle, VRAM budget, context window pressure, prompt injection risk, thread safety), integration point (no new events, inside ReasoningRouter), architectural fit (orthogonal to LoRA with retraining caveat).
+
+## 23. Godot Citation Panel UI — OPEN
+
+* **Context:** Phase 7 RAG retrieval returns `Citation` objects (document name, chunk ID, score) that are currently not surfaced in the Godot frontend.
+* **Items:**
+  - Design and implement a `citation_panel.gd` / `citation_panel.tscn` in `ui/` — should display source document name and relevance score alongside the LLM response.
+  - Wire `rag_retrieval` wire event (already sent by `ZMQServer.on_rag_retrieval()`) to populate the panel in `main.gd`.
+  - Add a "hide citations" toggle so the panel can be dismissed.
+  - Update `ui/TESTING.md` manual checklist with citation panel test cases.
+* **Blocker:** None — `rag_retrieval` wire event is already defined and sent. Godot scene work only.
+
+## 24. Real Avatar Artwork — OPEN
+
+* **Context:** The Godot frontend currently uses placeholder colored-circle sprites in `ui/assets/sprites/`. Phase 5 and 6 deferred real artwork.
+* **Items:**
+  - Commission or create idle/listening/processing/speaking sprite sheets for `AnimatedSprite2D`.
+  - Replace placeholder sprites in `ui/assets/sprites/` and update `avatar_controller.gd` animation frame counts if needed.
+  - Phase 6 target was Live2D (Standard edition) / 3D VRM (Pro edition) — decide on scope before starting.
+* **Blocker:** Design decision on art style and Live2D vs. static sprites must be made first.

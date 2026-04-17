@@ -1738,14 +1738,11 @@ dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "openwakeword" },
-    { name = "pypdf" },
     { name = "pyyaml" },
     { name = "pyzmq" },
     { name = "scipy" },
-    { name = "sentence-transformers" },
     { name = "sounddevice" },
     { name = "soundfile" },
-    { name = "sqlite-vec" },
     { name = "webrtcvad" },
 ]
 
@@ -1761,6 +1758,11 @@ dev = [
 ]
 llm = [
     { name = "llama-cpp-python" },
+]
+rag = [
+    { name = "pypdf" },
+    { name = "sentence-transformers" },
+    { name = "sqlite-vec" },
 ]
 training = [
     { name = "acoustics" },
@@ -1818,7 +1820,7 @@ requires-dist = [
     { name = "piper-phonemize-cross", marker = "extra == 'tts'", specifier = ">=1.2.1" },
     { name = "piper-tts", marker = "extra == 'tts'", specifier = ">=1.4.1" },
     { name = "pronouncing", marker = "extra == 'training'", specifier = ">=0.2.0" },
-    { name = "pypdf", specifier = ">=6.10.2" },
+    { name = "pypdf", marker = "extra == 'rag'", specifier = ">=6.10.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12" },
@@ -1827,13 +1829,13 @@ requires-dist = [
     { name = "pyzmq", specifier = ">=26.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "scipy", specifier = ">=1.17.0" },
-    { name = "sentence-transformers", specifier = ">=5.4.1" },
+    { name = "sentence-transformers", marker = "extra == 'rag'", specifier = ">=5.4.1" },
     { name = "setuptools", marker = "extra == 'training'", specifier = "<70" },
     { name = "sng4onnx", marker = "extra == 'training'", specifier = ">=2.0.0" },
     { name = "sounddevice", specifier = ">=0.5.5" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "speechbrain", marker = "extra == 'training'", specifier = ">=0.5.16" },
-    { name = "sqlite-vec", specifier = ">=0.1.9" },
+    { name = "sqlite-vec", marker = "extra == 'rag'", specifier = ">=0.1.9" },
     { name = "torch", marker = "extra == 'training'", specifier = ">=2.10.0" },
     { name = "torch-audiomentations", marker = "extra == 'training'", specifier = ">=0.12.0" },
     { name = "torchaudio", marker = "extra == 'training'", specifier = ">=2.10.0" },
@@ -1842,7 +1844,7 @@ requires-dist = [
     { name = "torchmetrics", marker = "extra == 'training'", specifier = ">=1.8.2" },
     { name = "webrtcvad", specifier = ">=2.0.10" },
 ]
-provides-extras = ["training", "tts", "llm", "dev"]
+provides-extras = ["training", "tts", "llm", "rag", "dev"]
 
 [[package]]
 name = "markdown"
