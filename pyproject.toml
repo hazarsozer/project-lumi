@@ -27,6 +27,9 @@ dependencies = [
     "pyzmq>=26.0.0",
     # YAML config file parsing — direct dep, currently transitively via faster-whisper
     "pyyaml>=6.0",
+    "sqlite-vec>=0.1.9",
+    "sentence-transformers>=5.4.1",
+    "pypdf>=6.10.2",
 ]
 
 [project.optional-dependencies]

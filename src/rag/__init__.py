@@ -6,5 +6,23 @@ Public surface area (grows as waves are implemented):
 """
 
 from src.core.config import RAGConfig
+from src.rag.errors import IngestError, RAGUnavailableError, RetrievalError
+from src.rag.store import (
+    ChunkRecord,
+    DocumentRecord,
+    DocumentStore,
+    SearchHit,
+    StoreStats,
+)
 
-__all__ = ["RAGConfig"]
+__all__ = [
+    "RAGConfig",
+    "RAGUnavailableError",
+    "IngestError",
+    "RetrievalError",
+    "DocumentStore",
+    "DocumentRecord",
+    "ChunkRecord",
+    "SearchHit",
+    "StoreStats",
+]
