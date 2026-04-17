@@ -358,9 +358,16 @@ class Orchestrator:
                     )
                     return
 
-                self._memory.save()
-                self.post_event(LLMResponseReadyEvent(text=response))
-                self._state_machine.transition_to(LumiState.SPEAKING)
+                try:
+                    self._memory.save()
+                    self.post_event(LLMResponseReadyEvent(text=response))
+                    self._state_machine.transition_to(LumiState.SPEAKING)
+                except Exception:
+                    logger.exception(
+                        "Post-inference save/dispatch failed for %r; returning to IDLE",
+                        event.text,
+                    )
+                    self._state_machine.transition_to(LumiState.IDLE)
 
         thread = threading.Thread(target=_run_inference, daemon=True)
         thread.start()
@@ -473,9 +480,16 @@ class Orchestrator:
                     )
                     return
 
-                self._memory.save()
-                self.post_event(LLMResponseReadyEvent(text=response))
-                self._state_machine.transition_to(LumiState.SPEAKING)
+                try:
+                    self._memory.save()
+                    self.post_event(LLMResponseReadyEvent(text=response))
+                    self._state_machine.transition_to(LumiState.SPEAKING)
+                except Exception:
+                    logger.exception(
+                        "Post-inference save/dispatch failed for %r; returning to IDLE",
+                        event.text,
+                    )
+                    self._state_machine.transition_to(LumiState.IDLE)
 
         thread = threading.Thread(target=_run_inference, daemon=True)
         thread.start()
