@@ -63,13 +63,9 @@
   2. **Post sound events:** Refactor `play_ready_sound()` to accept an `output_queue: queue.Queue` and post a playback event instead of blocking.
   3. **Scale for Phase 4:** Expand this thread to act as the eventual handler for TTS streaming.
 
-## 13. No VRAM Resource Manager
+## ~~13. No VRAM Resource Manager~~ — DONE
 * **Context:** The core idea of offloading LLMs to system RAM to keep VRAM free for gaming is completely unhandled right now.
-* **Why it matters:** Without VRAM management, Lumi will randomly spike VRAM usage, causing lag during heavy GPU tasks and violating the "Zero Cost" premise.
-* **Step-by-step Actions:**
-  1. **Create `ModelLoader`:** Build `src/llm/model_loader.py` wrapping `llama_cpp.Llama`.
-  2. **Implement Wake/Hibernate:** Add `wake()` to load to VRAM during the `PROCESSING` state, and `hibernate()` to garbage-collect and unload upon returning to `IDLE`.
-  3. **Add limits:** Incorporate config logic limiting the `n_gpu_layers` based on the autodetected VRAM budget.
+* **Resolution:** `src/llm/model_loader.py` wraps `llama_cpp.Llama` with `load()`/`unload()` lifecycle. A module-level `_VRAM_LOCK` is shared with `ScreenshotTool` so LLM and vision model loads are mutually exclusive — confirmed by `tests/test_vram_mutex_concurrent.py` (3 tests).
 
 ## ~~14. Naming Divergence Between Design and Code~~ — DONE
 * **Context:** Several components described in `ARCHITECTURE.md` (like `audio/listener.py`) don't map to the physical file tree (like `audio/ears.py`).

@@ -93,7 +93,14 @@ class ScreenshotTool:
         self._llm_loader = llm_loader
         self._vision_model: Any | None = None
         self._unload_timer: threading.Timer | None = None
-        self._model_lock: threading.Lock = threading.Lock()
+        # Share the VRAM lock with ModelLoader so LLM load and vision-model load
+        # are mutually exclusive.  Falls back to a private lock when no LLM loader
+        # is provided (e.g. during unit tests without a real LLM).
+        self._model_lock: threading.Lock = (
+            llm_loader._vram_lock
+            if llm_loader is not None and hasattr(llm_loader, "_vram_lock")
+            else threading.Lock()
+        )
 
     # ------------------------------------------------------------------
     # Public Tool interface
