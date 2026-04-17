@@ -43,6 +43,9 @@ from src.core.events import (
     InterruptEvent,
     LLMResponseReadyEvent,
     LLMTokenEvent,
+    RAGRetrievalEvent,
+    RAGSetEnabledEvent,
+    RAGStatusEvent,
     SpeechCompletedEvent,
     TranscriptReadyEvent,
     UserTextEvent,
@@ -202,6 +205,34 @@ class ZMQServer:
         }
         self._send("llm_token", payload)
 
+    def on_rag_retrieval(self, event: RAGRetrievalEvent) -> None:
+        """Forward a RAG retrieval result to the Body for display.
+
+        Args:
+            event: The retrieval event with query, hit count, latency, and paths.
+        """
+        payload: dict[str, Any] = {
+            "query": event.query,
+            "hit_count": event.hit_count,
+            "latency_ms": event.latency_ms,
+            "top_doc_paths": list(event.top_doc_paths),
+        }
+        self._send("rag_retrieval", payload)
+
+    def on_rag_status(self, event: RAGStatusEvent) -> None:
+        """Forward the RAG status response to the Body.
+
+        Args:
+            event: The status event describing current RAG state.
+        """
+        payload: dict[str, Any] = {
+            "enabled": event.enabled,
+            "doc_count": event.doc_count,
+            "chunk_count": event.chunk_count,
+            "last_indexed": event.last_indexed,
+        }
+        self._send("rag_status", payload)
+
     def on_error(self, code: str, message: str) -> None:
         """Forward an error notification to the Body.
 
@@ -235,6 +266,8 @@ class ZMQServer:
             self._handle_interrupt(msg.payload)
         elif event_name == "user_text":
             self._handle_user_text(msg.payload)
+        elif event_name == "rag_set_enabled":
+            self._handle_rag_set_enabled(msg.payload)
         else:
             logger.warning(
                 "ZMQServer: received unknown inbound event %r; dropping.", event_name
@@ -248,6 +281,26 @@ class ZMQServer:
         """
         self._event_queue.put(InterruptEvent(source="zmq"))
         logger.debug("ZMQServer: posted InterruptEvent(source='zmq') to queue.")
+
+    def _handle_rag_set_enabled(self, payload: dict[str, Any]) -> None:
+        """Post a RAGSetEnabledEvent to the orchestrator queue.
+
+        Args:
+            payload: Wire payload; must contain a boolean ``"enabled"`` key.
+        """
+        enabled = payload.get("enabled")
+        if not isinstance(enabled, bool):
+            logger.warning(
+                "ZMQServer: rag_set_enabled payload missing or invalid 'enabled' field; "
+                "dropping. payload=%r",
+                payload,
+            )
+            return
+
+        self._event_queue.put(RAGSetEnabledEvent(enabled=enabled))
+        logger.debug(
+            "ZMQServer: posted RAGSetEnabledEvent(enabled=%s) to queue.", enabled
+        )
 
     def _handle_user_text(self, payload: dict[str, Any]) -> None:
         """Validate and post a UserTextEvent to the orchestrator queue.

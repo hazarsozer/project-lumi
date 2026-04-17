@@ -26,6 +26,7 @@ from src.core.events import (
     InterruptEvent,
     LLMResponseReadyEvent,
     LLMTokenEvent,
+    RAGRetrievalEvent,
     RAGSetEnabledEvent,
     ShutdownEvent,
     SpeechCompletedEvent,
@@ -191,6 +192,7 @@ class Orchestrator:
             self.register_handler(TranscriptReadyEvent, self._zmq_server.on_transcript)
             self.register_handler(LLMResponseReadyEvent, self._zmq_server.on_tts_start)
             self.register_handler(LLMTokenEvent, self._zmq_server.on_llm_token)
+            self.register_handler(RAGRetrievalEvent, self._zmq_server.on_rag_retrieval)
 
     @property
     def state_machine(self) -> StateMachine:

@@ -8,7 +8,7 @@ import threading
 from typing import Any
 
 from src.core.config import LLMConfig
-from src.core.events import LLMTokenEvent
+from src.core.events import LLMTokenEvent, RAGRetrievalEvent
 from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
@@ -56,6 +56,16 @@ class ReasoningRouter:
                 logger.debug(
                     "RAG: %d hits, %d chars, %d ms",
                     result.hit_count, len(result.context), result.latency_ms,
+                )
+            if self._event_queue is not None and result.hit_count > 0:
+                top_paths = tuple(c.doc_path for c in result.citations)
+                self._event_queue.put(
+                    RAGRetrievalEvent(
+                        query=text,
+                        hit_count=result.hit_count,
+                        latency_ms=result.latency_ms,
+                        top_doc_paths=top_paths,
+                    )
                 )
             return result.context
         except Exception as exc:
