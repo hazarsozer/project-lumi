@@ -198,6 +198,53 @@ class VisionConfig:
 
 
 @dataclass(frozen=True)
+class RAGConfig:
+    """Configuration for the personal knowledge-base retriever (Phase 7)."""
+
+    # Whether the RAG feature is active.  Off by default — must be explicitly
+    # enabled by the user (via config.yaml or the Godot UI toggle).
+    enabled: bool = False
+
+    # Path to the SQLite database file used for document, chunk, and vector
+    # storage.  Tilde is expanded at use time.
+    db_path: str = "~/.lumi/rag.db"
+
+    # HuggingFace model ID for the sentence-embedding model.
+    # all-MiniLM-L6-v2 is 80 MB, ~20 ms CPU inference, 384-dimensional vectors.
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+    # Fixed chunk size in tokens used by the chunker at ingest time.
+    chunk_size: int = 512
+
+    # Overlap in tokens between consecutive chunks to preserve context across
+    # chunk boundaries.
+    chunk_overlap: int = 64
+
+    # Number of top candidates retrieved per retrieval mode (BM25 + vector)
+    # before Reciprocal Rank Fusion re-ranks and trims the final result list.
+    retrieval_top_k: int = 8
+
+    # Hard budget (in characters, not tokens) for the retrieved context block
+    # injected into the prompt.  2400 chars ≈ 600 tokens, fitting comfortably
+    # in the 4096-token context window alongside history and generation budget.
+    context_char_budget: int = 2400
+
+    # Minimum fused RRF score threshold [0.0–1.0].  Hits below this floor are
+    # discarded entirely — prevents low-quality chunks from being injected when
+    # no genuinely relevant document exists.
+    min_score: float = 0.15
+
+    # Directory the ingest CLI will scan for documents (.md, .txt, .pdf).
+    # Tilde is expanded at use time.
+    corpus_dir: str = "~/.lumi/docs"
+
+    # Hard ceiling (in seconds) for a single retrieval call.  If the call
+    # exceeds this budget the retriever returns an empty result and logs a
+    # warning, so the LLM still responds — without retrieved context.
+    retrieval_timeout_s: float = 0.4
+
+
+@dataclass(frozen=True)
 class LumiConfig:
     """Top-level configuration object passed to every subsystem at startup."""
 
@@ -212,6 +259,7 @@ class LumiConfig:
     ipc: IPCConfig = field(default_factory=IPCConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
+    rag: RAGConfig = field(default_factory=RAGConfig)
 
     # Root-logger level forwarded to setup_logging().
     log_level: str = "INFO"
@@ -381,6 +429,10 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         **_merge_section(VisionConfig(), raw.get("vision", {}))
     )
 
+    rag_cfg = RAGConfig(
+        **_merge_section(RAGConfig(), raw.get("rag", {}))
+    )
+
     # Top-level scalar overrides.
     top_defaults = LumiConfig()
     edition = raw["edition"] if "edition" in raw else detect_edition()
@@ -396,6 +448,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         ipc=ipc_cfg,
         tools=tools_cfg,
         vision=vision_cfg,
+        rag=rag_cfg,
         log_level=log_level,
         json_logs=json_logs,
     )

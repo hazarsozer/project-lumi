@@ -180,3 +180,37 @@ vision:
 
   # Downscale captured screenshots to this max resolution before inference.
   max_resolution: 1280
+
+# ─────────────────────────────────────────────────────────────────────────────
+# rag — personal knowledge-base retriever (Phase 7)
+# ─────────────────────────────────────────────────────────────────────────────
+rag:
+  # Whether the RAG retriever is active.  Off by default.
+  # Enable via this flag or via the Godot UI toggle at runtime.
+  enabled: false
+
+  # SQLite database file for document/chunk/vector storage.
+  db_path: ~/.lumi/rag.db
+
+  # Sentence-embedding model.  all-MiniLM-L6-v2 is 80 MB, CPU-only, ~20 ms/query.
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+
+  # Chunk size (tokens) and overlap used at ingest time.
+  chunk_size: 512
+  chunk_overlap: 64
+
+  # Number of top candidates per retrieval mode before RRF re-ranking.
+  retrieval_top_k: 8
+
+  # Hard budget in characters for the retrieved context block (~600 tokens).
+  context_char_budget: 2400
+
+  # Minimum fused RRF score; hits below this floor are discarded.
+  min_score: 0.15
+
+  # Directory the ingest CLI scans for documents (.md, .txt, .pdf).
+  corpus_dir: ~/.lumi/docs
+
+  # Hard ceiling in seconds for a single retrieval call.
+  # Exceeded → empty result, LLM still responds without context.
+  retrieval_timeout_s: 0.4
