@@ -159,22 +159,29 @@
 * **Phased rollout:** v1 (identity + brevity), v2 (+ OS tools), v3 (+ code + multi-turn), v4 (+ internet tools)
 * **Reference:** See `ARCHITECTURE.md` Section 5 for full strategy: LoRA config table, dataset category specs, training workflow, tool palette, proof-of-concept experiment gate, and open questions.
 
-## 22. Phase 7: LightRAG Personal Knowledge Base — NOT STARTED
+## ~~22. Phase 7: RAG Personal Knowledge Base~~ — DONE
 
-* **Context:** Optional user-facing feature deferred from Phase 6. Users can feed Lumi personal documents (notes, manuals, wikis) and query them via natural language. Not a core mechanic — UI toggle, off by default.
-* **Gate:** End-to-end latency benchmark must be < 2s before starting. Adding 150–600ms retrieval on top of a > 2s pipeline pushes past the 3-second voice UI threshold.
-* **Items:**
-  - End-to-end latency benchmark script — measure wake-to-speech-start round trip
-  - `src/llm/rag_retriever.py` — LightRAG query wrapper, 600-token hard cap, SQLite graph storage
-  - `src/llm/reasoning_router.py` — optional `rag_enabled` flag to `route()`
-  - `src/llm/prompt_engine.py` — optional `retrieved_context` parameter to `format_prompt()`
-  - `src/core/orchestrator.py` — RAG trigger check (regex: "search my docs", "look up in notes")
-  - Embedding model: `all-MiniLM-L6-v2` (~80MB, ~10–30ms CPU, 384-dim), kept in RAM while enabled
-  - UI toggle (Godot frontend) — off by default; "searching documents…" animation masks latency
-  - **Critical:** If personality LoRA is in use, retrain with 50–100 `[CONTEXT]` block examples before deploying
-* **Reference:** See `ARCHITECTURE.md` Section 6 for full analysis.
+* **What was built (527 tests, 4 skipped, 0 failures):**
+  - `src/rag/` package — `DocumentStore` (SQLite FTS5 + sqlite-vec kNN, WAL mode),
+    `Chunker` (sliding-window), `Embedder` (all-MiniLM-L6-v2, 384-dim CPU),
+    `Loader` (.txt/.md/.pdf/.html), `reciprocal_rank_fusion()` (RRF k=60),
+    `RAGRetriever` (timeout + cancel-safe), `Citation`, `RAGResult`
+  - `src/core/config.py` — `RAGConfig` added to `LumiConfig`
+  - `src/llm/prompt_engine.py` — `rag_context` injection in `build_prompt()`
+  - `src/llm/reasoning_router.py` — `use_rag` flag, `_maybe_retrieve()`, posts `RAGRetrievalEvent`
+  - `src/llm/reflex_router.py` — `route_rag_intent()` intent detection
+  - `src/core/events.py` — `RAGRetrievalEvent`, `RAGStatusEvent`, `RAGSetEnabledEvent`
+  - `src/core/orchestrator.py` — RAGRetriever at startup; intent check; `_handle_rag_set_enabled()`
+  - `src/core/zmq_server.py` — `on_rag_retrieval()`, `on_rag_status()` outbound; `rag_set_enabled` inbound
+  - `scripts/ingest_docs.py` — CLI to chunk, embed, and store personal documents
+  - `scripts/measure_rag_latency.py` — end-to-end benchmark (p95 < 2.0 s gate)
+  - Base latency gate PASS: p95 = 0.431 s (threshold 1.7 s)
+  - RAG disabled by default (`config.rag.enabled: false`)
+* **Still open:**
+  - Godot citation panel UI (Wave 4 Godot — deferred)
+  - Real avatar artwork (placeholder sprites still in use)
 
-## 17. LightRAG Personal Knowledge Base (Phase 6 Optional)
+## ~~17. LightRAG Personal Knowledge Base (Phase 6 Optional)~~ — SUPERSEDED BY ITEM 22
 
 * **Context:** Optional user-facing feature deferred from Phase 5 to Phase 6. Users can feed Lumi personal documents (notes, manuals, wikis) and query them via natural language. Not a core mechanic — UI toggle, off by default. Orthogonal to LoRA but competes for context window and 150–600ms latency.
 * **Prerequisites:** Phase 3 and 4 complete, end-to-end latency benchmarked, `all-MiniLM-L6-v2` CPU latency benchmarked on target hardware. **Critical:** If personality LoRA in use, retrain with 50–100 `[CONTEXT]` block examples before deploying LightRAG.

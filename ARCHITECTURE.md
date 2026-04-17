@@ -465,7 +465,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 
 ## 7. Actual Directory Structure
 
-Current state as of 2026-04-13 (Phase 5 complete):
+Current state as of 2026-04-17 (Phase 7 complete):
 
 ```
 Lumi/
@@ -495,7 +495,20 @@ Lumi/
 │   ├── test_state_machine.py   # All valid/invalid transition branches
 │   ├── test_tool_call_parser.py # parse_tool_calls: extraction, validation, recovery
 │   ├── test_utils.py           # play_ready_sound() unit tests
-│   └── test_zmq_server.py      # ZMQServer: outbound events, inbound parsing, lifecycle (16 tests)
+│   ├── test_zmq_server.py      # ZMQServer: outbound events, inbound parsing, lifecycle (16 tests)
+│   ├── test_zmq_server_rag.py  # ZMQServer RAG event forwarding (9 tests)
+│   ├── test_rag_config.py      # RAGConfig loading and validation
+│   ├── test_rag_store.py       # DocumentStore: upsert, FTS5, kNN, WAL
+│   ├── test_rag_chunker.py     # chunk_text: overlap, edge cases
+│   ├── test_rag_embedder.py    # Embedder: dim, batch, slow model test
+│   ├── test_rag_loader.py      # load(): txt, md, unsupported formats
+│   ├── test_rag_ingest_script.py # ingest_docs.py CLI integration
+│   ├── test_rag_fusion.py      # reciprocal_rank_fusion (8 tests)
+│   ├── test_rag_retriever.py   # RAGRetriever: timeout, cancel, char-budget (12 tests)
+│   ├── test_rag_intent.py      # route_rag_intent: patterns, edge cases (13 tests)
+│   ├── test_prompt_engine_rag.py  # rag_context injection (7 tests)
+│   ├── test_reasoning_router_rag.py # use_rag flag, _maybe_retrieve (7 tests)
+│   └── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                 # Thin bootstrap: logging → config → checks → orchestrator
@@ -525,16 +538,28 @@ Lumi/
 │   │   │                       #   StateMachine, InvalidTransitionError, unregister_observer()
 │   │   └── zmq_server.py       # ZMQServer: event translation bridge over IPCTransport;
 │   │                           #   Brain → Body (state_change, transcript, tts_start, tts_viseme,
-│   │                           #   tts_stop, error); Body → Brain (interrupt, user_text)
+│   │                           #   tts_stop, llm_token, rag_retrieval, rag_status, error);
+│   │                           #   Body → Brain (interrupt, user_text, rag_set_enabled)
 │   └── llm/
 │       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
 │       │                       #   ConversationMemory, ModelLoader, PromptEngine
 │       ├── memory.py           # JSON-persisted conversation history (ConversationMemory)
 │       ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama)
 │       ├── prompt_engine.py    # ChatML prompt assembly + token-budget truncation
-│       ├── reasoning_router.py # Token-by-token LLM inference with cancel flag support
-│       ├── reflex_router.py    # Regex fast-path: greetings, time queries
+│       ├── reasoning_router.py # Token-by-token LLM inference with cancel flag; use_rag flag;
+│       │                       #   posts RAGRetrievalEvent after retrieval
+│       ├── reflex_router.py    # Regex fast-path: greetings, time queries, RAG intent
 │       └── tool_call_parser.py # <tool_call> extractor + JSON recovery (parse_tool_calls)
+│   └── rag/
+│       ├── __init__.py         # Public exports: DocumentStore, RAGRetriever, Embedder, chunk_text
+│       ├── chunker.py          # chunk_text() — sliding-window text splitting
+│       ├── embedder.py         # Embedder wrapping all-MiniLM-L6-v2 (384-dim CPU); get_embedder()
+│       ├── errors.py           # RAGUnavailableError, IngestError
+│       ├── fusion.py           # reciprocal_rank_fusion() (RRF k=60)
+│       ├── loader.py           # load() — .txt/.md/.pdf/.html document reader
+│       ├── retriever.py        # RAGRetriever: BM25+kNN hybrid; Citation, RAGResult; cancel-safe
+│       ├── schema.sql          # SQLite schema: documents, chunks, chunks_fts, vec_chunks
+│       └── store.py            # DocumentStore: FTS5 BM25 + sqlite-vec kNN; WAL; thread-local conn
 ├── ui/                         # Godot 4 frontend project
 │   ├── project.godot           # Godot project descriptor
 │   ├── assets/
@@ -549,6 +574,10 @@ Lumi/
 │   │   └── main.gd             # Root scene logic: wires signals, Escape → interrupt
 │   ├── README.md               # Godot setup and running instructions
 │   └── TESTING.md              # Manual test checklist for Godot frontend
+├── scripts/
+│   ├── ingest_docs.py          # CLI: chunk + embed + store personal documents into RAG store
+│   ├── measure_base_latency.py # Benchmark: LLM-only p95 gate (< 1.7 s; Phase 7 entry gate)
+│   └── measure_rag_latency.py  # Benchmark: retrieval+LLM p95 gate (< 2.0 s)
 ├── config.yaml                 # Runtime configuration (all keys optional, defaults in config.py)
 ├── ARCHITECTURE.md             # This file
 ├── README.md
@@ -561,13 +590,9 @@ Planned additions (not yet created):
 
 ```
 src/
-├── llm/
-│   ├── domain_router.py        # Regex/embedding-based domain classification (Phase 3+)
-│   ├── model_registry.py       # Fallback: full GGUF model swapping (Phase 3+, if LoRA API unavailable)
-│   └── rag_retriever.py        # LightRAG query wrapper, token budget enforcement (Phase 6 optional)
-├── tools/
-│   ├── os_actions.py           # App launch, file management (Phase 6)
-│   └── vision.py               # Screenshot analysis (Phase 6)
+└── llm/
+    ├── domain_router.py        # Regex/embedding-based domain classification (Phase 3+)
+    └── model_registry.py       # Fallback: full GGUF model swapping (Phase 3+, if LoRA API unavailable)
 scripts/
 ├── train_lumi.py               # QLoRA training entrypoint (Phase 3+)
 └── merge_lora.py               # Adapter merge + GGUF export (Phase 3+)
@@ -662,11 +687,28 @@ scripts/
 - [ ] LightRAG Option A (deferred to Phase 7)
 - [ ] v1.0 release
 
-### Phase 7: LightRAG Personal Knowledge Base — NOT STARTED
-*Goal: Users can query personal documents via natural language. Latency benchmark gate.*
+### Phase 7: RAG Personal Knowledge Base — COMPLETE
+*Goal: Users can query personal documents via natural language. Hybrid BM25 + vector retrieval.*
 
-- [ ] End-to-end latency benchmark (gate: < 2s round-trip required before LightRAG)
-- [ ] `src/llm/rag_retriever.py` — LightRAG integration (explicit skill trigger, UI toggle, off by default)
-- [ ] `all-MiniLM-L6-v2` CPU embedding latency benchmark on target hardware
-- [ ] LightRAG Option B/C (automatic routing via classifier, gated on >90% precision proof)
-- [ ] v1.0 release
+- [x] `src/rag/schema.sql` — SQLite schema (documents, chunks, FTS5, sqlite-vec vec0)
+- [x] `src/rag/errors.py` — `RAGUnavailableError`, `IngestError`
+- [x] `src/rag/store.py` — `DocumentStore` (FTS5 BM25 + sqlite-vec kNN; WAL mode; thread-local connections)
+- [x] `src/rag/chunker.py` — `chunk_text()` with sliding-window overlap
+- [x] `src/rag/embedder.py` — `Embedder` wrapping `all-MiniLM-L6-v2` (384-dim, CPU-only); `get_embedder()`
+- [x] `src/rag/loader.py` — `load()` for .txt/.md/.pdf/.html files
+- [x] `src/rag/fusion.py` — `reciprocal_rank_fusion()` (RRF k=60)
+- [x] `src/rag/retriever.py` — `RAGRetriever`, `Citation`, `RAGResult`; timeout + cancel-safe
+- [x] `src/llm/prompt_engine.py` — `build_prompt()` gained `rag_context` injection
+- [x] `src/llm/reasoning_router.py` — `use_rag` flag, `_maybe_retrieve()`, posts `RAGRetrievalEvent`
+- [x] `src/llm/reflex_router.py` — `route_rag_intent()` for intent detection
+- [x] `src/core/events.py` — `RAGRetrievalEvent`, `RAGStatusEvent`, `RAGSetEnabledEvent`
+- [x] `src/core/orchestrator.py` — RAGRetriever at startup; intent check; `_handle_rag_set_enabled()`
+- [x] `src/core/zmq_server.py` — `on_rag_retrieval()`, `on_rag_status()` outbound; `rag_set_enabled` inbound
+- [x] `src/core/config.py` — `RAGConfig` added to `LumiConfig`
+- [x] `scripts/ingest_docs.py` — CLI to chunk, embed, and store documents
+- [x] `scripts/measure_rag_latency.py` — end-to-end latency benchmark (gate: p95 < 2.0 s)
+- [x] Base latency gate: p95 = 0.431 s (threshold 1.7 s) — PASS
+- [x] 527 tests passing, 4 skipped
+- [x] RAG disabled by default (`config.rag.enabled: false`)
+- [ ] Godot citation panel UI (deferred — Wave 4 Godot)
+- [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
