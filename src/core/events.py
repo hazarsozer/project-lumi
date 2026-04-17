@@ -165,3 +165,30 @@ class ZMQMessage:
     payload: dict[str, object]
     timestamp: float
     version: str = "1.0"
+
+
+@dataclass(frozen=True)
+class RAGRetrievalEvent:
+    """Fired after RAG retrieval completes (for ZMQ forwarding and logging)."""
+
+    query: str
+    hit_count: int
+    latency_ms: int
+    top_doc_paths: tuple[str, ...]  # up to retrieval_top_k paths, for display
+
+
+@dataclass(frozen=True)
+class RAGStatusEvent:
+    """Fired in response to a status request; describes RAG runtime state."""
+
+    enabled: bool
+    doc_count: int
+    chunk_count: int
+    last_indexed: str  # ISO-8601 timestamp or "" if never indexed
+
+
+@dataclass(frozen=True)
+class RAGSetEnabledEvent:
+    """Fired from ZMQ layer to toggle RAG on/off at runtime without restart."""
+
+    enabled: bool

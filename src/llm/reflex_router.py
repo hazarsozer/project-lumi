@@ -18,6 +18,12 @@ _GREETING_PATTERN = re.compile(
 _TIME_PATTERN = re.compile(
     r"\b(what\s+time|current\s+time|time\s+is\s+it)\b", re.IGNORECASE
 )
+_RAG_PATTERN = re.compile(
+    r"\b(search|look\s*up|find|check)\b.{0,40}"
+    r"\b(my\s+(docs?|notes?|files?|wiki|journal|documents?)"
+    r"|in\s+my\s+(docs?|notes?|files?|wiki|journal|documents?))\b",
+    re.IGNORECASE,
+)
 
 
 class ReflexRouter:
@@ -45,3 +51,12 @@ class ReflexRouter:
             return f"The current time is {now}."
 
         return None
+
+    def route_rag_intent(self, text: str) -> bool:
+        """Return True if *text* expresses an intent to search personal docs.
+
+        Boolean signal only — does not return a canned response.  The
+        Orchestrator uses the result to set ``use_rag=True`` on the reasoning
+        router so retrieval runs before LLM inference.
+        """
+        return bool(_RAG_PATTERN.search(text.strip()))

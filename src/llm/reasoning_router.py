@@ -13,6 +13,12 @@ from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
 
+# Optional RAG import — only resolved when a retriever is actually injected.
+# Using TYPE_CHECKING avoids a circular-import risk at module load time.
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.rag.retriever import RAGRetriever
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,18 +37,37 @@ class ReasoningRouter:
         memory: ConversationMemory,
         config: LLMConfig,
         event_queue: queue.Queue[Any] | None = None,
+        retriever: "RAGRetriever | None" = None,
     ) -> None:
         self._model_loader = model_loader
         self._prompt_engine = prompt_engine
         self._memory = memory
         self._config = config
         self._event_queue = event_queue
+        self._retriever = retriever
+
+    def _maybe_retrieve(self, text: str, cancel_flag: threading.Event) -> str:
+        """Run RAG retrieval and return the context string, or "" on miss/skip."""
+        if self._retriever is None:
+            return ""
+        try:
+            result = self._retriever.retrieve(text, cancel_flag)
+            if result.context:
+                logger.debug(
+                    "RAG: %d hits, %d chars, %d ms",
+                    result.hit_count, len(result.context), result.latency_ms,
+                )
+            return result.context
+        except Exception as exc:
+            logger.warning("RAG retrieval error (continuing without context): %s", exc)
+            return ""
 
     def generate(
         self,
         text: str,
         cancel_flag: threading.Event,
         utterance_id: str = "",
+        use_rag: bool = False,
     ) -> str:
         """Generate a response to *text* using the local LLM.
 
@@ -74,11 +99,13 @@ class ReasoningRouter:
                 "Model not loaded. Call ModelLoader.load() before generate()."
             )
 
+        rag_context = self._maybe_retrieve(text, cancel_flag) if use_rag else ""
+
         history = self._memory.get_history()
         truncated = self._prompt_engine.truncate_history(
             history, self._config.context_length // 2
         )
-        prompt = self._prompt_engine.build_prompt(text, truncated)
+        prompt = self._prompt_engine.build_prompt(text, truncated, rag_context=rag_context)
         model = self._model_loader.model
 
         collected: list[str] = []

@@ -26,6 +26,7 @@ from src.core.events import (
     InterruptEvent,
     LLMResponseReadyEvent,
     LLMTokenEvent,
+    RAGSetEnabledEvent,
     ShutdownEvent,
     SpeechCompletedEvent,
     TranscriptReadyEvent,
@@ -86,12 +87,27 @@ class Orchestrator:
             config.llm.memory_dir
         )
         self._memory.load()
+        # RAG subsystem — built only when enabled in config.
+        self._rag_runtime_enabled: bool = config.rag.enabled
+        self._rag_retriever = None
+        if config.rag.enabled:
+            try:
+                from src.rag.store import DocumentStore  # noqa: PLC0415
+                from src.rag.retriever import RAGRetriever  # noqa: PLC0415
+                _rag_store = DocumentStore(config.rag)
+                self._rag_retriever = RAGRetriever(_rag_store, config.rag)
+                logger.info("RAG subsystem initialised (db=%s)", config.rag.db_path)
+            except Exception:
+                logger.exception("RAG subsystem failed to initialise; disabling RAG")
+                self._rag_runtime_enabled = False
+
         self._reasoning_router: ReasoningRouter = ReasoningRouter(
             model_loader=self._model_loader,
             prompt_engine=self._prompt_engine,
             memory=self._memory,
             config=config.llm,
             event_queue=self._event_queue,
+            retriever=self._rag_retriever,
         )
 
         # Tool registry and executor — wired when tools are enabled.
@@ -143,6 +159,7 @@ class Orchestrator:
         self.register_handler(LLMResponseReadyEvent, self._handle_llm_response)
         self.register_handler(SpeechCompletedEvent, self._handle_speech_completed)
         self.register_handler(UserTextEvent, self._handle_user_text)
+        self.register_handler(RAGSetEnabledEvent, self._handle_rag_set_enabled)
 
         # ZMQServer wiring — optional; injected for testing or when IPC is
         # enabled.  If not injected but config.ipc.enabled is True, create it
@@ -276,12 +293,19 @@ class Orchestrator:
         # Generate utterance_id here so the ZMQ token handler can correlate events.
         utterance_id = str(uuid.uuid4())
 
+        # RAG intent check — only when RAG is runtime-enabled.
+        use_rag = (
+            self._rag_runtime_enabled
+            and self._reflex_router.route_rag_intent(event.text)
+        )
+
         # Reasoning slow-path — run in a daemon thread so the event loop
         # remains responsive to InterruptEvents during long inference.
         def _run_inference() -> None:
             try:
                 response = self._reasoning_router.generate(
-                    event.text, self._llm_cancel_flag, utterance_id=utterance_id
+                    event.text, self._llm_cancel_flag,
+                    utterance_id=utterance_id, use_rag=use_rag,
                 )
             except InterruptedError:
                 logger.info("LLM generation cancelled for %r", event.text)
@@ -389,12 +413,19 @@ class Orchestrator:
         # Generate utterance_id here so the ZMQ token handler can correlate events.
         utterance_id = str(uuid.uuid4())
 
+        # RAG intent check — only when RAG is runtime-enabled.
+        use_rag = (
+            self._rag_runtime_enabled
+            and self._reflex_router.route_rag_intent(event.text)
+        )
+
         # Reasoning slow-path — run in a daemon thread so the event loop
         # remains responsive to InterruptEvents during long inference.
         def _run_inference() -> None:
             try:
                 response = self._reasoning_router.generate(
-                    event.text, self._llm_cancel_flag, utterance_id=utterance_id
+                    event.text, self._llm_cancel_flag,
+                    utterance_id=utterance_id, use_rag=use_rag,
                 )
             except InterruptedError:
                 logger.info("LLM generation cancelled for %r", event.text)
@@ -512,6 +543,25 @@ class Orchestrator:
                 "SpeechCompletedEvent received in state %s, ignoring",
                 current.value,
             )
+
+    def _handle_rag_set_enabled(self, event: RAGSetEnabledEvent) -> None:
+        """Handle RAGSetEnabledEvent: toggle RAG retrieval at runtime.
+
+        Only effective when a RAGRetriever was successfully constructed at
+        startup (i.e. config.rag.enabled was True).  Silently ignored when
+        no retriever is available so the event is always safe to send.
+
+        Args:
+            event: The enable/disable event from the ZMQ layer.
+        """
+        if self._rag_retriever is None:
+            logger.warning(
+                "RAGSetEnabledEvent(%s) ignored — no RAG retriever available",
+                event.enabled,
+            )
+            return
+        self._rag_runtime_enabled = event.enabled
+        logger.info("RAG runtime enabled set to %s", event.enabled)
 
     def _handle_shutdown(self, event: ShutdownEvent) -> None:
         """Handle ShutdownEvent: stop the event loop.

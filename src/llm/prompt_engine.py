@@ -17,10 +17,18 @@ class PromptEngine:
         user_text: str,
         history: list[dict[str, str]],
         system_prompt: str | None = None,
+        rag_context: str = "",
     ) -> str:
-        """Assemble a ChatML prompt from system prompt, history, and user input."""
+        """Assemble a ChatML prompt from system prompt, history, and user input.
+
+        When *rag_context* is non-empty it is injected between the system
+        prompt and conversation history as a ``[Relevant notes]`` block so
+        the LLM can cite retrieved passages without confusing them with
+        hard facts stated by the system.
+        """
         sys = system_prompt if system_prompt is not None else DEFAULT_SYSTEM_PROMPT
-        parts: list[str] = [f"<|system|>\n{sys}<|end|>"]
+        sys_block = f"{sys}\n\n[Relevant notes]\n{rag_context}" if rag_context else sys
+        parts: list[str] = [f"<|system|>\n{sys_block}<|end|>"]
 
         for turn in history:
             role = turn["role"]
