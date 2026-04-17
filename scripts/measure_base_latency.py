@@ -30,6 +30,12 @@ import queue
 import logging
 from pathlib import Path
 
+# Ensure the project root is on sys.path regardless of how this script is
+# invoked (directly, via `uv run`, or from a different working directory).
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 logging.basicConfig(level=logging.WARNING)
 
 # ---------------------------------------------------------------------------
@@ -94,11 +100,11 @@ def _load_components(config_path: str):
         sys.exit(2)
 
     print(f"Loading model: {model_path} ...", flush=True)
-    loader = ModelLoader(cfg.llm)
-    loader.wake()
+    loader = ModelLoader()
+    loader.load(cfg.llm)
 
-    engine = PromptEngine(cfg.llm)
-    memory = ConversationMemory(cfg.llm)
+    engine = PromptEngine()
+    memory = ConversationMemory(cfg.llm.memory_dir)
     event_queue: queue.Queue = queue.Queue()
 
     router = ReasoningRouter(
