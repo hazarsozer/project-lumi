@@ -113,18 +113,25 @@
   - Total test count: **284 passing**.
 * **Deferred to Phase 6:** Real avatar artwork (placeholder colored-circle sprites used), LightRAG Option A, LLM token streaming to Godot, viseme extraction.
 
-## 21. Phase 6: The Hands (OS Control) — NOT STARTED
+## ~~21. Phase 6: The Hands (OS Control)~~ — DONE
 
-* **Goal:** Lumi can act on the desktop, stream tokens to the Godot overlay, and optionally query personal documents.
-* **Items:**
-  - Vision tool (`src/tools/vision.py`) — screenshot capture + analysis
-  - Automation tools (`src/tools/os_actions.py`) — app launch, file management, clipboard
-  - Real avatar artwork replacing Phase 5 placeholder sprites in `ui/assets/sprites/`
-  - LLM token streaming to Godot frontend (live text rendering as tokens arrive via `LLMTokenEvent`)
-  - Viseme extraction from Kokoro phoneme output (`VisemeEvent` fully wired for lip-sync)
-  - LightRAG Option A (`src/llm/rag_retriever.py`, explicit skill trigger, UI toggle, off by default)
-  - LightRAG Option B/C (automatic embedding classifier, gated on >90% precision proof)
-  - v1.0 release
+* **What was done (363 tests, 4 skipped, 0 failures):**
+  - `src/tools/` package — `Tool` Protocol, `ToolRegistry`, `ToolExecutor` (allowlist + `threading.Event` timeout)
+  - OS tools: `AppLaunchTool` (allowlist + `shutil.which`), `ClipboardTool` (xclip), `FileInfoTool` (`Path.parts` traversal guard), `WindowListTool` (wmctrl)
+  - `src/tools/vision.py` — `ScreenshotTool` with grim→scrot→Pillow fallback, moondream2 GGUF description, 30s idle unload, VRAM mutex with LLM; 86% coverage
+  - `src/audio/viseme_map.py` — 8 viseme groups, `map_phoneme()`, stress digit stripping; 100% coverage
+  - `src/audio/mouth.py` — `_post_visemes()` posts `VisemeEvent` per phoneme from Kokoro output
+  - `src/llm/reasoning_router.py` — `LLMTokenEvent` posted per token; `utterance_id` param
+  - `src/core/zmq_server.py` — `on_llm_token()` sends `llm_token` wire frame to Godot
+  - `src/core/orchestrator.py` — tool registry wired; two-pass inference loop; `utterance_id` UUID threaded
+  - `src/core/config.py` + `config.yaml` — `ToolsConfig` + `VisionConfig` added
+  - Godot: `text_bubble.gd`/`text_bubble.tscn` for streaming display; `llm_token`/`tts_start` routing in `main.gd`; 8 per-viseme-group mouth animations in `avatar_controller.gd`
+* **Still open:**
+  - Real avatar artwork (placeholder colored-circle sprites still in use)
+  - Kokoro phoneme tuple format `(phoneme_str, start_ms, duration_ms)` — assumed, needs local verification with real model
+  - moondream2 GGUF availability for llama-cpp-python — needs confirmation
+  - Godot `$TextBubble` node must be added in the editor to the main scene
+  - Pre-existing flaky test `test_ears_start_sets_listening_flag` (threading race in ears.py)
 
 ## 18. Phase 3 Wave 4: Coverage Gate + Code Review — OPEN
 
@@ -151,6 +158,21 @@
   - Versioning scheme: `lumi-phi35-v{N}-Q4_K_M.gguf` + specialist variants (`lumi-phi35-chat-v1`, `lumi-phi35-os-v1`)
 * **Phased rollout:** v1 (identity + brevity), v2 (+ OS tools), v3 (+ code + multi-turn), v4 (+ internet tools)
 * **Reference:** See `ARCHITECTURE.md` Section 5 for full strategy: LoRA config table, dataset category specs, training workflow, tool palette, proof-of-concept experiment gate, and open questions.
+
+## 22. Phase 7: LightRAG Personal Knowledge Base — NOT STARTED
+
+* **Context:** Optional user-facing feature deferred from Phase 6. Users can feed Lumi personal documents (notes, manuals, wikis) and query them via natural language. Not a core mechanic — UI toggle, off by default.
+* **Gate:** End-to-end latency benchmark must be < 2s before starting. Adding 150–600ms retrieval on top of a > 2s pipeline pushes past the 3-second voice UI threshold.
+* **Items:**
+  - End-to-end latency benchmark script — measure wake-to-speech-start round trip
+  - `src/llm/rag_retriever.py` — LightRAG query wrapper, 600-token hard cap, SQLite graph storage
+  - `src/llm/reasoning_router.py` — optional `rag_enabled` flag to `route()`
+  - `src/llm/prompt_engine.py` — optional `retrieved_context` parameter to `format_prompt()`
+  - `src/core/orchestrator.py` — RAG trigger check (regex: "search my docs", "look up in notes")
+  - Embedding model: `all-MiniLM-L6-v2` (~80MB, ~10–30ms CPU, 384-dim), kept in RAM while enabled
+  - UI toggle (Godot frontend) — off by default; "searching documents…" animation masks latency
+  - **Critical:** If personality LoRA is in use, retrain with 50–100 `[CONTEXT]` block examples before deploying
+* **Reference:** See `ARCHITECTURE.md` Section 6 for full analysis.
 
 ## 17. LightRAG Personal Knowledge Base (Phase 6 Optional)
 

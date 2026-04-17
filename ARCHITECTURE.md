@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 5 Wave 5 review (2026-04-14).
+> Last updated to reflect actual state as of Phase 6 complete (2026-04-17).
 
 ---
 
@@ -50,6 +50,7 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 | `tts_start` | Brain → Body | `{ "text": string, "duration_ms": int }` |
 | `tts_viseme` | Brain → Body | `{ "viseme": string, "duration_ms": int }` |
 | `tts_stop` | Brain → Body | `{}` |
+| `llm_token` | Brain → Body | `{ "token": string, "utterance_id": string }` |
 | `error` | Brain → Body | `{ "code": string, "message": string }` |
 | `interrupt` | Body → Brain | `{}` |
 | `user_text` | Body → Brain | `{ "text": string }` |
@@ -195,8 +196,25 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory exists, 284 tests) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 363 tests) |
 | CI | `.github/workflows/ci.yml` |
+
+### OS Tools — The Hands (Phase 6)
+| Component | Technology | Notes |
+|---|---|---|
+| Tool Protocol | `src/tools/base.py` — `Tool` `@runtime_checkable` Protocol + frozen `ToolResult` dataclass | Standard interface for all tools |
+| Tool Registry | `src/tools/registry.py` — `register()`/`get()`/`list_tools()` | Warns on name collision |
+| Tool Executor | `src/tools/executor.py` — allowlist gate + `threading.Event` timeout + cancel flag | Single entry point for all tool invocations |
+| AppLaunchTool | `src/tools/os_actions.py` | `shutil.which` validation + internal allowlist + `subprocess.Popen` |
+| ClipboardTool | `src/tools/os_actions.py` | `xclip` read/write; graceful fail if absent |
+| FileInfoTool | `src/tools/os_actions.py` | `Path.parts` traversal guard; stat metadata only |
+| WindowListTool | `src/tools/os_actions.py` | `wmctrl -l` parse; graceful fail if absent |
+| ScreenshotTool | `src/tools/vision.py` | grim → scrot → Pillow fallback; moondream2 GGUF description; 30s idle unload; VRAM mutex with LLM |
+| Viseme extraction | `src/audio/viseme_map.py` + `src/audio/mouth.py` | 8 viseme groups; `map_phoneme()` strips stress digits; `VisemeEvent` posted per phoneme |
+| Token streaming | `src/llm/reasoning_router.py` + `src/core/zmq_server.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Godot |
+| Config | `ToolsConfig` + `VisionConfig` in `src/core/config.py`; `tools:` + `vision:` keys in `config.yaml` | |
+
+**Tool-call flow (two-pass):** `_run_inference` → LLM generates `<tool_call>` block → `ToolExecutor.execute()` → result injected into conversation → second LLM pass → `LLMResponseReadyEvent`.
 
 ---
 
@@ -611,7 +629,7 @@ scripts/
 - [x] TTS engine (Kokoro-82M ONNX) — `src/audio/mouth.py`, KokoroTTS with sentence streaming
 - [x] Non-blocking audio playback (SpeakerThread, `src/audio/speaker.py`)
 - [x] TTS config keys (`TTSConfig` in `config.py`, `tts:` section in `config.yaml`, startup check)
-- [ ] Viseme extraction for avatar lip-sync (VisemeEvent defined; phoneme data not yet extracted from Kokoro output — Phase 6)
+- [x] Viseme extraction for avatar lip-sync (`viseme_map.py` + `mouth.py`; `VisemeEvent` fully wired — Phase 6)
 
 ### Phase 5: The Body (Visuals) — COMPLETE
 *Goal: Transparent, interactive desktop overlay + IPC transport to Python Brain.*
@@ -629,14 +647,26 @@ scripts/
 - [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default — deferred to Phase 6)
 - [ ] Real avatar artwork (placeholder colored-circle sprites used — deferred to Phase 6)
 
-### Phase 6: The Hands (OS Control) — NOT STARTED
-*Goal: Lumi can act on the desktop. Real avatar art. Advanced RAG routing.*
+### Phase 6: The Hands (OS Control) — COMPLETE
+*Goal: Lumi can act on the desktop. Token streaming. Viseme lip-sync. Advanced RAG routing.*
 
-- [ ] Vision tool (screenshot capture + analysis)
-- [ ] Automation tools (app launch, file management, clipboard)
-- [ ] Real avatar artwork replacing Phase 5 placeholder sprites
-- [ ] LLM token streaming to Godot frontend (live text rendering as tokens arrive)
-- [ ] Viseme extraction from Kokoro phoneme output (VisemeEvent fully wired for lip-sync)
-- [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default)
-- [ ] LightRAG Option B/C (automatic routing via classifier, gated on proof of concept)
+- [x] `src/tools/` package — `Tool` Protocol, `ToolRegistry`, `ToolExecutor` (allowlist + timeout)
+- [x] OS tools: `AppLaunchTool`, `ClipboardTool`, `FileInfoTool`, `WindowListTool` (`src/tools/os_actions.py`)
+- [x] Vision tool — `ScreenshotTool` with grim→scrot→Pillow fallback + moondream2 GGUF description (`src/tools/vision.py`)
+- [x] LLM token streaming — `LLMTokenEvent` per token; `llm_token` wire frame to Godot
+- [x] Viseme extraction — `src/audio/viseme_map.py` (8 groups); `VisemeEvent` posted from `mouth.py`
+- [x] Orchestrator two-pass tool-call loop + `utterance_id` threading
+- [x] Godot: `text_bubble.gd`/`.tscn` for streaming display; per-viseme-group mouth animations
+- [x] 363 tests passing, 4 skipped; `vision.py` at 86% coverage
+- [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
+- [ ] LightRAG Option A (deferred to Phase 7)
+- [ ] v1.0 release
+
+### Phase 7: LightRAG Personal Knowledge Base — NOT STARTED
+*Goal: Users can query personal documents via natural language. Latency benchmark gate.*
+
+- [ ] End-to-end latency benchmark (gate: < 2s round-trip required before LightRAG)
+- [ ] `src/llm/rag_retriever.py` — LightRAG integration (explicit skill trigger, UI toggle, off by default)
+- [ ] `all-MiniLM-L6-v2` CPU embedding latency benchmark on target hardware
+- [ ] LightRAG Option B/C (automatic routing via classifier, gated on >90% precision proof)
 - [ ] v1.0 release
