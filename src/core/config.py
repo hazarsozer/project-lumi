@@ -159,6 +159,45 @@ class IPCConfig:
 
 
 @dataclass(frozen=True)
+class ToolsConfig:
+    """Configuration for the OS action tool framework (Phase 6)."""
+
+    # Whether OS tools are enabled at all.
+    enabled: bool = True
+
+    # Allowlist of tool names the executor may run.  Any tool name not in
+    # this tuple is rejected before execution — provides a secondary defence
+    # against prompt-injection attacks asking Lumi to invoke arbitrary tools.
+    allowed_tools: tuple[str, ...] = (
+        "launch_app",
+        "clipboard",
+        "file_info",
+        "window_list",
+    )
+
+    # Per-tool execution timeout in seconds.  Tool threads that exceed this
+    # budget are abandoned and a failure ToolResult is returned.
+    execution_timeout_s: float = 10.0
+
+
+@dataclass(frozen=True)
+class VisionConfig:
+    """Configuration for the screenshot + moondream2 vision model (Phase 6)."""
+
+    # Set to true only after downloading the moondream2.gguf model.
+    enabled: bool = False
+
+    # Path to the moondream2 GGUF model file.
+    model_path: str = "models/vision/moondream2.gguf"
+
+    # Screenshot capture method: "auto" | "grim" (Wayland) | "scrot" (X11) | "pillow"
+    capture_method: str = "auto"
+
+    # Downscale captured screenshots to this max resolution before inference.
+    max_resolution: int = 1280
+
+
+@dataclass(frozen=True)
 class LumiConfig:
     """Top-level configuration object passed to every subsystem at startup."""
 
@@ -171,6 +210,8 @@ class LumiConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     ipc: IPCConfig = field(default_factory=IPCConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
 
     # Root-logger level forwarded to setup_logging().
     log_level: str = "INFO"
@@ -331,6 +372,15 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         **_merge_section(IPCConfig(), raw.get("ipc", {}))
     )
 
+    # ToolsConfig: YAML lists parse as Python list; convert allowed_tools to tuple.
+    tools_raw = _merge_section(ToolsConfig(), raw.get("tools", {}))
+    tools_raw["allowed_tools"] = tuple(tools_raw["allowed_tools"])
+    tools_cfg = ToolsConfig(**tools_raw)
+
+    vision_cfg = VisionConfig(
+        **_merge_section(VisionConfig(), raw.get("vision", {}))
+    )
+
     # Top-level scalar overrides.
     top_defaults = LumiConfig()
     edition = raw["edition"] if "edition" in raw else detect_edition()
@@ -344,6 +394,8 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         llm=llm_cfg,
         tts=tts_cfg,
         ipc=ipc_cfg,
+        tools=tools_cfg,
+        vision=vision_cfg,
         log_level=log_level,
         json_logs=json_logs,
     )

@@ -25,12 +25,16 @@ from src.core.config import LumiConfig
 from src.core.events import (
     InterruptEvent,
     LLMResponseReadyEvent,
+    LLMTokenEvent,
     ShutdownEvent,
     SpeechCompletedEvent,
     TranscriptReadyEvent,
     UserTextEvent,
     VisemeEvent,
 )
+from src.llm.tool_call_parser import parse_tool_calls
+from src.tools import ToolExecutor, ToolRegistry
+from src.tools.os_actions import AppLaunchTool, ClipboardTool, FileInfoTool, WindowListTool
 from src.core.state_machine import LumiState, StateMachine
 from src.core.zmq_server import ZMQServer
 from src.llm.memory import ConversationMemory
@@ -87,6 +91,29 @@ class Orchestrator:
             prompt_engine=self._prompt_engine,
             memory=self._memory,
             config=config.llm,
+            event_queue=self._event_queue,
+        )
+
+        # Tool registry and executor — wired when tools are enabled.
+        self._tool_registry: ToolRegistry = ToolRegistry()
+        if config.tools.enabled:
+            self._tool_registry.register(AppLaunchTool())
+            self._tool_registry.register(ClipboardTool())
+            self._tool_registry.register(FileInfoTool())
+            self._tool_registry.register(WindowListTool())
+
+        # Register ScreenshotTool if vision is enabled.
+        if config.vision.enabled:
+            from src.tools.vision import ScreenshotTool  # noqa: PLC0415
+            self._tool_registry.register(
+                ScreenshotTool(
+                    config=config.vision,
+                    llm_loader=self._model_loader,
+                )
+            )
+
+        self._tool_executor: ToolExecutor = ToolExecutor(
+            self._tool_registry, config.tools
         )
 
         # Speaker output thread — injectable for testing; created here otherwise.
@@ -146,6 +173,7 @@ class Orchestrator:
             self.register_handler(SpeechCompletedEvent, self._zmq_server.on_tts_stop)
             self.register_handler(TranscriptReadyEvent, self._zmq_server.on_transcript)
             self.register_handler(LLMResponseReadyEvent, self._zmq_server.on_tts_start)
+            self.register_handler(LLMTokenEvent, self._zmq_server.on_llm_token)
 
     @property
     def state_machine(self) -> StateMachine:
@@ -245,12 +273,15 @@ class Orchestrator:
             self._state_machine.transition_to(LumiState.SPEAKING)
             return
 
+        # Generate utterance_id here so the ZMQ token handler can correlate events.
+        utterance_id = str(uuid.uuid4())
+
         # Reasoning slow-path — run in a daemon thread so the event loop
         # remains responsive to InterruptEvents during long inference.
         def _run_inference() -> None:
             try:
                 response = self._reasoning_router.generate(
-                    event.text, self._llm_cancel_flag
+                    event.text, self._llm_cancel_flag, utterance_id=utterance_id
                 )
             except InterruptedError:
                 logger.info("LLM generation cancelled for %r", event.text)
@@ -261,6 +292,32 @@ class Orchestrator:
                     if self._state_machine.current_state == LumiState.PROCESSING:
                         self._state_machine.transition_to(LumiState.IDLE)
                 return
+
+            # Tool-call pass: if the LLM emitted tool-call blocks, execute them
+            # and feed the results back for a second inference pass (single-shot only).
+            tool_calls = parse_tool_calls(response)
+            if tool_calls:
+                results = self._tool_executor.execute(tool_calls, self._llm_cancel_flag)
+                result_lines = []
+                for tc, tr in zip(tool_calls, results):
+                    result_lines.append(
+                        f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
+                    )
+                tool_context = "\n".join(result_lines)
+                followup_prompt = f"{event.text}\n\n[Tool results]\n{tool_context}"
+                try:
+                    response = self._reasoning_router.generate(
+                        followup_prompt, self._llm_cancel_flag, utterance_id=utterance_id
+                    )
+                except InterruptedError:
+                    logger.info("LLM tool-followup cancelled for %r", event.text)
+                    return
+                except Exception:
+                    logger.exception("LLM tool-followup failed for %r", event.text)
+                    with self._llm_state_lock:
+                        if self._state_machine.current_state == LumiState.PROCESSING:
+                            self._state_machine.transition_to(LumiState.IDLE)
+                    return
 
             # Hold the state lock so this check+transition is atomic with
             # _handle_interrupt's own set+transition block.  Without the lock,
@@ -329,12 +386,15 @@ class Orchestrator:
             self._state_machine.transition_to(LumiState.SPEAKING)
             return
 
+        # Generate utterance_id here so the ZMQ token handler can correlate events.
+        utterance_id = str(uuid.uuid4())
+
         # Reasoning slow-path — run in a daemon thread so the event loop
         # remains responsive to InterruptEvents during long inference.
         def _run_inference() -> None:
             try:
                 response = self._reasoning_router.generate(
-                    event.text, self._llm_cancel_flag
+                    event.text, self._llm_cancel_flag, utterance_id=utterance_id
                 )
             except InterruptedError:
                 logger.info("LLM generation cancelled for %r", event.text)
@@ -345,6 +405,32 @@ class Orchestrator:
                     if self._state_machine.current_state == LumiState.PROCESSING:
                         self._state_machine.transition_to(LumiState.IDLE)
                 return
+
+            # Tool-call pass: if the LLM emitted tool-call blocks, execute them
+            # and feed the results back for a second inference pass (single-shot only).
+            tool_calls = parse_tool_calls(response)
+            if tool_calls:
+                results = self._tool_executor.execute(tool_calls, self._llm_cancel_flag)
+                result_lines = []
+                for tc, tr in zip(tool_calls, results):
+                    result_lines.append(
+                        f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
+                    )
+                tool_context = "\n".join(result_lines)
+                followup_prompt = f"{event.text}\n\n[Tool results]\n{tool_context}"
+                try:
+                    response = self._reasoning_router.generate(
+                        followup_prompt, self._llm_cancel_flag, utterance_id=utterance_id
+                    )
+                except InterruptedError:
+                    logger.info("LLM tool-followup cancelled for %r", event.text)
+                    return
+                except Exception:
+                    logger.exception("LLM tool-followup failed for %r", event.text)
+                    with self._llm_state_lock:
+                        if self._state_machine.current_state == LumiState.PROCESSING:
+                            self._state_machine.transition_to(LumiState.IDLE)
+                    return
 
             with self._llm_state_lock:
                 if self._state_machine.current_state != LumiState.PROCESSING:

@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 
 from src.audio.speaker import SpeakerThread
-from src.core.events import SpeechCompletedEvent, TTSChunkReadyEvent
+from src.core.events import SpeechCompletedEvent, TTSChunkReadyEvent, VisemeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -272,9 +272,10 @@ class KokoroTTS:
                 return False
 
             try:
-                samples, _ = self._kokoro.create(
+                samples, phonemes = self._kokoro.create(
                     sentence, voice=self._voice, speed=1.0, lang="en-us"
                 )
+                self._post_visemes(phonemes, utterance_id)
             except Exception:
                 logger.exception(
                     "KokoroTTS: inference failed for sentence %r (utterance_id=%s)",
@@ -330,6 +331,48 @@ class KokoroTTS:
         logger.debug(
             "KokoroTTS: silence emitted for utterance_id=%s", utterance_id
         )
+
+    def _post_visemes(self, phonemes: Any, utterance_id: str) -> None:
+        """Post VisemeEvent instances for each phoneme in *phonemes*.
+
+        Handles the case where phonemes is None or an unrecognised type by
+        logging a debug message and returning without posting any events.
+
+        Args:
+            phonemes: Second return value from kokoro_onnx.Kokoro.create().
+                      Expected to be a list of (phoneme_str, start_ms, duration_ms)
+                      tuples -- but we guard against other formats defensively.
+            utterance_id: The utterance this viseme sequence belongs to.
+        """
+        if phonemes is None:
+            return
+        if not isinstance(phonemes, (list, tuple)):
+            logger.debug(
+                "KokoroTTS: unexpected phonemes type %s — skipping visemes",
+                type(phonemes).__name__,
+            )
+            return
+
+        from src.audio.viseme_map import map_phoneme  # noqa: F811 — deferred import
+
+        for item in phonemes:
+            try:
+                phoneme_str, start_ms, duration_ms = item
+            except (TypeError, ValueError):
+                logger.debug(
+                    "KokoroTTS: cannot unpack phoneme item %r — skipping", item
+                )
+                continue
+
+            if self._event_queue is not None:
+                self._event_queue.put(
+                    VisemeEvent(
+                        utterance_id=utterance_id,
+                        phoneme=str(phoneme_str),
+                        start_ms=int(start_ms),
+                        duration_ms=int(duration_ms),
+                    )
+                )
 
     def _emit_chunk(
         self,

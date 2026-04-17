@@ -1,0 +1,17 @@
+[gd_scene load_steps=2 format=3 uid="uid://text_bubble"]
+
+[ext_resource type="Script" path="res://scripts/text_bubble.gd" id="1_text_bubble"]
+
+[node name="TextBubble" type="Control"]
+script = ExtResource("1_text_bubble")
+visible = false
+# label property is wired to the Label child node below.
+# In the Godot editor: select TextBubble, set the Label export slot to ./Label.
+label = NodePath("Label")
+
+[node name="Label" type="RichTextLabel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+bbcode_enabled = true

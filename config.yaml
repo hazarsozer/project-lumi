@@ -151,3 +151,32 @@ ipc:
 
   # Port number for the ZMQ socket.
   port: 5555
+
+# ─────────────────────────────────────────────────────────────────────────────
+# tools — OS action tool framework settings
+# ─────────────────────────────────────────────────────────────────────────────
+tools:
+  # Whether OS tools are enabled.
+  enabled: true
+
+  # Allowlist of tool names the executor may run.
+  allowed_tools: [launch_app, clipboard, file_info, window_list]
+
+  # Per-tool execution timeout in seconds.
+  execution_timeout_s: 10.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# vision — screenshot + moondream2 vision model settings
+# ─────────────────────────────────────────────────────────────────────────────
+vision:
+  # Set to true only after downloading the moondream2.gguf model.
+  enabled: false
+
+  # Path to the moondream2 GGUF model file.
+  model_path: models/vision/moondream2.gguf
+
+  # Screenshot capture method: "auto" | "grim" (Wayland) | "scrot" (X11) | "pillow"
+  capture_method: auto
+
+  # Downscale captured screenshots to this max resolution before inference.
+  max_resolution: 1280

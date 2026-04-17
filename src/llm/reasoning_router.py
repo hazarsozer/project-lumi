@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
+from typing import Any
 
 from src.core.config import LLMConfig
+from src.core.events import LLMTokenEvent
 from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
@@ -27,21 +30,34 @@ class ReasoningRouter:
         prompt_engine: PromptEngine,
         memory: ConversationMemory,
         config: LLMConfig,
+        event_queue: queue.Queue[Any] | None = None,
     ) -> None:
         self._model_loader = model_loader
         self._prompt_engine = prompt_engine
         self._memory = memory
         self._config = config
+        self._event_queue = event_queue
 
-    def generate(self, text: str, cancel_flag: threading.Event) -> str:
+    def generate(
+        self,
+        text: str,
+        cancel_flag: threading.Event,
+        utterance_id: str = "",
+    ) -> str:
         """Generate a response to *text* using the local LLM.
 
         Checks *cancel_flag* before and between each token so the caller can
         interrupt long-running inference at low latency.
 
+        When *event_queue* was provided at construction and *utterance_id* is
+        non-empty, an ``LLMTokenEvent`` is posted per generated token for
+        live streaming display on the frontend.
+
         Args:
             text: The user's query.
             cancel_flag: A ``threading.Event``; when set, generation is aborted.
+            utterance_id: Optional utterance identifier for token streaming.
+                When empty, no ``LLMTokenEvent`` events are posted.
 
         Returns:
             The generated response string.
@@ -89,6 +105,12 @@ class ReasoningRouter:
 
             finish_reason = chunk["choices"][0].get("finish_reason")
             collected.append(token)
+
+            if self._event_queue is not None and utterance_id:
+                self._event_queue.put(
+                    LLMTokenEvent(token=token, utterance_id=utterance_id)
+                )
+
             prev_token = token
             remaining -= 1
 

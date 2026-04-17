@@ -2,6 +2,10 @@ extends Node
 
 @onready var client: LumiClient = $LumiClient
 @onready var avatar: AvatarController = $AvatarController
+# TextBubble must be added as a child node named "TextBubble" in the main
+# scene (ui/scenes/main.tscn) via the Godot editor before this reference
+# will resolve. Use the text_bubble.tscn scene as the source.
+@onready var text_bubble: TextBubble = $TextBubble
 
 
 func _ready() -> void:
@@ -36,10 +40,18 @@ func _on_message(event_name: String, payload: Dictionary) -> void:
 				avatar.on_viseme(payload["viseme"], payload["duration_ms"])
 			else:
 				push_warning("main.gd: tts_viseme missing required keys")
+		"tts_start":
+			# LLM finished streaming — clear the bubble before TTS begins.
+			text_bubble.clear()
 		"tts_stop":
 			avatar.on_tts_stop()
 		"transcript":
-			print("Transcript: %s" % payload.get("text", ""))
+			push_warning("main.gd: transcript received: %s" % payload.get("text", ""))
+		"llm_token":
+			if payload.has("token"):
+				text_bubble.add_token(payload["token"])
+			else:
+				push_warning("main.gd: llm_token missing 'token' key")
 		"error":
 			push_warning("Brain error [%s]: %s" % [payload.get("code", "?"), payload.get("message", "?")])
 		_:

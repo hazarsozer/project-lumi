@@ -248,7 +248,7 @@ def test_handle_transcript_reasoning_path_posts_response_and_transitions_to_spea
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    def _fake_generate(text: str, cancel_flag: threading.Event) -> str:
+    def _fake_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
         return "Paris is the capital of France."
 
     with patch.object(orch._reflex_router, "route", return_value=None), \
@@ -286,12 +286,12 @@ def test_handle_transcript_reasoning_interrupted_error_logged_no_state_change() 
     # the except InterruptedError block returns from _run_inference).
     thread_done = threading.Event()
 
-    def _raise_interrupted(text: str, cancel_flag: threading.Event) -> str:
+    def _raise_interrupted(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
         raise InterruptedError("cancelled mid-stream")
 
     original_generate = _raise_interrupted
 
-    def _wrapped_generate(text: str, cancel_flag: threading.Event) -> str:
+    def _wrapped_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
         try:
             return original_generate(text, cancel_flag)
         finally:
@@ -338,7 +338,7 @@ def test_handle_transcript_reasoning_unexpected_exception_transitions_to_idle() 
 
     orch.state_machine.register_observer(_on_transition)
 
-    def _raise_generic(text: str, cancel_flag: threading.Event) -> str:
+    def _raise_generic(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
         raise RuntimeError("GPU exploded")
 
     with patch.object(orch._reflex_router, "route", return_value=None), \
@@ -385,7 +385,7 @@ def test_handle_transcript_stale_state_response_discarded() -> None:
     thread_entered = threading.Event()
     inference_guard_checked = threading.Event()
 
-    def _slow_generate(text: str, cancel_flag: threading.Event) -> str:
+    def _slow_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
         thread_entered.set()
         hold_thread.wait(timeout=5.0)
         return "stale response"
@@ -394,7 +394,7 @@ def test_handle_transcript_stale_state_response_discarded() -> None:
     # guard and is about to return (the guard is the last thing before the
     # post_event/transition block, so returning from generate means the guard
     # will be evaluated next).
-    def _wrapped_generate(text: str, cancel_flag: threading.Event) -> str:
+    def _wrapped_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
         result = _slow_generate(text, cancel_flag)
         inference_guard_checked.set()
         return result

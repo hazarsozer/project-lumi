@@ -42,6 +42,7 @@ from src.core.config import IPCConfig
 from src.core.events import (
     InterruptEvent,
     LLMResponseReadyEvent,
+    LLMTokenEvent,
     SpeechCompletedEvent,
     TranscriptReadyEvent,
     UserTextEvent,
@@ -188,6 +189,18 @@ class ZMQServer:
         """
         payload: dict[str, Any] = {"text": event.text}
         self._send("transcript", payload)
+
+    def on_llm_token(self, event: LLMTokenEvent) -> None:
+        """Forward a streaming LLM token to the Body for live display.
+
+        Args:
+            event: The token event with token string and utterance_id.
+        """
+        payload: dict[str, Any] = {
+            "token": event.token,
+            "utterance_id": event.utterance_id,
+        }
+        self._send("llm_token", payload)
 
     def on_error(self, code: str, message: str) -> None:
         """Forward an error notification to the Body.
