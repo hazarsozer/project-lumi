@@ -11,7 +11,7 @@
 
 ## Current Status
 
-**Phases 1–5 complete. Phase 6 (OS tools, real avatar art, LLM streaming) not started.**
+**Phases 1–7 complete. MVP-ready: voice assistant pipeline + OS tools + personal knowledge base RAG.**
 
 | Phase | Name | Status |
 |---|---|---|
@@ -20,7 +20,8 @@
 | 3 | The Brain (Intelligence) | COMPLETE |
 | 4 | The Mouth (TTS) | COMPLETE |
 | 5 | The Body (Visuals + IPC) | COMPLETE |
-| 6 | The Hands (OS Control) | NOT STARTED |
+| 6 | The Hands (OS Control) | COMPLETE |
+| 7 | RAG Personal Knowledge Base | COMPLETE |
 
 ---
 
@@ -38,7 +39,10 @@
 - Startup validation halts on missing wake word model, wrong openwakeword version, or no microphone
 - Structured logging (human-readable or JSON) via `src/core/logging_config.py`
 - **Godot 4 transparent overlay** (`ui/`) connects to the Python Brain via raw TCP on port 5555; drives an animated avatar from Brain state events. Set `ipc.enabled: true` in `config.yaml` to activate the IPC server.
-- 284 tests with 80% coverage gate enforced in CI
+- **RAG personal knowledge base** — hybrid BM25 + vector kNN retrieval (SQLite FTS5 + sqlite-vec), RRF fusion, `all-MiniLM-L6-v2` embeddings; `scripts/ingest_docs.py` to index personal documents; off by default
+- OS automation tools: app launch, clipboard, file info, window list, screenshot analysis (moondream2)
+- LLM token streaming to Godot overlay; per-viseme-group mouth animations (Kokoro lip-sync)
+- 527 tests with 80% coverage gate enforced in CI
 
 ---
 
@@ -91,15 +95,24 @@
 - [x] Enable with `ipc.enabled: true` in `config.yaml` (default `false`)
 - [ ] LightRAG personal knowledge base (deferred to Phase 6). See [ARCHITECTURE.md § 6](ARCHITECTURE.md#6-lightrag-optional-personal-knowledge-base-phase-5) for details.
 
-### Phase 6: The Hands — Not Started
+### Phase 6: The Hands — Complete
 
-- [ ] Vision tool (screenshot analysis)
-- [ ] Automation tools (app launch, file management)
-- [ ] Real avatar artwork (replacing Phase 5 placeholder sprites)
-- [ ] LLM token streaming to Godot frontend
-- [ ] Viseme extraction for lip-sync
-- [ ] LightRAG personal knowledge base (optional, UI toggle, off by default)
-- [ ] v1.0 release
+- [x] OS automation tools: `AppLaunchTool`, `ClipboardTool`, `FileInfoTool`, `WindowListTool`
+- [x] Vision tool: `ScreenshotTool` with moondream2 GGUF description
+- [x] LLM token streaming to Godot overlay (`llm_token` wire frame)
+- [x] Viseme extraction for lip-sync (`viseme_map.py`, `VisemeEvent` from Kokoro phonemes)
+- [x] Godot: streaming text bubble, 8 per-viseme-group mouth animations
+- [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
+
+### Phase 7: RAG Personal Knowledge Base — Complete
+
+- [x] `src/rag/` package — `DocumentStore` (SQLite FTS5 + sqlite-vec), `Chunker`, `Embedder`, `Loader`, RRF fusion, `RAGRetriever`
+- [x] `scripts/ingest_docs.py` — CLI to chunk, embed, and index personal documents
+- [x] `scripts/measure_rag_latency.py` — end-to-end latency benchmark (gate p95 < 2.0 s)
+- [x] ZMQ wiring: `rag_retrieval`, `rag_status` outbound; `rag_set_enabled` inbound
+- [x] RAG off by default (`config.rag.enabled: false`); enable + `uv sync --extra rag` to activate
+- [ ] Godot citation panel UI (deferred)
+- [ ] Real avatar artwork
 
 ---
 
@@ -131,7 +144,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | LLM | llama-cpp-python, Phi-3.5 Mini or Gemma 2 2B |
 | Fine-tuning (planned) | QLoRA + llama.cpp GGUF export |
 | TTS | Kokoro-82M ONNX |
-| Knowledge retrieval (planned) | LightRAG (optional, Phase 6) with all-MiniLM-L6-v2 embeddings |
+| Knowledge retrieval | Hybrid BM25+vec RAG (Phase 7); SQLite FTS5 + sqlite-vec; all-MiniLM-L6-v2 |
 | Frontend | Godot 4 (`ui/`; set `ipc.enabled: true` to activate) |
 | IPC | Raw TCP, 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; no pyzmq) |
 | Testing | pytest + pytest-cov (80% coverage gate) |
@@ -141,4 +154,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 ## Pre-Alpha Notice
 
-This is a work-in-progress. The full audio-to-speech pipeline (Phases 1–4) and the Godot 4 frontend IPC transport (Phase 5) are complete. The next milestone is Phase 6: OS automation tools, real avatar artwork, and LLM token streaming to the overlay. See [TODO.md](TODO.md) for all identified issues and their planned solutions.
+This is a work-in-progress. Phases 1–7 are complete: the full audio-to-speech pipeline, Godot 4 overlay, OS tools, and personal knowledge base RAG are all functional. The next milestone is MVP stabilization: graceful runtime error recovery and end-to-end integration smoke tests. See [TODO.md](TODO.md) for all identified issues and their planned solutions.

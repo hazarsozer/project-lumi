@@ -10,10 +10,14 @@ Failure policy:
         - openwakeword version mismatch
         - Wake word ONNX model file not found
         - No microphone device detected
+        - llama-cpp-python not installed (required for LLM inference)
+        - RAG packages missing when config.rag.enabled is True
 
     SOFT failures (log WARNING — application can continue degraded):
         - STT model directory not found
         - LLM model file not found  (model is optional until PROCESSING)
+        - kokoro-onnx not installed when config.tts.enabled is True
+        - TTS model or voices file not found
 
 Constraints:
     - No print() calls — all output via logging.getLogger(__name__)
@@ -159,6 +163,85 @@ def _check_tts_model(model_path: str, voices_path: str) -> None:
         logger.info("TTS voices file found: %s", voices_path)
 
 
+def _check_llm_package() -> None:
+    """Raise RuntimeError if llama-cpp-python is not installed.
+
+    llama-cpp-python is required for all LLM inference.  It lives in the
+    optional ``llm`` extra and is not installed by a plain ``uv sync``.
+    Failing here gives the user a clear remediation path before the
+    pipeline reaches the LLM load step.
+    """
+    try:
+        import llama_cpp  # noqa: F401
+    except ImportError:
+        raise RuntimeError(
+            "llama-cpp-python is not installed but is required for LLM inference.\n"
+            "Install with:\n"
+            "  uv sync --extra llm\n"
+            "Note: building llama-cpp-python requires CMake and a C++ compiler.\n"
+            "  sudo apt install cmake build-essential  # Debian/Ubuntu"
+        )
+
+    logger.info("llama-cpp-python package check passed.")
+
+
+def _check_tts_package(enabled: bool) -> None:
+    """Log a warning if kokoro-onnx is missing and TTS is enabled.
+
+    TTS is treated as a soft dependency — the assistant can still wake,
+    transcribe, and route commands without audio playback.  Only emit the
+    warning when the user has explicitly set ``config.tts.enabled = True``
+    so that users running in silent/test mode are not warned unnecessarily.
+    """
+    if not enabled:
+        return
+    try:
+        import kokoro_onnx  # noqa: F401
+    except ImportError:
+        logger.warning(
+            "kokoro-onnx is not installed but config.tts.enabled is True. "
+            "TTS playback will be unavailable. "
+            "Install with: uv sync --extra tts"
+        )
+        return
+
+    logger.info("kokoro-onnx package check passed.")
+
+
+def _check_rag_packages(enabled: bool) -> None:
+    """Raise RuntimeError if RAG packages are missing and RAG is enabled.
+
+    sqlite-vec, sentence-transformers, and pypdf are grouped under the
+    optional ``rag`` extra.  When ``config.rag.enabled`` is False the check
+    is skipped entirely so users who have not installed the extra are not
+    affected at all.  When enabled, all three must be present or the
+    RAGRetriever will fail at init time anyway — better to surface the full
+    list upfront.
+    """
+    if not enabled:
+        return
+
+    missing: list[str] = []
+    for pkg, import_name in [
+        ("sqlite-vec (uv sync --extra rag)", "sqlite_vec"),
+        ("sentence-transformers (uv sync --extra rag)", "sentence_transformers"),
+        ("pypdf (uv sync --extra rag)", "pypdf"),
+    ]:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(pkg)
+
+    if missing:
+        raise RuntimeError(
+            "config.rag.enabled is True but the following RAG packages are missing:\n"
+            + "\n".join(f"  - {p}" for p in missing)
+            + "\nInstall with:\n  uv sync --extra rag"
+        )
+
+    logger.info("RAG package check passed: all required packages present.")
+
+
 def _check_microphone() -> None:
     """Raise RuntimeError if no input (microphone) device is available.
 
@@ -222,11 +305,16 @@ def run_startup_checks(config: LumiConfig) -> None:
     _check_openwakeword_version()
     _check_wake_word_model(config.audio.wake_word_model_path)
     _check_microphone()
+    _check_llm_package()
 
     # Soft failures — warn but continue.
     _check_stt_model(config.scribe.model_path)
     _check_llm_model(config.llm.model_path)
+    _check_tts_package(config.tts.enabled)
     if config.tts.enabled:
         _check_tts_model(config.tts.model_path, config.tts.voices_path)
+
+    # Hard failure when RAG feature is explicitly enabled without its extras.
+    _check_rag_packages(config.rag.enabled)
 
     logger.info("--- Startup checks complete ---")
