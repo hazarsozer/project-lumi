@@ -14,6 +14,7 @@ block each other.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 import time
@@ -281,6 +282,17 @@ class DocumentStore:
     # Search
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _sanitize_fts_query(query: str) -> str:
+        """Strip characters that FTS5 interprets as syntax operators.
+
+        FTS5 treats '.', '?', '"', '(', ')', '-', '*', '^' as special.
+        Replace any non-word, non-space character with a space and collapse
+        runs so the result is a plain bag-of-words query.
+        """
+        sanitized = re.sub(r"[^\w\s]", " ", query)
+        return re.sub(r"\s+", " ", sanitized).strip()
+
     def search_fts(self, query: str, top_k: int) -> list[SearchHit]:
         """BM25 keyword search via SQLite FTS5.
 
@@ -288,6 +300,9 @@ class DocumentStore:
         relevant).  We negate to produce a positive score where higher is
         better, then normalise to [0, 1] across the result set.
         """
+        clean_query = self._sanitize_fts_query(query)
+        if not clean_query:
+            return []
         rows = self._conn().execute(
             """
             SELECT c.id       AS chunk_id,
@@ -302,7 +317,7 @@ class DocumentStore:
             ORDER BY raw_score DESC
             LIMIT ?
             """,
-            (query, top_k),
+            (clean_query, top_k),
         ).fetchall()
 
         if not rows:

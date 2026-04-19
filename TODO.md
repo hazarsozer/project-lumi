@@ -172,6 +172,7 @@
   - `scripts/measure_rag_latency.py` — end-to-end benchmark (p95 < 2.0 s gate)
   - Base latency gate PASS: p95 = 0.431 s (threshold 1.7 s)
   - RAG disabled by default (`config.rag.enabled: false`)
+* **Wave B2 (2026-04-19):** RAG latency benchmark executed against live Phi-3.5-mini + all-MiniLM-L6-v2, 20 queries. **p95 = 0.490 s** (gate: 2.0 s) — PASS with 4× headroom. Two bugs fixed in benchmark script: `get_embedder(rag_cfg)` → `get_embedder(rag_cfg.embedding_model)`, and `store.init_schema()` missing. FTS5 syntax errors (`.`, `?` in queries) fixed via `_sanitize_fts_query()` in `store.py`.
 * **Still open:**
   - Godot citation panel UI (Wave 4 Godot — deferred)
   - Real avatar artwork (placeholder sprites still in use)

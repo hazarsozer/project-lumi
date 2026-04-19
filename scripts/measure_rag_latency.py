@@ -153,13 +153,14 @@ def _setup(config_path: str, tmp_dir: Path):
 
     print("Loading embedder …", flush=True)
     try:
-        embedder = get_embedder(rag_cfg)
+        embedder = get_embedder(rag_cfg.embedding_model)
     except Exception as exc:
         print(f"[ERROR] Embedder init failed: {exc}", file=sys.stderr)
         sys.exit(2)
 
     print("Seeding document store …", flush=True)
     store = DocumentStore(rag_cfg)
+    store.init_schema()
     _seed_store(store, embedder, rag_cfg, tmp_dir)
 
     print(f"Loading LLM model: {model_path} …", flush=True)
