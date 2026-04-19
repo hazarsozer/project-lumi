@@ -192,3 +192,15 @@ class RAGSetEnabledEvent:
     """Fired from ZMQ layer to toggle RAG on/off at runtime without restart."""
 
     enabled: bool
+
+
+@dataclass(frozen=True)
+class EarsErrorEvent:
+    """Fired by Ears when the audio capture thread fails unrecoverably.
+
+    code follows the namespace pattern ``ears.<reason>``:
+      - ``ears.unrecoverable`` — InputStream failed after all retries
+    """
+
+    code: str    # e.g. "ears.unrecoverable"
+    detail: str  # human-readable description for logs / UI toast

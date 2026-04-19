@@ -25,10 +25,14 @@
 * **What was done:** `pyproject.toml` pins `openwakeword==0.4.0` (not 0.6.0 — that version has no Python 3.12 wheels). `startup_check.py` enforces this exact version with a hard `RuntimeError` on mismatch. The monkey-patch in `ears.py` remains.
 * **Remaining:** Long-term fix — push a PR upstream to add `inference_framework` kwarg and remove the monkey-patch entirely once merged.
 
-## 7. No Graceful Error Recovery — PARTIALLY DONE
+## ~~7. No Graceful Error Recovery~~ — DONE
 * **Context:** Failing to load the Wake Word ONNX model or lacking a microphone will result in an immediate fatal crash.
-* **What was done:** `src/core/startup_check.py` runs `run_startup_checks()` before the event loop starts. Hard failures (missing model, wrong openwakeword version, no microphone) raise `RuntimeError` with human-readable messages. Soft failures (missing STT/LLM model directories) log a warning and continue.
-* **Remaining:** Safe try-except fallback to `IDLE` for localized runtime errors (e.g., transient VAD dropouts, audio device disconnection) is not yet implemented.
+* **What was done:**
+  - `src/core/startup_check.py` runs `run_startup_checks()` before the event loop starts. Hard failures (missing model, wrong openwakeword version, no microphone) raise `RuntimeError` with human-readable messages. Soft failures (missing STT/LLM model directories) log a warning and continue.
+  - `src/audio/ears.py` — `_consumer_loop` now wraps `sd.InputStream` in an outer retry loop (up to `_MAX_RETRIES=3`). `sd.PortAudioError` and unexpected exceptions are caught, logged, and retried after `_RETRY_DELAY_S=0.25s`. Per-chunk `model.predict()` failures are caught at the inner level and skipped. On retry exhaustion, `EarsErrorEvent` is posted to the event queue.
+  - `src/core/events.py` — `EarsErrorEvent(code, detail)` dataclass added.
+  - `src/core/orchestrator.py` — `_handle_ears_error` handler registered; transitions non-IDLE states to IDLE on receipt.
+  - `tests/test_ears_recovery.py` — 6 tests: PortAudioError retry, predict-skip, exhausted retries post EarsErrorEvent, orchestrator handler IDLE transition, no-op when already IDLE.
 
 ## ~~8. No IPC Contract~~ — DONE
 * **Context:** The planned ZeroMQ integration with the Godot frontend lacks a formal schema.

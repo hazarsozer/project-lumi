@@ -32,13 +32,16 @@ import threading
 import queue
 import time as _time
 
-from src.core.events import WakeDetectedEvent, RecordingCompleteEvent
+from src.core.events import EarsErrorEvent, WakeDetectedEvent, RecordingCompleteEvent
 
 logger = logging.getLogger(__name__)
 
 #Constants
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280
+
+_MAX_RETRIES = 3       # InputStream open/run failures before giving up
+_RETRY_DELAY_S = 0.25  # seconds to wait between retries
 
 class Ears:
     def __init__(self, sensitivity: float = 0.5, model_paths: list[str] = None):
@@ -165,69 +168,95 @@ class Ears:
         '''
         This runs in the background thread and processes the audio data.
         Posts WakeDetectedEvent to the event queue on wake word detection.
+
+        Transient InputStream failures (PortAudioError, USB hiccups) are
+        retried up to _MAX_RETRIES times with a short delay between attempts.
+        On exhaustion, EarsErrorEvent is posted and the thread exits cleanly.
         '''
 
         logger.info('Ears: starting listening...')
         _time.sleep(0)  # yield GIL so caller's post-start assertions run first
 
-        #Opening microphone stream
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            blocksize=CHUNK_SIZE,
-            dtype="int16",
-            channels=1,
-            latency="high",  # Prefer higher latency to reduce buffer underruns
-            callback=self._mic_callback,
-        ):
-
-            while self.listening:
-                #Get audio data from the queue
-                try:
-                    chunk = self.audio_queue.get(timeout=0.1)
-                except queue.Empty:
-                    continue
-
-                # Ensure audio is 1D int16 as expected by openwakeword's AudioFeatures
-                if isinstance(chunk, np.ndarray):
-                    if chunk.ndim == 2:
-                        # Flatten mono channel (frames, 1) -> (frames,)
-                        chunk = chunk[:, 0]
-                    elif chunk.ndim > 2:
-                        chunk = chunk.reshape(-1)
-                    chunk = chunk.astype(np.int16, copy=False)
-
-                # Respect cooldown window: keep draining queue but skip inference
-                now = _time.monotonic()
-                if now < self._cooldown_until:
-                    continue
-
-                #Process the audio data
-                predictions = self.model.predict(chunk)
-
-                #Check if the wake word is detected
-                for model_name, score in predictions.items():
-                    if score > self.sensitivity:
-                        logger.info("Wake word detected: %s with score %s", model_name, score)
-
-                        # Post wake event to the event bus instead of blocking
-                        if self._event_queue is not None:
-                            self._event_queue.put(
-                                WakeDetectedEvent(timestamp=_time.monotonic())
-                            )
-
-                        # Immediately flush any audio that arrived
+        retries = 0
+        while self.listening and retries <= _MAX_RETRIES:
+            try:
+                with sd.InputStream(
+                    samplerate=SAMPLE_RATE,
+                    blocksize=CHUNK_SIZE,
+                    dtype="int16",
+                    channels=1,
+                    latency="high",
+                    callback=self._mic_callback,
+                ):
+                    retries = 0  # stream opened successfully — reset retry counter
+                    while self.listening:
                         try:
-                            while True:
-                                self.audio_queue.get_nowait()
+                            chunk = self.audio_queue.get(timeout=0.1)
                         except queue.Empty:
-                            pass
+                            continue
 
-                        # Reset model state and start a short cooldown where we ignore new audio
-                        self.model.reset()
-                        self._cooldown_until = _time.monotonic() + 2.0
+                        # Ensure audio is 1D int16 as expected by openwakeword's AudioFeatures
+                        if isinstance(chunk, np.ndarray):
+                            if chunk.ndim == 2:
+                                chunk = chunk[:, 0]
+                            elif chunk.ndim > 2:
+                                chunk = chunk.reshape(-1)
+                            chunk = chunk.astype(np.int16, copy=False)
 
-                        # Only handle a single wake trigger per chunk
-                        break
+                        # Respect cooldown window: keep draining queue but skip inference
+                        now = _time.monotonic()
+                        if now < self._cooldown_until:
+                            continue
+
+                        try:
+                            predictions = self.model.predict(chunk)
+                        except Exception:
+                            logger.warning("Ears: model.predict() failed on chunk; skipping", exc_info=True)
+                            continue
+
+                        for model_name, score in predictions.items():
+                            if score > self.sensitivity:
+                                logger.info("Wake word detected: %s with score %s", model_name, score)
+
+                                if self._event_queue is not None:
+                                    self._event_queue.put(
+                                        WakeDetectedEvent(timestamp=_time.monotonic())
+                                    )
+
+                                try:
+                                    while True:
+                                        self.audio_queue.get_nowait()
+                                except queue.Empty:
+                                    pass
+
+                                self.model.reset()
+                                self._cooldown_until = _time.monotonic() + 2.0
+                                break
+
+            except sd.PortAudioError:
+                retries += 1
+                logger.warning(
+                    "Ears: PortAudioError (attempt %d/%d); retrying in %.2fs",
+                    retries, _MAX_RETRIES, _RETRY_DELAY_S,
+                )
+                _time.sleep(_RETRY_DELAY_S)
+            except Exception:
+                retries += 1
+                logger.exception(
+                    "Ears: unexpected error in capture loop (attempt %d/%d); retrying in %.2fs",
+                    retries, _MAX_RETRIES, _RETRY_DELAY_S,
+                )
+                _time.sleep(_RETRY_DELAY_S)
+
+        if self.listening and retries > _MAX_RETRIES:
+            logger.error("Ears: audio capture failed after %d retries; posting EarsErrorEvent", _MAX_RETRIES)
+            if self._event_queue is not None:
+                self._event_queue.put(
+                    EarsErrorEvent(
+                        code="ears.unrecoverable",
+                        detail=f"InputStream failed after {_MAX_RETRIES} retries",
+                    )
+                )
 
     def start(self, event_queue: queue.Queue) -> None:
         '''

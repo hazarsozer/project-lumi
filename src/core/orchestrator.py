@@ -23,6 +23,7 @@ from src.audio.mouth import KokoroTTS
 from src.audio.speaker import SpeakerThread
 from src.core.config import LumiConfig
 from src.core.events import (
+    EarsErrorEvent,
     InterruptEvent,
     LLMResponseReadyEvent,
     LLMTokenEvent,
@@ -155,6 +156,7 @@ class Orchestrator:
         # runs first (state transitions), then the ZMQ forwarder sends the event
         # to Godot.  This ordering is guaranteed by registration order in _dispatch.
         self.register_handler(ShutdownEvent, self._handle_shutdown)
+        self.register_handler(EarsErrorEvent, self._handle_ears_error)
         self.register_handler(InterruptEvent, self._handle_interrupt)
         self.register_handler(TranscriptReadyEvent, self._handle_transcript)
         self.register_handler(LLMResponseReadyEvent, self._handle_llm_response)
@@ -578,6 +580,21 @@ class Orchestrator:
             return
         self._rag_runtime_enabled = event.enabled
         logger.info("RAG runtime enabled set to %s", event.enabled)
+
+    def _handle_ears_error(self, event: EarsErrorEvent) -> None:
+        """Handle EarsErrorEvent: log, surface to Godot, and return to IDLE.
+
+        Args:
+            event: The error event posted by the Ears thread on exhausting retries.
+        """
+        logger.error(
+            "Ears unrecoverable error (code=%s): %s — forcing IDLE",
+            event.code,
+            event.detail,
+        )
+        current = self._state_machine.current_state
+        if current != LumiState.IDLE:
+            self._state_machine.transition_to(LumiState.IDLE)
 
     def _handle_shutdown(self, event: ShutdownEvent) -> None:
         """Handle ShutdownEvent: stop the event loop.
