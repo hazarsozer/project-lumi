@@ -15,6 +15,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import time as _time
 from unittest.mock import MagicMock, patch, call
 
 import numpy as np
@@ -259,3 +260,92 @@ def test_ears_error_handler_noop_when_already_idle():
     orch._handle_ears_error(EarsErrorEvent(code="ears.unrecoverable", detail="test"))
 
     assert orch._state_machine.current_state == LumiState.IDLE
+
+
+# ---------------------------------------------------------------------------
+# Wake word detection path coverage (lines 219–234)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(5)
+def test_wake_word_detection_posts_wake_detected_event():
+    """When model.predict returns a score above sensitivity, WakeDetectedEvent is posted."""
+    from src.core.events import WakeDetectedEvent
+
+    ears = _make_ears(sensitivity=0.5)
+    eq = queue.Queue()
+
+    # predict returns a score above threshold on first call; second call returns 0.0
+    predict_calls = [0]
+
+    def _predict(chunk):
+        predict_calls[0] += 1
+        if predict_calls[0] == 1:
+            return {"hey_lumi": 0.9}
+        return {"hey_lumi": 0.0}
+
+    ears.model.predict.side_effect = _predict
+
+    get_calls = [0]
+
+    def _limited_get(**kwargs):
+        get_calls[0] += 1
+        if get_calls[0] >= 3:
+            ears.listening = False
+            raise queue.Empty
+        return np.zeros(1280, dtype=np.int16)
+
+    ears.audio_queue.get = _limited_get  # type: ignore[method-assign]
+
+    with patch("sounddevice.InputStream") as mock_sd:
+        mock_sd.return_value.__enter__ = lambda s: s
+        mock_sd.return_value.__exit__ = MagicMock(return_value=False)
+        ears.start(eq)
+        ears.thread.join(timeout=4.0)
+
+    assert not ears.thread.is_alive()
+    assert not eq.empty()
+    event = eq.get_nowait()
+    assert isinstance(event, WakeDetectedEvent)
+    assert event.timestamp > 0
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(5)
+def test_wake_word_detection_resets_model_and_sets_cooldown():
+    """After a wake word detection, model.reset() is called and cooldown is set."""
+    ears = _make_ears(sensitivity=0.5)
+    eq = queue.Queue()
+
+    predict_calls = [0]
+
+    def _predict(chunk):
+        predict_calls[0] += 1
+        if predict_calls[0] == 1:
+            return {"hey_lumi": 0.9}
+        return {"hey_lumi": 0.0}
+
+    ears.model.predict.side_effect = _predict
+
+    get_calls = [0]
+
+    def _limited_get(**kwargs):
+        get_calls[0] += 1
+        if get_calls[0] >= 3:
+            ears.listening = False
+            raise queue.Empty
+        return np.zeros(1280, dtype=np.int16)
+
+    ears.audio_queue.get = _limited_get  # type: ignore[method-assign]
+
+    before = _time.monotonic()
+
+    with patch("sounddevice.InputStream") as mock_sd:
+        mock_sd.return_value.__enter__ = lambda s: s
+        mock_sd.return_value.__exit__ = MagicMock(return_value=False)
+        ears.start(eq)
+        ears.thread.join(timeout=4.0)
+
+    ears.model.reset.assert_called_once()
+    assert ears._cooldown_until > before
