@@ -111,56 +111,56 @@ def _check_stt_model(model_path: str) -> None:
 
 
 def _check_llm_model(model_path: str) -> None:
-    """Log a warning if the LLM GGUF file is missing.
+    """Raise RuntimeError if the LLM GGUF file is missing.
 
-    The LLM is only loaded during PROCESSING (not at IDLE), so a missing
-    model file is acceptable at startup — the assistant can still do wake
-    word detection and STT.
+    llama-cpp-python is installed but the model file is not present —
+    inference would crash at the first user query rather than at startup.
+    Surfacing this here gives the user a clear remediation message.
     """
     path = Path(model_path)
     if not path.is_file():
-        logger.warning(
-            "LLM model file not found: '%s'. "
-            "The assistant will not be able to generate responses until "
-            "the model is present. Place the GGUF file at the configured "
-            "path or update config.yaml → llm.model_path.",
-            model_path,
+        raise RuntimeError(
+            f"LLM model file not found: '{model_path}'\n"
+            "Download the Phi-3.5-mini Q4_K_M GGUF and place it at the configured path,\n"
+            "or update config.yaml → llm.model_path.\n"
+            "Example download:\n"
+            "  huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF "
+            "Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir models/llm/"
         )
-    else:
-        logger.info("LLM model file found: %s", model_path)
+    logger.info("LLM model file found: %s", model_path)
 
 
 def _check_tts_model(model_path: str, voices_path: str) -> None:
-    """Log a warning if TTS model files are missing.
+    """Raise RuntimeError if TTS model or voices files are missing.
 
-    KokoroTTS falls back to silent mode when model files are absent, so
-    this is a soft failure — the assistant can still wake, transcribe, and
-    route commands without TTS playback.
+    When TTS is enabled, both files are required for Kokoro to produce any
+    audio.  Hard-failing prevents a demo where the assistant appears to
+    respond but produces no sound.
     """
     model = Path(model_path)
     voices = Path(voices_path)
+    missing: list[str] = []
 
     if not model.is_file():
-        logger.warning(
-            "TTS model file not found: '%s'. "
-            "KokoroTTS will run in silent mode until the file is present. "
-            "Download from the kokoro-onnx releases page and place at the "
-            "configured path, or update config.yaml → tts.model_path.",
-            model_path,
+        missing.append(
+            f"TTS model file not found: '{model_path}'\n"
+            "  Download kokoro-v1_0.onnx from the kokoro-onnx releases page\n"
+            "  and place it at the configured path, or update config.yaml → tts.model_path."
         )
     else:
         logger.info("TTS model file found: %s", model_path)
 
     if not voices.is_file():
-        logger.warning(
-            "TTS voices file not found: '%s'. "
-            "KokoroTTS will run in silent mode until the file is present. "
-            "Download voices.bin from the kokoro-onnx releases page and "
-            "place at the configured path, or update config.yaml → tts.voices_path.",
-            voices_path,
+        missing.append(
+            f"TTS voices file not found: '{voices_path}'\n"
+            "  Download voices.bin from the kokoro-onnx releases page\n"
+            "  and place it at the configured path, or update config.yaml → tts.voices_path."
         )
     else:
         logger.info("TTS voices file found: %s", voices_path)
+
+    if missing:
+        raise RuntimeError("\n".join(missing))
 
 
 def _check_llm_package() -> None:
@@ -186,24 +186,24 @@ def _check_llm_package() -> None:
 
 
 def _check_tts_package(enabled: bool) -> None:
-    """Log a warning if kokoro-onnx is missing and TTS is enabled.
+    """Raise RuntimeError if kokoro-onnx is missing and TTS is enabled.
 
-    TTS is treated as a soft dependency — the assistant can still wake,
-    transcribe, and route commands without audio playback.  Only emit the
-    warning when the user has explicitly set ``config.tts.enabled = True``
-    so that users running in silent/test mode are not warned unnecessarily.
+    When TTS is explicitly enabled in config, a missing kokoro-onnx package
+    will cause silent audio failures at runtime.  Hard-failing here ensures
+    the user knows exactly what to install before the app appears to work.
+    Set config.tts.enabled = false to run in silent/headless mode.
     """
     if not enabled:
         return
     try:
         import kokoro_onnx  # noqa: F401
     except ImportError:
-        logger.warning(
-            "kokoro-onnx is not installed but config.tts.enabled is True. "
-            "TTS playback will be unavailable. "
-            "Install with: uv sync --extra tts"
+        raise RuntimeError(
+            "kokoro-onnx is not installed but config.tts.enabled is True.\n"
+            "TTS playback requires the tts extra:\n"
+            "  uv sync --extra tts\n"
+            "To run without TTS, set config.tts.enabled = false in config.yaml."
         )
-        return
 
     logger.info("kokoro-onnx package check passed.")
 
