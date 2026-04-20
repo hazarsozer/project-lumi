@@ -19,7 +19,9 @@ import threading
 import uuid
 from typing import Any, Callable
 
+from src.audio.ears import Ears
 from src.audio.mouth import KokoroTTS
+from src.audio.scribe import Scribe
 from src.audio.speaker import SpeakerThread
 from src.core.config import LumiConfig
 from src.core.events import (
@@ -29,11 +31,13 @@ from src.core.events import (
     LLMTokenEvent,
     RAGRetrievalEvent,
     RAGSetEnabledEvent,
+    RecordingCompleteEvent,
     ShutdownEvent,
     SpeechCompletedEvent,
     TranscriptReadyEvent,
     UserTextEvent,
     VisemeEvent,
+    WakeDetectedEvent,
 )
 from src.llm.tool_call_parser import parse_tool_calls
 from src.tools import ToolExecutor, ToolRegistry
@@ -63,6 +67,8 @@ class Orchestrator:
         speaker: SpeakerThread | None = None,
         tts: KokoroTTS | None = None,
         zmq_server: ZMQServer | None = None,
+        ears: Ears | None = None,
+        scribe: Scribe | None = None,
     ) -> None:
         self._config: LumiConfig = config
         self._event_queue: queue.Queue[Any] = queue.Queue()
@@ -149,6 +155,10 @@ class Orchestrator:
         self._tts_state_lock: threading.Lock = threading.Lock()
         self._current_utterance_id: str | None = None
 
+        # Audio-in pipeline — both are optional (None = text-only mode / testing).
+        self._ears: Ears | None = ears
+        self._scribe: Scribe | None = scribe
+
         # Register built-in handlers.
         # NOTE: TranscriptReadyEvent and SpeechCompletedEvent each receive a
         # second handler below (on_transcript / on_tts_stop) when a ZMQServer
@@ -158,6 +168,8 @@ class Orchestrator:
         self.register_handler(ShutdownEvent, self._handle_shutdown)
         self.register_handler(EarsErrorEvent, self._handle_ears_error)
         self.register_handler(InterruptEvent, self._handle_interrupt)
+        self.register_handler(WakeDetectedEvent, self._handle_wake_detected)
+        self.register_handler(RecordingCompleteEvent, self._handle_recording_complete)
         self.register_handler(TranscriptReadyEvent, self._handle_transcript)
         self.register_handler(LLMResponseReadyEvent, self._handle_llm_response)
         self.register_handler(SpeechCompletedEvent, self._handle_speech_completed)
@@ -233,8 +245,11 @@ class Orchestrator:
 
         Call from the main thread. Uses a 0.1 s timeout on queue.get
         so the loop checks _shutdown even when the queue is empty.
+        Starts the Ears audio pipeline (if configured) before entering the loop.
         """
         logger.info("Orchestrator starting event loop")
+        if self._ears is not None:
+            self._ears.start(self._event_queue)
 
         while not self._shutdown:
             try:
@@ -581,6 +596,77 @@ class Orchestrator:
         self._rag_runtime_enabled = event.enabled
         logger.info("RAG runtime enabled set to %s", event.enabled)
 
+    def _handle_wake_detected(self, event: WakeDetectedEvent) -> None:
+        """Handle WakeDetectedEvent: transition IDLE → LISTENING.
+
+        Events arriving in any state other than IDLE are silently dropped so
+        that spurious detections during active speech or processing do not
+        corrupt the state machine.
+
+        Args:
+            event: The wake-word detection event posted by Ears.
+        """
+        current = self._state_machine.current_state
+        if current != LumiState.IDLE:
+            logger.debug(
+                "WakeDetectedEvent received in state %s; ignoring.", current.value
+            )
+            return
+        self._state_machine.transition_to(LumiState.LISTENING)
+        logger.info("Wake word detected — transitioning to LISTENING")
+
+    def _handle_recording_complete(self, event: RecordingCompleteEvent) -> None:
+        """Handle RecordingCompleteEvent: invoke Scribe in a daemon thread.
+
+        Only processes the event when in LISTENING state; any other state means
+        the recording was stale or arrived out of order.
+
+        Scribe.transcribe() runs in a dedicated daemon thread so it cannot
+        block the event-dispatch loop during long CPU-bound transcription.
+        On success, TranscriptReadyEvent is posted back to the queue.
+        On failure, the state machine falls back to IDLE.
+
+        Args:
+            event: The recording-complete event carrying the audio array.
+        """
+        current = self._state_machine.current_state
+        if current != LumiState.LISTENING:
+            logger.debug(
+                "RecordingCompleteEvent received in state %s; ignoring.", current.value
+            )
+            return
+
+        self._state_machine.transition_to(LumiState.PROCESSING)
+
+        if self._scribe is None:
+            logger.warning("RecordingCompleteEvent received but no Scribe configured; returning to IDLE")
+            self._state_machine.transition_to(LumiState.IDLE)
+            return
+
+        thread = threading.Thread(
+            target=self._run_scribe,
+            args=(event.audio,),
+            daemon=True,
+            name="ScribeTranscribeThread",
+        )
+        thread.start()
+
+    def _run_scribe(self, audio: object) -> None:
+        """Run Scribe.transcribe() and post the result to the event queue.
+
+        Executed in a daemon thread started by _handle_recording_complete.
+        Falls back to IDLE on any transcription error.
+
+        Args:
+            audio: The numpy audio array from RecordingCompleteEvent.
+        """
+        try:
+            transcript = self._scribe.transcribe(audio)  # type: ignore[union-attr]
+            self._event_queue.put(TranscriptReadyEvent(text=transcript))
+        except Exception:
+            logger.exception("Scribe transcription failed; returning to IDLE")
+            self._state_machine.transition_to(LumiState.IDLE)
+
     def _handle_ears_error(self, event: EarsErrorEvent) -> None:
         """Handle EarsErrorEvent: log, surface to Godot, and return to IDLE.
 
@@ -604,6 +690,8 @@ class Orchestrator:
         """
         logger.info("Shutdown requested")
         self._speaker.stop()
+        if self._ears is not None:
+            self._ears.stop()
         if self._zmq_server is not None:
             self._zmq_server.stop()
         self._shutdown = True
