@@ -6,6 +6,8 @@ extends Node
 # scene (ui/scenes/main.tscn) via the Godot editor before this reference
 # will resolve. Use the text_bubble.tscn scene as the source.
 @onready var text_bubble: TextBubble = $TextBubble
+# CitationPanel is instanced from citation_panel.tscn and wired in main.tscn.
+@onready var citation_panel: CitationPanel = $CitationPanel
 
 
 func _ready() -> void:
@@ -52,6 +54,11 @@ func _on_message(event_name: String, payload: Dictionary) -> void:
 				text_bubble.add_token(payload["token"])
 			else:
 				push_warning("main.gd: llm_token missing 'token' key")
+		"rag_retrieval":
+			if payload.has("top_doc_paths"):
+				citation_panel.show_citations(payload)
+			else:
+				push_warning("main.gd: rag_retrieval missing 'top_doc_paths' key")
 		"error":
 			push_warning("Brain error [%s]: %s" % [payload.get("code", "?"), payload.get("message", "?")])
 		_:
