@@ -81,14 +81,6 @@ def test_ears_start_sets_listening_flag(
     # so the thread exits cleanly.
     ears = _make_ears(mock_oww_model)
 
-    stop_event = threading.Event()
-
-    def _fake_on_wake() -> None:
-        pass
-
-    # Replace queue.get so the thread terminates after we set listening=False
-    original_get = ears.audio_queue.get
-
     call_count = [0]
 
     def _limited_get(**kwargs):
@@ -100,8 +92,9 @@ def test_ears_start_sets_listening_flag(
 
     ears.audio_queue.get = _limited_get  # type: ignore[method-assign]
 
-    ears.start(_fake_on_wake)
-    assert ears.listening is True  # flag must be set synchronously
+    event_queue: queue.Queue = queue.Queue()
+    ears.start(event_queue)
+    assert ears.listening is True  # flag set synchronously before thread starts
     ears.thread.join(timeout=3.0)
 
 
@@ -114,9 +107,6 @@ def test_ears_stop_clears_listening_flag(
     """stop() sets listening=False and joins the background thread."""
     ears = _make_ears(mock_oww_model)
 
-    def _fake_on_wake() -> None:
-        pass
-
     call_count = [0]
 
     def _limited_get(**kwargs):
@@ -128,7 +118,8 @@ def test_ears_stop_clears_listening_flag(
 
     ears.audio_queue.get = _limited_get  # type: ignore[method-assign]
 
-    ears.start(_fake_on_wake)
+    event_queue: queue.Queue = queue.Queue()
+    ears.start(event_queue)
     ears.stop()
     assert ears.listening is False
     assert not ears.thread.is_alive()
