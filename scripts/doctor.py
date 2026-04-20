@@ -79,6 +79,14 @@ def _check_dir(path_str: str, label: str, hint: str = "") -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Lumi environment diagnostic")
     parser.add_argument("--config", default="config.yaml", help="Path to config.yaml")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help=(
+            "After dependency checks, run scripts/smoke_live.py to validate "
+            "real model loading and inference (requires model files on disk)."
+        ),
+    )
     args = parser.parse_args()
 
     print(f"\n{_BOLD}Lumi Doctor{_RESET}")
@@ -195,6 +203,22 @@ def main() -> int:
     except Exception as exc:
         _fail("Microphone", f"sounddevice error: {exc}")
         failures += 1
+
+    # -----------------------------------------------------------------------
+    # Live model smoke (--live flag)
+    # -----------------------------------------------------------------------
+    if args.live:
+        import subprocess
+
+        _section("Live model smoke (scripts/smoke_live.py)")
+        smoke_script = Path(__file__).parent / "smoke_live.py"
+        result = subprocess.run(
+            ["uv", "run", "python", str(smoke_script)],
+            capture_output=False,
+        )
+        if result.returncode != 0:
+            print(f"\n  {_RED}{_BOLD}FAIL{_RESET}  smoke_live.py exited with code {result.returncode}")
+            failures += 1
 
     # -----------------------------------------------------------------------
     # Summary
