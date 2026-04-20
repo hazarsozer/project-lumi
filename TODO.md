@@ -202,7 +202,7 @@
 * **Go/No-Go gate:** If end-to-end latency after Phase 4 exceeds 2 seconds, defer LightRAG until base pipeline optimized (adding 150–600ms retrieval would push past 3-second voice UI threshold).
 * **Reference:** See `ARCHITECTURE.md` Section 6 for full analysis: mitigations (latency masking, embedding lifecycle, VRAM budget, context window pressure, prompt injection risk, thread safety), integration point (no new events, inside ReasoningRouter), architectural fit (orthogonal to LoRA with retraining caveat).
 
-## 23. Godot Citation Panel UI — OPEN
+## ~~23. Godot Citation Panel UI~~ — DONE
 
 * **Context:** Phase 7 RAG retrieval returns `Citation` objects (document name, chunk ID, score) that are currently not surfaced in the Godot frontend.
 * **Items:**
@@ -212,11 +212,11 @@
   - Update `ui/TESTING.md` manual checklist with citation panel test cases.
 * **Blocker:** None — `rag_retrieval` wire event is already defined and sent. Godot scene work only.
 
-## 24. Real Avatar Artwork — OPEN
+## 24. Real Avatar Artwork — AWAITING ASSETS
 
 * **Context:** The Godot frontend currently uses placeholder colored-circle sprites in `ui/assets/sprites/`. Phase 5 and 6 deferred real artwork.
+* **Decision (2026-04-20):** Option A — static sprite sheets for `AnimatedSprite2D`. Live2D / 3D VRM deferred indefinitely.
 * **Items:**
-  - Commission or create idle/listening/processing/speaking sprite sheets for `AnimatedSprite2D`.
-  - Replace placeholder sprites in `ui/assets/sprites/` and update `avatar_controller.gd` animation frame counts if needed.
-  - Phase 6 target was Live2D (Standard edition) / 3D VRM (Pro edition) — decide on scope before starting.
-* **Blocker:** Design decision on art style and Live2D vs. static sprites must be made first.
+  - Commission or create PNG sprite sheets per `ui/assets/sprites/SPRITE_SPEC.md` (4 state animations mandatory, 8 viseme overlays optional).
+  - Drop PNGs into `ui/assets/sprites/`, import into Godot `SpriteFrames` resource — no code changes needed; `avatar_controller.gd` picks up animations by name.
+* **Blocker:** Artwork — spec written, waiting on art delivery.
