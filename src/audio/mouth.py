@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # Kokoro-82M ONNX outputs at 24 kHz — matches SpeakerThread canonical rate.
 _TTS_SAMPLE_RATE: int = 24_000
 
+# KPipeline.forward yields pred_dur as integer hop-frame counts (not ms).
+# Each frame = hop_length / sample_rate * 1000 ms (from istftnet.py defaults).
+_KOKORO_HOP_LENGTH: int = 256
+_KOKORO_FRAMES_TO_MS: float = _KOKORO_HOP_LENGTH / _TTS_SAMPLE_RATE * 1000.0
+
 # Sentence boundary: split after .  !  ?  … followed by whitespace.
 _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 
@@ -339,9 +344,11 @@ class KokoroTTS:
         logging a debug message and returning without posting any events.
 
         Args:
-            phonemes: Second return value from kokoro_onnx.Kokoro.create().
-                      Expected to be a list of (phoneme_str, start_ms, duration_ms)
-                      tuples -- but we guard against other formats defensively.
+            phonemes: KPipeline.forward phoneme list:
+                      [(phoneme_str: str, start_frames: int, duration_frames: torch.Tensor), ...]
+                      start_frames comes from itertools.accumulate (Python int);
+                      duration_frames is a 0-dim torch.Tensor of hop-frame counts.
+                      Both are converted to float ms via _KOKORO_FRAMES_TO_MS.
             utterance_id: The utterance this viseme sequence belongs to.
         """
         if phonemes is None:
@@ -357,20 +364,24 @@ class KokoroTTS:
 
         for item in phonemes:
             try:
-                phoneme_str, start_ms, duration_ms = item
+                phoneme_str, start_frames, duration_frames = item
             except (TypeError, ValueError):
                 logger.debug(
                     "KokoroTTS: cannot unpack phoneme item %r — skipping", item
                 )
                 continue
 
+            # float() extracts scalar from a 0-dim torch.Tensor via __float__
+            start_ms = float(start_frames) * _KOKORO_FRAMES_TO_MS
+            duration_ms = float(duration_frames) * _KOKORO_FRAMES_TO_MS
+
             if self._event_queue is not None:
                 self._event_queue.put(
                     VisemeEvent(
                         utterance_id=utterance_id,
                         phoneme=str(phoneme_str),
-                        start_ms=int(start_ms),
-                        duration_ms=int(duration_ms),
+                        start_ms=start_ms,
+                        duration_ms=duration_ms,
                     )
                 )
 
