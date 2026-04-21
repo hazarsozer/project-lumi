@@ -4,6 +4,7 @@
 [ext_resource type="Script" path="res://scripts/lumi_client.gd" id="2_client"]
 [ext_resource type="Script" path="res://scripts/avatar_controller.gd" id="3_avatar"]
 [ext_resource type="PackedScene" path="res://scenes/citation_panel.tscn" id="4_citation_panel"]
+[ext_resource type="PackedScene" path="res://scenes/rag_toggle.tscn" id="5_rag_toggle"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
@@ -19,3 +20,5 @@ sprite = NodePath("AnimatedSprite2D")
 position = Vector2(100, 100)
 
 [node name="CitationPanel" parent="." instance=ExtResource("4_citation_panel")]
+
+[node name="RagToggle" parent="." instance=ExtResource("5_rag_toggle")]

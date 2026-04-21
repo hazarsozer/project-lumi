@@ -135,8 +135,10 @@ def test_wake_detected_ignored_when_speaking():
     # Minimum contract: does not crash
     orch._handle_wake_detected(WakeDetectedEvent(timestamp=3.0))
 
-    # State should be SPEAKING or IDLE (interrupt path transitions to IDLE)
-    assert orch._state_machine.current_state in (LumiState.SPEAKING, LumiState.IDLE)
+    # State should be LISTENING (Wave E4 interrupt path: SPEAKING → IDLE → LISTENING).
+    # SPEAKING and IDLE remain accepted for forward-compatibility should the
+    # implementation change again, but the expected outcome is now LISTENING.
+    assert orch._state_machine.current_state in (LumiState.SPEAKING, LumiState.IDLE, LumiState.LISTENING)
 
 
 @pytest.mark.unit
@@ -253,6 +255,75 @@ def test_wake_while_speaking_does_not_crash():
         LumiState.IDLE,
         LumiState.LISTENING,
     )
+
+
+# ---------------------------------------------------------------------------
+# Wave E4 — wake-while-speaking interrupt tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_wake_while_speaking_posts_interrupt_event():
+    """WakeDetectedEvent in SPEAKING state must post an InterruptEvent to the
+    event queue so the TTS playback is cancelled before re-entering LISTENING."""
+    orch = _make_orchestrator()
+    orch._state_machine.transition_to(LumiState.LISTENING)
+    orch._state_machine.transition_to(LumiState.PROCESSING)
+    orch._state_machine.transition_to(LumiState.SPEAKING)
+
+    orch._handle_wake_detected(WakeDetectedEvent(timestamp=10.0))
+
+    # Drain the queue and look for an InterruptEvent.
+    events: list = []
+    try:
+        while True:
+            events.append(orch._event_queue.get_nowait())
+    except Exception:
+        pass
+
+    interrupt_events = [e for e in events if isinstance(e, InterruptEvent)]
+    assert len(interrupt_events) == 1, (
+        f"Expected exactly one InterruptEvent; got: {events}"
+    )
+    assert interrupt_events[0].source == "wake_word"
+
+
+@pytest.mark.unit
+def test_wake_while_speaking_transitions_to_listening():
+    """After posting InterruptEvent, the state machine must be in LISTENING
+    (not SPEAKING or IDLE) so that recording starts immediately."""
+    orch = _make_orchestrator()
+    orch._state_machine.transition_to(LumiState.LISTENING)
+    orch._state_machine.transition_to(LumiState.PROCESSING)
+    orch._state_machine.transition_to(LumiState.SPEAKING)
+
+    orch._handle_wake_detected(WakeDetectedEvent(timestamp=11.0))
+
+    assert orch._state_machine.current_state == LumiState.LISTENING
+
+
+@pytest.mark.unit
+def test_wake_while_not_speaking_no_interrupt():
+    """WakeDetectedEvent from IDLE must NOT post an InterruptEvent — only the
+    standard IDLE → LISTENING transition should happen."""
+    orch = _make_orchestrator()
+    assert orch._state_machine.current_state == LumiState.IDLE
+
+    orch._handle_wake_detected(WakeDetectedEvent(timestamp=12.0))
+
+    # Queue must be empty — no InterruptEvent should have been posted.
+    events: list = []
+    try:
+        while True:
+            events.append(orch._event_queue.get_nowait())
+    except Exception:
+        pass
+
+    interrupt_events = [e for e in events if isinstance(e, InterruptEvent)]
+    assert len(interrupt_events) == 0, (
+        f"InterruptEvent must not be posted from IDLE; got: {events}"
+    )
+    assert orch._state_machine.current_state == LumiState.LISTENING
 
 
 # ---------------------------------------------------------------------------

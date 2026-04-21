@@ -88,8 +88,21 @@ Returns: Text description of screen content on success.
 Returns: "Screenshot captured but vision model not available." when model is absent.
 Failure cases: no screenshot backend available (grim/scrot/Pillow), model load error.
 
+rag_ingest
+~~~~~~~~~~
+Index a local folder or file into the Lumi personal knowledge base.
+
+Schema::
+
+    {"tool": "rag_ingest", "args": {"path": "<absolute or relative folder/file path>"}}
+
+Returns on success: docs indexed count + chunk count.
+Returns on error: descriptive message if path is missing, invalid, or ingest fails.
+Failure cases: non-existent path, path traversal attempt, non-string arg, ingest error.
+
 Default ToolsConfig allowlist: ("launch_app", "clipboard", "file_info", "window_list")
 Note: "screenshot" is registered separately when VisionConfig.enabled=True.
+Note: "rag_ingest" must be added to allowed_tools to activate it.
 """
 
 from src.tools.base import Tool, ToolResult

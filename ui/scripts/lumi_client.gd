@@ -100,7 +100,39 @@ func _drain_buffer() -> void:
 	_buffer = result["remainder"]
 	var messages: Array = result["messages"]
 	for msg in messages:
+		# Handle IPC handshake: Brain sends {"type":"hello",...}, we reply with hello_ack.
+		if msg.get("type", "") == "hello":
+			_handle_hello(msg)
+			continue
 		if msg.has("event") and msg.has("payload"):
 			emit_signal("message_received", msg["event"], msg["payload"])
 		else:
 			push_warning("LumiClient: dropping malformed message (missing 'event' or 'payload')")
+
+
+func _handle_hello(hello: Dictionary) -> void:
+	var remote_version: String = hello.get("version", "")
+	var status: String = "ok"
+	if remote_version != IPCProtocol.VERSION:
+		status = "version_mismatch"
+		push_warning(
+			"LumiClient: IPC version mismatch — Brain=%s, Godot=%s; continuing." \
+			% [remote_version, IPCProtocol.VERSION]
+		)
+	var ack := {
+		"type": "hello_ack",
+		"version": IPCProtocol.VERSION,
+		"status": status,
+	}
+	var ack_json: String = JSON.stringify(ack)
+	var ack_bytes: PackedByteArray = ack_json.to_utf8_buffer()
+	var length: int = ack_bytes.size()
+	var frame := PackedByteArray()
+	frame.append((length >> 24) & 0xFF)
+	frame.append((length >> 16) & 0xFF)
+	frame.append((length >> 8) & 0xFF)
+	frame.append(length & 0xFF)
+	frame.append_array(ack_bytes)
+	var err := _stream.put_data(frame)
+	if err != OK:
+		push_warning("LumiClient: failed to send hello_ack (err=%d)" % err)

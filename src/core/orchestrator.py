@@ -296,98 +296,7 @@ class Orchestrator:
             event: The transcript event containing the user's spoken text.
         """
         self._state_machine.transition_to(LumiState.PROCESSING)
-        self._llm_cancel_flag.clear()
-
-        # Reflex fast-path — no model required.
-        reflex_response = self._reflex_router.route(event.text)
-        if reflex_response is not None:
-            logger.debug("Reflex hit for %r -> %r", event.text, reflex_response)
-            self._memory.add_turn("user", event.text)
-            self._memory.add_turn("assistant", reflex_response)
-            self._memory.save()
-            self.post_event(LLMResponseReadyEvent(text=reflex_response))
-            self._state_machine.transition_to(LumiState.SPEAKING)
-            return
-
-        # Generate utterance_id here so the ZMQ token handler can correlate events.
-        utterance_id = str(uuid.uuid4())
-
-        # RAG intent check — only when RAG is runtime-enabled.
-        use_rag = (
-            self._rag_runtime_enabled
-            and self._reflex_router.route_rag_intent(event.text)
-        )
-
-        # Reasoning slow-path — run in a daemon thread so the event loop
-        # remains responsive to InterruptEvents during long inference.
-        def _run_inference() -> None:
-            try:
-                response = self._reasoning_router.generate(
-                    event.text, self._llm_cancel_flag,
-                    utterance_id=utterance_id, use_rag=use_rag,
-                )
-            except InterruptedError:
-                logger.info("LLM generation cancelled for %r", event.text)
-                return
-            except Exception:
-                logger.exception("LLM inference failed for %r", event.text)
-                with self._llm_state_lock:
-                    if self._state_machine.current_state == LumiState.PROCESSING:
-                        self._state_machine.transition_to(LumiState.IDLE)
-                return
-
-            # Tool-call pass: if the LLM emitted tool-call blocks, execute them
-            # and feed the results back for a second inference pass (single-shot only).
-            tool_calls = parse_tool_calls(response)
-            if tool_calls:
-                results = self._tool_executor.execute(tool_calls, self._llm_cancel_flag)
-                result_lines = []
-                for tc, tr in zip(tool_calls, results):
-                    result_lines.append(
-                        f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
-                    )
-                tool_context = "\n".join(result_lines)
-                followup_prompt = f"{event.text}\n\n[Tool results]\n{tool_context}"
-                try:
-                    response = self._reasoning_router.generate(
-                        followup_prompt, self._llm_cancel_flag, utterance_id=utterance_id
-                    )
-                except InterruptedError:
-                    logger.info("LLM tool-followup cancelled for %r", event.text)
-                    return
-                except Exception:
-                    logger.exception("LLM tool-followup failed for %r", event.text)
-                    with self._llm_state_lock:
-                        if self._state_machine.current_state == LumiState.PROCESSING:
-                            self._state_machine.transition_to(LumiState.IDLE)
-                    return
-
-            # Hold the state lock so this check+transition is atomic with
-            # _handle_interrupt's own set+transition block.  Without the lock,
-            # the interrupt handler could transition to IDLE between the guard
-            # check here and the transition_to(SPEAKING) call below, resulting
-            # in an illegal IDLE→SPEAKING transition.
-            with self._llm_state_lock:
-                if self._state_machine.current_state != LumiState.PROCESSING:
-                    logger.debug(
-                        "State changed during inference, discarding response for %r",
-                        event.text,
-                    )
-                    return
-
-                try:
-                    self._memory.save()
-                    self.post_event(LLMResponseReadyEvent(text=response))
-                    self._state_machine.transition_to(LumiState.SPEAKING)
-                except Exception:
-                    logger.exception(
-                        "Post-inference save/dispatch failed for %r; returning to IDLE",
-                        event.text,
-                    )
-                    self._state_machine.transition_to(LumiState.IDLE)
-
-        thread = threading.Thread(target=_run_inference, daemon=True)
-        thread.start()
+        self._dispatch_user_turn(event.text, source="transcript")
 
     def _handle_user_text(self, event: UserTextEvent) -> None:
         """Handle UserTextEvent: route typed text to reflex or LLM.
@@ -401,10 +310,6 @@ class Orchestrator:
         machine is IDLE, this handler performs the IDLE→LISTENING→PROCESSING
         double-step because the wake-word pipeline that normally drives that
         transition is not involved in the text-input path.
-
-        Fast-path: try ReflexRouter first (regex, no model needed).
-        Slow-path: dispatch ReasoningRouter in a daemon thread so the
-        event loop remains unblocked during inference.
 
         Args:
             event: The user-text event containing text from the frontend.
@@ -423,13 +328,32 @@ class Orchestrator:
             self._state_machine.transition_to(LumiState.LISTENING)
 
         self._state_machine.transition_to(LumiState.PROCESSING)
+        self._dispatch_user_turn(event.text, source="user_text")
+
+    def _dispatch_user_turn(self, text: str, source: str) -> None:
+        """Core dispatch logic shared by _handle_transcript and _handle_user_text.
+
+        Called after the state machine has already been moved to PROCESSING.
+        Clears the LLM cancel flag, attempts the reflex fast-path, and falls
+        through to the reasoning slow-path in a daemon thread when no reflex
+        matches.
+
+        Fast-path: try ReflexRouter first (regex, no model needed).
+        Slow-path: dispatch ReasoningRouter in a daemon thread so the
+        event loop remains unblocked during inference.
+
+        Args:
+            text: The user's input text (from STT transcript or Godot frontend).
+            source: Label used in log messages to identify the calling path
+                (``"transcript"`` or ``"user_text"``).
+        """
         self._llm_cancel_flag.clear()
 
         # Reflex fast-path — no model required.
-        reflex_response = self._reflex_router.route(event.text)
+        reflex_response = self._reflex_router.route(text)
         if reflex_response is not None:
-            logger.debug("Reflex hit for %r -> %r", event.text, reflex_response)
-            self._memory.add_turn("user", event.text)
+            logger.debug("Reflex hit for %r -> %r", text, reflex_response)
+            self._memory.add_turn("user", text)
             self._memory.add_turn("assistant", reflex_response)
             self._memory.save()
             self.post_event(LLMResponseReadyEvent(text=reflex_response))
@@ -442,7 +366,7 @@ class Orchestrator:
         # RAG intent check — only when RAG is runtime-enabled.
         use_rag = (
             self._rag_runtime_enabled
-            and self._reflex_router.route_rag_intent(event.text)
+            and self._reflex_router.route_rag_intent(text)
         )
 
         # Reasoning slow-path — run in a daemon thread so the event loop
@@ -450,14 +374,14 @@ class Orchestrator:
         def _run_inference() -> None:
             try:
                 response = self._reasoning_router.generate(
-                    event.text, self._llm_cancel_flag,
+                    text, self._llm_cancel_flag,
                     utterance_id=utterance_id, use_rag=use_rag,
                 )
             except InterruptedError:
-                logger.info("LLM generation cancelled for %r", event.text)
+                logger.info("LLM generation cancelled for %r (source=%s)", text, source)
                 return
             except Exception:
-                logger.exception("LLM inference failed for %r", event.text)
+                logger.exception("LLM inference failed for %r (source=%s)", text, source)
                 with self._llm_state_lock:
                     if self._state_machine.current_state == LumiState.PROCESSING:
                         self._state_machine.transition_to(LumiState.IDLE)
@@ -474,26 +398,32 @@ class Orchestrator:
                         f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
                     )
                 tool_context = "\n".join(result_lines)
-                followup_prompt = f"{event.text}\n\n[Tool results]\n{tool_context}"
+                followup_prompt = f"{text}\n\n[Tool results]\n{tool_context}"
                 try:
                     response = self._reasoning_router.generate(
                         followup_prompt, self._llm_cancel_flag, utterance_id=utterance_id
                     )
                 except InterruptedError:
-                    logger.info("LLM tool-followup cancelled for %r", event.text)
+                    logger.info("LLM tool-followup cancelled for %r (source=%s)", text, source)
                     return
                 except Exception:
-                    logger.exception("LLM tool-followup failed for %r", event.text)
+                    logger.exception("LLM tool-followup failed for %r (source=%s)", text, source)
                     with self._llm_state_lock:
                         if self._state_machine.current_state == LumiState.PROCESSING:
                             self._state_machine.transition_to(LumiState.IDLE)
                     return
 
+            # Hold the state lock so this check+transition is atomic with
+            # _handle_interrupt's own set+transition block.  Without the lock,
+            # the interrupt handler could transition to IDLE between the guard
+            # check here and the transition_to(SPEAKING) call below, resulting
+            # in an illegal IDLE→SPEAKING transition.
             with self._llm_state_lock:
                 if self._state_machine.current_state != LumiState.PROCESSING:
                     logger.debug(
-                        "State changed during inference, discarding response for %r",
-                        event.text,
+                        "State changed during inference, discarding response for %r (source=%s)",
+                        text,
+                        source,
                     )
                     return
 
@@ -503,8 +433,9 @@ class Orchestrator:
                     self._state_machine.transition_to(LumiState.SPEAKING)
                 except Exception:
                     logger.exception(
-                        "Post-inference save/dispatch failed for %r; returning to IDLE",
-                        event.text,
+                        "Post-inference save/dispatch failed for %r (source=%s); returning to IDLE",
+                        text,
+                        source,
                     )
                     self._state_machine.transition_to(LumiState.IDLE)
 
@@ -597,23 +528,45 @@ class Orchestrator:
         logger.info("RAG runtime enabled set to %s", event.enabled)
 
     def _handle_wake_detected(self, event: WakeDetectedEvent) -> None:
-        """Handle WakeDetectedEvent: transition IDLE → LISTENING.
+        """Handle WakeDetectedEvent: transition to LISTENING.
 
-        Events arriving in any state other than IDLE are silently dropped so
-        that spurious detections during active speech or processing do not
-        corrupt the state machine.
+        Normal path (IDLE): IDLE → LISTENING.
+
+        Interrupt path (SPEAKING): posts an InterruptEvent so that any
+        in-flight TTS playback is cancelled, then transitions
+        SPEAKING → IDLE → LISTENING so recording can begin immediately.
+        This prevents a double-listen deadlock when the user says the wake
+        word while Lumi is mid-response.
+
+        Events arriving in PROCESSING or LISTENING are silently dropped to
+        avoid corrupting the state machine during active inference.
 
         Args:
             event: The wake-word detection event posted by Ears.
         """
         current = self._state_machine.current_state
-        if current != LumiState.IDLE:
-            logger.debug(
-                "WakeDetectedEvent received in state %s; ignoring.", current.value
-            )
+
+        if current == LumiState.IDLE:
+            self._state_machine.transition_to(LumiState.LISTENING)
+            logger.info("Wake word detected — transitioning to LISTENING")
             return
-        self._state_machine.transition_to(LumiState.LISTENING)
-        logger.info("Wake word detected — transitioning to LISTENING")
+
+        if current == LumiState.SPEAKING:
+            logger.info(
+                "Wake word detected while SPEAKING — posting interrupt and entering LISTENING"
+            )
+            # Post InterruptEvent so _handle_interrupt can drain TTS queues
+            # and cancel in-flight synthesis when it is processed by the loop.
+            self._event_queue.put(InterruptEvent(source="wake_word"))
+            # Transition synchronously so Ears can start recording without
+            # waiting for the event loop to process the InterruptEvent first.
+            self._state_machine.transition_to(LumiState.IDLE)
+            self._state_machine.transition_to(LumiState.LISTENING)
+            return
+
+        logger.debug(
+            "WakeDetectedEvent received in state %s; ignoring.", current.value
+        )
 
     def _handle_recording_complete(self, event: RecordingCompleteEvent) -> None:
         """Handle RecordingCompleteEvent: invoke Scribe in a daemon thread.
@@ -711,6 +664,15 @@ class Orchestrator:
 
         if current == LumiState.IDLE:
             logger.debug("Already IDLE, ignoring interrupt")
+            return
+
+        if current == LumiState.LISTENING:
+            # Wake-while-speaking path: the state machine was already advanced
+            # to LISTENING by _handle_wake_detected before this InterruptEvent
+            # was enqueued.  Nothing further to cancel — recording is starting.
+            logger.debug(
+                "Interrupt received while LISTENING (wake-while-speaking); no-op"
+            )
             return
 
         if current == LumiState.PROCESSING:

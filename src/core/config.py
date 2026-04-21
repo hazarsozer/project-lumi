@@ -117,6 +117,14 @@ class LLMConfig:
     # VRAM budget in gigabytes used to decide the offload strategy at runtime.
     vram_budget_gb: float = 4.0
 
+    # Optional KV-cache quantization type forwarded to llama_cpp.Llama as
+    # ``cache_type_k`` / ``cache_type_v``.  ``None`` leaves the cache as FP16
+    # (llama.cpp default).  Set to e.g. ``"turbo3"`` once upstream
+    # llama-cpp-python ships TurboQuant (llama.cpp PR #21089).  If the
+    # installed build does not yet support the kwarg, ModelLoader silently
+    # falls back to the FP16 cache and logs a warning.
+    kv_cache_quant: str | None = None
+
     # Directory for persistent conversation memory (expanded at use time).
     memory_dir: str = "~/.lumi/memory"
 
@@ -198,6 +206,20 @@ class VisionConfig:
 
 
 @dataclass(frozen=True)
+class PersonaConfig:
+    """Configuration for Lumi's persona and system prompt (Wave F1).
+
+    The ``system_prompt`` field holds the full text sent as the ``<|system|>``
+    block.  It defaults to ``None`` so that ``PromptEngine`` can fall back to
+    its built-in ``DEFAULT_SYSTEM_PROMPT`` constant when the config file does
+    not override it.
+    """
+
+    # Full system prompt text.  None means "use the built-in default".
+    system_prompt: str | None = None
+
+
+@dataclass(frozen=True)
 class RAGConfig:
     """Configuration for the personal knowledge-base retriever (Phase 7)."""
 
@@ -260,6 +282,7 @@ class LumiConfig:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
+    persona: PersonaConfig = field(default_factory=PersonaConfig)
 
     # Root-logger level forwarded to setup_logging().
     log_level: str = "INFO"
@@ -433,6 +456,10 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         **_merge_section(RAGConfig(), raw.get("rag", {}))
     )
 
+    persona_cfg = PersonaConfig(
+        **_merge_section(PersonaConfig(), raw.get("persona", {}))
+    )
+
     # Top-level scalar overrides.
     top_defaults = LumiConfig()
     edition = raw["edition"] if "edition" in raw else detect_edition()
@@ -449,6 +476,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         tools=tools_cfg,
         vision=vision_cfg,
         rag=rag_cfg,
+        persona=persona_cfg,
         log_level=log_level,
         json_logs=json_logs,
     )

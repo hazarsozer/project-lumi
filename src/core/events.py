@@ -204,3 +204,24 @@ class EarsErrorEvent:
 
     code: str    # e.g. "ears.unrecoverable"
     detail: str  # human-readable description for logs / UI toast
+
+
+@dataclass(frozen=True)
+class ToolResultEvent:
+    """Fired when an async tool (e.g. rag_ingest) finishes execution.
+
+    Posted via the event_callback supplied to the tool at construction time.
+    Allows the orchestrator or UI layer to react to long-running tool results
+    without blocking the main inference thread.
+
+    Attributes:
+        tool_name: The ``Tool.name`` identifier of the tool that completed.
+        success:   True when the tool finished without error.
+        output:    Human-readable result string (mirrors ToolResult.output).
+        data:      Structured result dict (mirrors ToolResult.data).
+    """
+
+    tool_name: str
+    success: bool
+    output: str
+    data: dict  # type: ignore[type-arg]  # dict[str, Any] but frozen needs hashable

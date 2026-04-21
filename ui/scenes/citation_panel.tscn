@@ -15,7 +15,7 @@ anchor_bottom = 0.0
 offset_left = -320.0
 offset_top = 16.0
 offset_right = -16.0
-offset_bottom = 400.0
+offset_bottom = 420.0
 grow_horizontal = 0
 grow_vertical = 1
 
@@ -31,9 +31,16 @@ size_flags_horizontal = 3
 text = "Sources"
 theme_override_font_sizes/font_size = 16
 
-[node name="HideButton" type="Button" parent="PanelContainer/VBoxContainer/HeaderRow"]
+[node name="CloseButton" type="Button" parent="PanelContainer/VBoxContainer/HeaderRow"]
 layout_mode = 2
-text = "Hide"
+text = "X"
+tooltip_text = "Close"
+
+[node name="QueryLabel" type="Label" parent="PanelContainer/VBoxContainer"]
+layout_mode = 2
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1.0)
 
 [node name="CitationsList" type="VBoxContainer" parent="PanelContainer/VBoxContainer"]
 layout_mode = 2

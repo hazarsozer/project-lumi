@@ -8,12 +8,15 @@ extends Node
 @onready var text_bubble: TextBubble = $TextBubble
 # CitationPanel is instanced from citation_panel.tscn and wired in main.tscn.
 @onready var citation_panel: CitationPanel = $CitationPanel
+# RagToggle is instanced from rag_toggle.tscn and wired in main.tscn.
+@onready var rag_toggle: RagToggle = $RagToggle
 
 
 func _ready() -> void:
 	client.message_received.connect(_on_message)
 	client.connected_to_brain.connect(_on_connected)
 	client.disconnected_from_brain.connect(_on_disconnected)
+	rag_toggle.rag_state_changed.connect(_on_rag_state_changed)
 
 
 func _input(event: InputEvent) -> void:
@@ -23,11 +26,21 @@ func _input(event: InputEvent) -> void:
 
 func _on_connected() -> void:
 	print("main.gd: connected to Brain")
+	# Sync the Brain with the persisted RAG toggle state on (re)connect.
+	_send_rag_config(rag_toggle.is_enabled())
 
 
 func _on_disconnected() -> void:
 	print("main.gd: disconnected from Brain")
 	avatar.on_state_change("idle")
+
+
+func _on_rag_state_changed(enabled: bool) -> void:
+	_send_rag_config(enabled)
+
+
+func _send_rag_config(enabled: bool) -> void:
+	client.send_event("set_config", {"key": "rag_enabled", "value": enabled})
 
 
 func _on_message(event_name: String, payload: Dictionary) -> void:

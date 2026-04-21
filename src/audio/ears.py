@@ -287,18 +287,21 @@ class Ears:
 #Testing
 if __name__ == "__main__":
     import time as _time_main
-    
+    import logging as _logging_main
+    _logging_main.basicConfig(level=_logging_main.DEBUG)
+    _main_logger = _logging_main.getLogger(__name__)
+
     def wake_up_action():
-        print("Wake up action!")
+        _main_logger.info("Wake up action!")
 
     ears = Ears(sensitivity=0.5)
-    
+
     try:
         ears.start(on_wake_callback=wake_up_action)
         while True:
             _time_main.sleep(1)
 
     except KeyboardInterrupt:
-        print("Stopping ears...")
+        _main_logger.info("Stopping ears...")
         ears.stop()
 
