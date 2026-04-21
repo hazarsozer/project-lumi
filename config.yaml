@@ -113,6 +113,12 @@ llm:
   # The LLM engine will not exceed this limit.
   vram_budget_gb: 4.0
 
+  # KV-cache quantization.  Omit (or leave as null) for FP16 cache (default).
+  # Uncomment to activate TurboQuant once upstream llama-cpp-python ships
+  # llama.cpp PR #21089.  ModelLoader falls back to FP16 with a warning on
+  # older llama-cpp-python builds that do not yet expose the kwarg.
+  # kv_cache_quant: "turbo3"  # TurboQuant KV cache compression (3-bit); requires llama-cpp-python with upstream PR #21089
+
   # Directory for persistent conversation memory.
   # Tilde (~) is expanded at use time.
   memory_dir: ~/.lumi/memory
@@ -180,6 +186,15 @@ vision:
 
   # Downscale captured screenshots to this max resolution before inference.
   max_resolution: 1280
+
+# ─────────────────────────────────────────────────────────────────────────────
+# persona — Lumi's identity and system prompt (Wave F1)
+# ─────────────────────────────────────────────────────────────────────────────
+persona:
+  # Full system prompt sent to the LLM as the <|system|> block.
+  # Omit or set to null to use the built-in default persona defined in
+  # src/llm/prompt_engine.py (DEFAULT_SYSTEM_PROMPT).
+  system_prompt: null
 
 # ─────────────────────────────────────────────────────────────────────────────
 # rag — personal knowledge-base retriever (Phase 7)

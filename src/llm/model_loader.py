@@ -40,19 +40,42 @@ class ModelLoader:
         ScreenshotTool's vision-model load, preventing two GGUF models from
         occupying VRAM simultaneously.
 
+        If ``config.kv_cache_quant`` is set, ``cache_type_k`` / ``cache_type_v``
+        are forwarded to ``llama_cpp.Llama``.  Older llama-cpp-python builds
+        that predate upstream PR #21089 do not accept those kwargs — we detect
+        the resulting ``TypeError``, log a warning, and retry with the default
+        FP16 cache so the model still loads.
+
         Raises:
             FileNotFoundError: If ``config.model_path`` does not exist on disk.
         """
         model_path = Path(config.model_path)
 
+        kwargs: dict[str, Any] = {
+            "model_path": str(model_path),
+            "n_gpu_layers": config.n_gpu_layers,
+            "n_ctx": config.context_length,
+            "verbose": False,
+        }
+        if config.kv_cache_quant is not None:
+            kwargs["cache_type_k"] = config.kv_cache_quant
+            kwargs["cache_type_v"] = config.kv_cache_quant
+
         with self._vram_lock:
             try:
-                self._model = llama_cpp.Llama(
-                    model_path=str(model_path),
-                    n_gpu_layers=config.n_gpu_layers,
-                    n_ctx=config.context_length,
-                    verbose=False,
-                )
+                self._model = llama_cpp.Llama(**kwargs)
+            except TypeError as exc:
+                if "cache_type" in str(exc):
+                    logger.warning(
+                        "TurboQuant KV cache types not supported by installed "
+                        "llama-cpp-python (upstream PR #21089 not yet shipped); "
+                        "falling back to FP16 KV cache"
+                    )
+                    kwargs.pop("cache_type_k", None)
+                    kwargs.pop("cache_type_v", None)
+                    self._model = llama_cpp.Llama(**kwargs)
+                else:
+                    raise
             except ValueError as exc:
                 if "does not exist" in str(exc):
                     raise FileNotFoundError(

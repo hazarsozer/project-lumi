@@ -130,3 +130,67 @@ def test_load_reraises_non_file_not_found_value_error(mock_llama_cpp: MagicMock)
     loader = ModelLoader()
     with pytest.raises(ValueError, match="invalid quantization type"):
         loader.load(config)
+
+
+@pytest.mark.unit
+def test_kv_cache_quant_forwarded(mock_llama_cpp: MagicMock) -> None:
+    """When config.kv_cache_quant is set, cache_type_k and cache_type_v must be
+    forwarded to llama_cpp.Llama()."""
+    config = LLMConfig(kv_cache_quant="turbo3")
+    loader = ModelLoader()
+    loader.load(config)
+
+    assert mock_llama_cpp.call_count == 1
+    kwargs = mock_llama_cpp.call_args.kwargs
+    assert kwargs.get("cache_type_k") == "turbo3"
+    assert kwargs.get("cache_type_v") == "turbo3"
+
+
+@pytest.mark.unit
+def test_kv_cache_quant_none_not_forwarded(mock_llama_cpp: MagicMock) -> None:
+    """When config.kv_cache_quant is None (default), cache_type_k/cache_type_v
+    must not be present in the Llama() kwargs."""
+    config = LLMConfig()  # kv_cache_quant defaults to None
+    assert config.kv_cache_quant is None
+    loader = ModelLoader()
+    loader.load(config)
+
+    assert mock_llama_cpp.call_count == 1
+    kwargs = mock_llama_cpp.call_args.kwargs
+    assert "cache_type_k" not in kwargs
+    assert "cache_type_v" not in kwargs
+
+
+@pytest.mark.unit
+def test_kv_cache_quant_graceful_fallback(
+    mock_llama_cpp: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When the installed llama-cpp-python predates PR #21089, the first call
+    raises TypeError('...cache_type_k...').  ModelLoader must log a warning,
+    drop the kwargs, and retry successfully."""
+    # First invocation: raise TypeError as an old llama-cpp-python would.
+    # Second invocation: return the normal mocked instance.
+    fallback_instance = MagicMock(name="fallback_llama")
+    mock_llama_cpp.side_effect = [
+        TypeError("Llama.__init__() got an unexpected keyword argument 'cache_type_k'"),
+        fallback_instance,
+    ]
+
+    config = LLMConfig(kv_cache_quant="turbo3")
+    loader = ModelLoader()
+    with caplog.at_level("WARNING"):
+        loader.load(config)
+
+    # Warning logged about fallback.
+    assert any("TurboQuant" in rec.message or "falling back" in rec.message.lower()
+               for rec in caplog.records)
+
+    # Two calls: one that raised, one retry without the quant kwargs.
+    assert mock_llama_cpp.call_count == 2
+    retry_kwargs = mock_llama_cpp.call_args_list[1].kwargs
+    assert "cache_type_k" not in retry_kwargs
+    assert "cache_type_v" not in retry_kwargs
+
+    # Model ended up loaded via the fallback path.
+    assert loader.is_loaded is True
+    assert loader.model is fallback_instance
