@@ -42,7 +42,7 @@
 - **RAG personal knowledge base** — hybrid BM25 + vector kNN retrieval (SQLite FTS5 + sqlite-vec), RRF fusion, `all-MiniLM-L6-v2` embeddings; `scripts/ingest_docs.py` to index personal documents; off by default
 - OS automation tools: app launch, clipboard, file info, window list, screenshot analysis (moondream2)
 - LLM token streaming to Godot overlay; per-viseme-group mouth animations (Kokoro lip-sync)
-- 527 tests with 80% coverage gate enforced in CI
+- ~749 tests at 91% coverage (80% gate enforced in CI); behavioral regression contract suite in `tests/test_regression.py`
 
 ---
 
@@ -147,6 +147,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | Knowledge retrieval | Hybrid BM25+vec RAG (Phase 7); SQLite FTS5 + sqlite-vec; all-MiniLM-L6-v2 |
 | Frontend | Godot 4 (`ui/`; set `ipc.enabled: true` to activate) |
 | IPC | Raw TCP, 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; no pyzmq) |
+| IPC handshake | Version negotiation via `src/core/handshake.py` (`hello` / `hello_ack`) |
+| Metrics | Stdlib histogram module `src/core/metrics.py` (p50/p95/p99, no external deps) |
 | Testing | pytest + pytest-cov (80% coverage gate) |
 | Logging | Python `logging` module (`src/core/logging_config.py`) |
 

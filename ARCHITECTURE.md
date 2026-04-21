@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 6 complete (2026-04-17).
+> Last updated to reflect actual state as of Phase 7 complete + Waves E3–G5 merged (2026-04-21).
 
 ---
 
@@ -192,11 +192,12 @@ Hardware is auto-detected at startup to select the appropriate edition.
 |---|---|
 | Language | Python 3.12 |
 | Package Manager | `uv` |
-| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq) |
+| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). |
+| Observability | `src/core/metrics.py` — stdlib histogram (p50/p95/p99) for latency tracking without external deps |
 | Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — hard/soft checks; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 534 tests) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, ~749 tests at 91% coverage, 4 skipped) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)
@@ -259,9 +260,13 @@ Rather than loading multiple full GGUF models, keep one base model in VRAM perma
 |---|---|
 | Base model (Phi-3.5 Mini) | ~2.2 GB |
 | Audio pipeline (openwakeword + faster-whisper) | ~0.3 GB |
-| KV cache | ~0.3 GB |
+| KV cache (FP16) | ~0.3 GB |
+| KV cache with TurboQuant 3–4 bit (conditional, Wave I1) | ~0.075–0.1 GB |
 | LoRA adapters (per active) | ~0.05 GB |
-| **Total** | ~2.85 GB (comfortable within 3.8 GB budget) |
+| **Total (baseline)** | ~2.85 GB (comfortable within 3.8 GB budget) |
+| **Total with TurboQuant** | ~2.6 GB; savings scale with context length (0.4–0.75 GB saved at 8k–16k ctx) |
+
+**TurboQuant KV quantization (conditional, Wave I1):** Google Research ICLR 2026 technique — rotates KV vectors via Fast Walsh-Hadamard Transform, then scalar-quantizes to 3–4 bits. Stacks on top of GGUF weight quantization with no model conversion. Integrates via `cache_type_k="turbo3"` / `cache_type_v="turbo3"` kwargs on `llama_cpp.Llama()` in `src/llm/model_loader.py`. **Blocked on upstream:** awaits llama.cpp PR #21089 propagating into a `llama-cpp-python` release. Config plumbing (`llm.kv_cache_quant` key) ships in Wave I1; flip-switch activation follows once upstream ships.
 
 **Prerequisites:** Before building hot-swap infrastructure, verify that `llama-cpp-python>=0.2.90` exposes `llama_lora_adapter_set` / `llama_lora_adapter_remove` via a quick validation test. If unavailable, fall back to pre-merged GGUFs with `ModelRegistry`.
 
@@ -507,9 +512,15 @@ Lumi/
 │   ├── test_rag_retriever.py   # RAGRetriever: timeout, cancel, char-budget (12 tests)
 │   ├── test_rag_intent.py      # route_rag_intent: patterns, edge cases (13 tests)
 │   ├── test_prompt_engine_rag.py  # rag_context injection (7 tests)
+│   ├── test_eval_persona.py        # scripts/eval_persona.py harness (72 tests)
+│   ├── test_ipc_handshake.py       # Version handshake protocol (15 tests); 100% coverage
+│   ├── test_metrics.py             # Histogram module (13 TDD tests); 95% coverage
+│   ├── test_orchestrator_audio_wiring.py # Wake-while-speaking interrupt (3 tests)
 │   ├── test_orchestrator_recovery.py # Orchestrator: memory.save() crash → IDLE recovery (5 tests)
 │   ├── test_reasoning_router_rag.py # use_rag flag, _maybe_retrieve (7 tests)
+│   ├── test_regression.py          # 6 behavioral contract regressions (persona + state invariants)
 │   ├── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
+│   ├── test_tool_rag_ingest.py     # rag_ingest tool (15 tests)
 │   ├── test_vram_mutex_concurrent.py # _VRAM_LOCK mutual exclusion under concurrency (3 tests)
 │   └── integration/
 │       ├── __init__.py
@@ -533,9 +544,11 @@ Lumi/
 │   │   ├── config.py           # LumiConfig, AudioConfig, ScribeConfig, LLMConfig, TTSConfig, IPCConfig,
 │   │   │                       #   load_config(), detect_edition()
 │   │   ├── events.py           # Frozen event types + ZMQMessage dataclass
+│   │   ├── handshake.py        # IPC version handshake (hello / hello_ack); 100% coverage
 │   │   ├── ipc_transport.py    # IPCTransport: single-client TCP server, 4-byte length-prefix framing,
 │   │   │                       #   two daemon threads (ipc-accept, ipc-recv), stdlib socket only
 │   │   ├── logging_config.py   # setup_logging() — human-readable or JSON structured output
+│   │   ├── metrics.py          # Stdlib histogram module (p50/p95/p99, thread-safe); 95% coverage
 │   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling,
 │   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring,
 │   │   │                       #   ZMQServer injection, _handle_user_text handler
@@ -576,12 +589,15 @@ Lumi/
 │   │   └── main.tscn           # Root scene (wires client signals)
 │   ├── scripts/
 │   │   ├── avatar_controller.gd # Drives AnimatedSprite2D from Brain state events
+│   │   ├── citation_panel.gd   # Citation panel (latency header, query subtitle, path truncation, 8s auto-hide)
 │   │   ├── ipc_protocol.gd     # 4-byte length-prefix frame encode/decode
-│   │   ├── lumi_client.gd      # StreamPeerTCP client with auto-reconnect (2 s retry)
-│   │   └── main.gd             # Root scene logic: wires signals, Escape → interrupt
+│   │   ├── lumi_client.gd      # StreamPeerTCP client with auto-reconnect (2 s retry); sends hello_ack
+│   │   ├── main.gd             # Root scene logic: wires signals, Escape → interrupt, Ctrl+R → RAG toggle
+│   │   └── rag_toggle.gd       # Green/grey RAG pill (Ctrl+R); ConfigFile persistence
 │   ├── README.md               # Godot setup and running instructions
 │   └── TESTING.md              # Manual test checklist for Godot frontend
 ├── scripts/
+│   ├── eval_persona.py         # 20 prompts × 8 criteria persona eval; offline (--dry-run) + live (--live) modes
 │   ├── ingest_docs.py          # CLI: chunk + embed + store personal documents into RAG store
 │   ├── measure_base_latency.py # Benchmark: LLM-only p95 gate (< 1.7 s; Phase 7 entry gate)
 │   └── measure_rag_latency.py  # Benchmark: retrieval+LLM p95 gate (< 2.0 s)
