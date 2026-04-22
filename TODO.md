@@ -147,12 +147,21 @@
   - Dataset generation (synthetic + manual + live mining) — ~1000–1200 examples across 6 categories
   - GGUF export pipeline — merge LoRA → convert → quantize → evaluate (Q4_K_M vs FP16 baseline)
   - Evaluation suite (`tests/test_model_quality.py`) — automated assertions (identity, tool calls, brevity) + manual checklist
-  - Domain router (`src/llm/domain_router.py`) — Option A (regex, <1ms), Option B (embedding, ~20ms), decision gate at 20% miss rate
+  - ~~Domain router (`src/llm/domain_router.py`) — Option A (regex, <1ms), Option B (embedding, ~20ms), decision gate at 20% miss rate~~ — **DONE** (shipped; `DomainRouter.classify()`, 6 domains, safety-first priority order; 39 tests passing)
   - LoRA hot-swap architecture — verify `llama_lora_adapter_set` API in `llama-cpp-python>=0.2.90`; fallback to ModelRegistry if unavailable
-  - ModelRegistry (`src/llm/model_registry.py`) — Full GGUF swapping (2.5–7s) if LoRA API missing
+  - ~~ModelRegistry (`src/llm/model_registry.py`) — Full GGUF swapping (2.5–7s) if LoRA API missing~~ — **DONE** (shipped; `register()`, `load()`, `unload()`, `current_name`, `is_loaded`, `model`, `list_registered()`; 11 tests passing)
   - Versioning scheme: `lumi-phi35-v{N}-Q4_K_M.gguf` + specialist variants (`lumi-phi35-chat-v1`, `lumi-phi35-os-v1`)
 * **Phased rollout:** v1 (identity + brevity), v2 (+ OS tools), v3 (+ code + multi-turn), v4 (+ internet tools)
 * **Reference:** See `ARCHITECTURE.md` Section 5 for full strategy: LoRA config table, dataset category specs, training workflow, tool palette, proof-of-concept experiment gate, and open questions.
+
+**Backlog (blocked — external dependencies):**
+  - Wave H3 — QLoRA fine-tune (`scripts/finetune_lora.py`): blocked on ≥8 GB VRAM GPU
+  - Wave H4 — Merge LoRA adapter: blocked on Wave H3
+  - Wave H5 — Evaluate delta (Q4_K_M vs FP16 baseline): blocked on Wave H3
+  - Wave H6 — Hot-swap wiring into orchestrator: blocked on Wave H3
+  - Wave I3 — Avatar sprite integration (`ui/assets/sprites/`): blocked on external PNG delivery
+  - TurboQuant activation — uncomment `kv_cache_quant: "turbo3"` in `config.yaml`: blocked on llama.cpp PR #21089 shipping in `llama-cpp-python`
+  - Wave J1+ — pip-installable wheel: not yet scoped
 
 ## ~~22. Phase 7: RAG Personal Knowledge Base~~ — DONE
 

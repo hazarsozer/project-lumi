@@ -197,7 +197,7 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — hard/soft checks; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, ~749 tests at 91% coverage, 4 skipped) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 820 passed, 4 skipped) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)
@@ -522,6 +522,8 @@ Lumi/
 │   ├── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
 │   ├── test_tool_rag_ingest.py     # rag_ingest tool (15 tests)
 │   ├── test_vram_mutex_concurrent.py # _VRAM_LOCK mutual exclusion under concurrency (3 tests)
+│   ├── test_domain_router.py       # DomainRouter.classify(): all 6 domains + general fallback (39 tests)
+│   ├── test_model_registry.py      # ModelRegistry: register, load, unload, properties (11 tests)
 │   └── integration/
 │       ├── __init__.py
 │       ├── fake_godot_client.py    # Test helper: real TCP client simulating Godot Body
@@ -563,8 +565,15 @@ Lumi/
 │   └── llm/
 │       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
 │       │                       #   ConversationMemory, ModelLoader, PromptEngine
+│       ├── domain_router.py    # DomainRouter: regex domain classifier (<1ms); classify(text) → str;
+│       │                       #   6 domains (refusal_no_apology, tool_call, out_of_scope,
+│       │                       #   knowledge_limit, concise_factual, plain_prose) + "general" fallback;
+│       │                       #   safety-first priority order (refusal checked before tool_call)
 │       ├── memory.py           # JSON-persisted conversation history (ConversationMemory)
 │       ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama); module-level _VRAM_LOCK shared with ScreenshotTool
+│       ├── model_registry.py   # ModelRegistry: named GGUF hot-swap registry; register(name, config),
+│       │                       #   load(name), unload(), current_name, is_loaded, model,
+│       │                       #   list_registered(); composition over ModelLoader; ~2.5–7s swap latency
 │       ├── prompt_engine.py    # ChatML prompt assembly + token-budget truncation
 │       ├── reasoning_router.py # Token-by-token LLM inference with cancel flag; use_rag flag;
 │       │                       #   posts RAGRetrievalEvent after retrieval
@@ -612,13 +621,9 @@ Lumi/
 Planned additions (not yet created):
 
 ```
-src/
-└── llm/
-    ├── domain_router.py        # Regex/embedding-based domain classification (Phase 3+)
-    └── model_registry.py       # Fallback: full GGUF model swapping (Phase 3+, if LoRA API unavailable)
 scripts/
-├── train_lumi.py               # QLoRA training entrypoint (Phase 3+)
-└── merge_lora.py               # Adapter merge + GGUF export (Phase 3+)
+├── train_lumi.py               # QLoRA training entrypoint (Phase 3+; blocked on ≥8 GB VRAM GPU)
+└── merge_lora.py               # Adapter merge + GGUF export (Phase 3+; blocked on train_lumi.py)
 ```
 
 ---
