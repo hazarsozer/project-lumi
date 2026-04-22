@@ -10,7 +10,25 @@ Bootstraps the application in five steps:
 
 SIGINT and SIGTERM both post ShutdownEvent to the Orchestrator for graceful exit.
 The Orchestrator calls ears.start() on entry to run() and ears.stop() on ShutdownEvent.
+
+--setup flag:
+    Pass ``--setup`` (optionally with ``--yes``) to run the interactive first-run
+    setup wizard before any model is loaded.  The wizard is imported lazily so
+    this works even when the venv is only partially populated.
 """
+
+# ---------------------------------------------------------------------------
+# --setup early exit — must appear before any heavy imports so the wizard
+# works even when optional extras (llama-cpp-python, kokoro-onnx, …) are
+# not yet installed.
+# ---------------------------------------------------------------------------
+import sys as _sys
+
+if "--setup" in _sys.argv:
+    from scripts.setup_wizard import run_setup as _run_setup
+
+    _yes = "--yes" in _sys.argv or "-y" in _sys.argv
+    _sys.exit(_run_setup(yes=_yes))
 
 import logging
 import signal
