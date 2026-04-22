@@ -166,7 +166,7 @@ tools:
   enabled: true
 
   # Allowlist of tool names the executor may run.
-  allowed_tools: [launch_app, clipboard, file_info, window_list]
+  allowed_tools: [launch_app, clipboard, file_info, window_list, rag_ingest]
 
   # Per-tool execution timeout in seconds.
   execution_timeout_s: 10.0

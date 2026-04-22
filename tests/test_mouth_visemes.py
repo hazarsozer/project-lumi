@@ -85,9 +85,12 @@ def test_synthesize_posts_viseme_events() -> None:
     viseme_events = [e for e in events if isinstance(e, VisemeEvent)]
     assert len(viseme_events) == 3
 
+    # _KOKORO_FRAMES_TO_MS = 256 / 24000 * 1000 ≈ 10.6667 ms/frame
+    _hop_ms = 256 / 24000 * 1000
+
     assert viseme_events[0].phoneme == "AH"
-    assert viseme_events[0].start_ms == 0
-    assert viseme_events[0].duration_ms == 80
+    assert viseme_events[0].start_ms == pytest.approx(0 * _hop_ms)
+    assert viseme_events[0].duration_ms == pytest.approx(80 * _hop_ms)
     assert viseme_events[0].utterance_id == "utt-vis"
 
     assert viseme_events[1].phoneme == "L"

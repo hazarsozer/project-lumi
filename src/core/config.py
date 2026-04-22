@@ -181,6 +181,7 @@ class ToolsConfig:
         "clipboard",
         "file_info",
         "window_list",
+        "rag_ingest",
     )
 
     # Per-tool execution timeout in seconds.  Tool threads that exceed this

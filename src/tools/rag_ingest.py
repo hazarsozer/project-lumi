@@ -61,6 +61,10 @@ logger = logging.getLogger(__name__)
 # should pass a RAGConfig explicitly.
 _DEFAULT_RAG_CONFIG = RAGConfig()
 
+# Large-ingest confirmation thresholds.
+_LARGE_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB
+_LARGE_DIR_FILE_COUNT: int = 100
+
 
 class RagIngestTool:
     """Ingest documents from a local folder or file into the RAG vector store.
@@ -151,6 +155,27 @@ class RagIngestTool:
                 data={"status": "error", "message": f"path not found: {raw_path}"},
             )
 
+        # --- Large-ingest confirmation gate ---
+        confirmed: bool = bool(args.get("confirmed", False))
+        if not confirmed:
+            guard = self._check_confirmation_needed(path)
+            if guard is not None:
+                logger.info(
+                    "RagIngestTool: confirmation required for '%s': %s",
+                    raw_path,
+                    guard["reason"],
+                )
+                return ToolResult(
+                    success=False,
+                    output=guard["reason"],
+                    data={
+                        "status": "needs_confirmation",
+                        "needs_confirmation": True,
+                        "reason": guard["reason"],
+                        "estimated_chunks": guard["estimated_chunks"],
+                    },
+                )
+
         # --- Run ingest ---
         try:
             stats = self._run_ingest(path)
@@ -195,6 +220,42 @@ class RagIngestTool:
             logger.error(
                 "RagIngestTool: event_callback raised %s: %s.", type(exc).__name__, exc
             )
+
+    def _check_confirmation_needed(self, path: Path) -> dict[str, Any] | None:
+        """Return a confirmation payload when the ingest target is large.
+
+        Returns None if no confirmation is needed; otherwise a dict with
+        ``reason`` and ``estimated_chunks`` keys.
+        """
+        if path.is_file():
+            try:
+                size = path.stat().st_size
+            except OSError:
+                return None
+            if size > _LARGE_FILE_BYTES:
+                size_mb = size / (1024 * 1024)
+                estimated = max(1, size // (_LARGE_FILE_BYTES // 20))
+                return {
+                    "reason": (
+                        f"File is large ({size_mb:.1f} MB > 10 MB). "
+                        "Pass confirmed=True to proceed."
+                    ),
+                    "estimated_chunks": estimated,
+                }
+        else:
+            try:
+                file_count = sum(1 for p in path.rglob("*") if p.is_file())
+            except OSError:
+                return None
+            if file_count > _LARGE_DIR_FILE_COUNT:
+                return {
+                    "reason": (
+                        f"Directory contains {file_count} files (> 100). "
+                        "Pass confirmed=True to proceed."
+                    ),
+                    "estimated_chunks": file_count * 2,
+                }
+        return None
 
     def _run_ingest(self, path: Path) -> dict[str, int]:
         """Walk *path* and ingest all supported files into the RAG store.

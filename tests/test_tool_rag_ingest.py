@@ -329,3 +329,69 @@ def test_run_ingest_calls_rag_subsystem(tmp_path: Path) -> None:
         result = tool._run_ingest(corpus)
 
     assert result["docs_indexed"] >= 0  # completed without exception
+
+
+# ---------------------------------------------------------------------------
+# Wave I2 tests: rag_ingest in default allowed_tools + confirmation gate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_rag_ingest_in_default_allowed_tools() -> None:
+    from src.core.config import ToolsConfig
+
+    cfg = ToolsConfig()
+    assert "rag_ingest" in cfg.allowed_tools
+
+
+@pytest.mark.unit
+def test_rag_ingest_large_file_triggers_confirmation(tmp_path: Path) -> None:
+    from src.tools.rag_ingest import RagIngestTool, _LARGE_FILE_BYTES
+
+    large_file = tmp_path / "big.txt"
+    large_file.write_bytes(b"x" * (_LARGE_FILE_BYTES + 1))
+
+    tool = RagIngestTool()
+    with patch.object(tool, "_run_ingest") as mock_ingest:
+        result = tool.execute({"path": str(large_file)})
+
+    assert result.success is False
+    assert result.data.get("needs_confirmation") is True
+    assert "estimated_chunks" in result.data
+    mock_ingest.assert_not_called()
+
+
+@pytest.mark.unit
+def test_rag_ingest_small_file_bypasses_confirmation(tmp_path: Path) -> None:
+    from src.tools.rag_ingest import RagIngestTool
+
+    small_file = tmp_path / "small.txt"
+    small_file.write_text("Hello world")
+
+    mock_result = {"docs_indexed": 1, "chunks_total": 2, "errors": 0}
+
+    tool = RagIngestTool()
+    with patch.object(tool, "_run_ingest", return_value=mock_result) as mock_ingest:
+        result = tool.execute({"path": str(small_file)})
+
+    assert result.success is True
+    mock_ingest.assert_called_once()
+
+
+@pytest.mark.unit
+def test_rag_ingest_confirmed_true_bypasses_gate_for_large_file(
+    tmp_path: Path,
+) -> None:
+    from src.tools.rag_ingest import RagIngestTool, _LARGE_FILE_BYTES
+
+    large_file = tmp_path / "big2.txt"
+    large_file.write_bytes(b"y" * (_LARGE_FILE_BYTES + 1))
+
+    mock_result = {"docs_indexed": 1, "chunks_total": 5, "errors": 0}
+
+    tool = RagIngestTool()
+    with patch.object(tool, "_run_ingest", return_value=mock_result) as mock_ingest:
+        result = tool.execute({"path": str(large_file), "confirmed": True})
+
+    assert result.success is True
+    mock_ingest.assert_called_once()
