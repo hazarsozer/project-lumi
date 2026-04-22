@@ -1,4 +1,4 @@
-"""Tests for ZMQServer.on_llm_token() — LLM token streaming over IPC.
+"""Tests for EventBridge.on_llm_token() — LLM token streaming over IPC.
 
 Validates that LLMTokenEvent is correctly forwarded as a wire frame
 with event='llm_token' and the expected payload fields.
@@ -16,7 +16,7 @@ import pytest
 from src.core.config import IPCConfig
 from src.core.events import LLMTokenEvent
 from src.core.state_machine import StateMachine
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 
 
 # ---------------------------------------------------------------------------
@@ -42,12 +42,12 @@ def mock_transport() -> MagicMock:
 
 
 @pytest.fixture()
-def zmq_server(mock_transport: MagicMock) -> ZMQServer:
+def zmq_server(mock_transport: MagicMock) -> EventBridge:
     config = IPCConfig(address="tcp://127.0.0.1", port=5555)
     event_q: queue.Queue[Any] = queue.Queue()
     sm = StateMachine()
-    with patch("src.core.zmq_server.IPCTransport", return_value=mock_transport):
-        server = ZMQServer(config=config, event_queue=event_q, state_machine=sm)
+    with patch("src.core.event_bridge.IPCTransport", return_value=mock_transport):
+        server = EventBridge(config=config, event_queue=event_q, state_machine=sm)
     return server
 
 
@@ -58,7 +58,7 @@ def zmq_server(mock_transport: MagicMock) -> ZMQServer:
 
 @pytest.mark.unit
 def test_on_llm_token_sends_llm_token_frame(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_llm_token() must send a JSON frame with event='llm_token' and
@@ -73,7 +73,7 @@ def test_on_llm_token_sends_llm_token_frame(
 
 @pytest.mark.unit
 def test_on_llm_token_token_in_payload(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """The 'token' key must be present in the encoded frame payload."""
@@ -87,7 +87,7 @@ def test_on_llm_token_token_in_payload(
 
 @pytest.mark.unit
 def test_on_llm_token_utterance_id_in_payload(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """The 'utterance_id' key must be present in the encoded frame payload."""

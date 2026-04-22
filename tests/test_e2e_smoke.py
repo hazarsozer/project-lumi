@@ -22,7 +22,7 @@ Scenarios covered
                                         returns context verifies that the context
                                         string reaches the LLM prompt.
 6. test_ipc_event_forwarded           — LLMResponseReadyEvent is forwarded to
-                                        the ZMQServer stub's on_tts_start handler.
+                                        the EventBridge stub's on_tts_start handler.
 """
 
 from __future__ import annotations
@@ -435,14 +435,14 @@ def test_rag_retrieval_integrated():
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — IPC event forwarded through ZMQServer stub
+# Test 6 — IPC event forwarded through EventBridge stub
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_ipc_event_forwarded():
-    """An LLMResponseReadyEvent is forwarded to the injected ZMQServer stub's
+    """An LLMResponseReadyEvent is forwarded to the injected EventBridge stub's
     on_tts_start handler when the orchestrator dispatches it.
     """
     config = _minimal_config()

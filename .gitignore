@@ -57,3 +57,6 @@ coverage.xml
 next_session.md
 finetune.md
 useful-agents.md
+
+# --- Fine-tuning datasets (large, regenerable) ---
+data/finetune/*.jsonl

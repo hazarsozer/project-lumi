@@ -3,7 +3,7 @@ Minimal Python TCP client that mimics the Godot ``lumi_client.gd`` script.
 
 Wire format: 4-byte big-endian uint32 length prefix + UTF-8 JSON body.
 
-JSON envelope (inbound to ZMQServer / outbound from ZMQServer):
+JSON envelope (inbound to EventBridge / outbound from EventBridge):
     {
         "event":     str,
         "payload":   dict,
@@ -98,8 +98,8 @@ class FakeGodotClient:
     def send_frame(self, event: str, payload: dict[str, Any]) -> None:
         """Encode and send a length-prefixed JSON frame.
 
-        Wraps ``event`` and ``payload`` in the full ZMQServer wire envelope so
-        that ``ZMQServer._decode()`` accepts it.
+        Wraps ``event`` and ``payload`` in the full EventBridge wire envelope so
+        that ``EventBridge._decode()`` accepts it.
 
         Args:
             event:   Wire event name (e.g. ``"interrupt"``, ``"user_text"``).

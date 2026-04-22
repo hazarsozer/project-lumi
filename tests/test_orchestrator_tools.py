@@ -30,13 +30,13 @@ from src.core.events import (
 )
 from src.core.orchestrator import Orchestrator
 from src.core.state_machine import LumiState
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 from src.tools.base import ToolResult
 
 
 def _make_orchestrator(
     tools_enabled: bool = True,
-    zmq_server: ZMQServer | None = None,
+    zmq_server: EventBridge | None = None,
 ) -> Orchestrator:
     """Create an Orchestrator with mock SpeakerThread and no audio device."""
     mock_speaker = MagicMock(spec=SpeakerThread)
@@ -171,7 +171,7 @@ def test_llm_token_event_handler_registered_with_zmq() -> None:
     """When a ZMQServer is injected, LLMTokenEvent is registered as a handler
     type in the orchestrator's handler map.
     """
-    mock_zmq = MagicMock(spec=ZMQServer)
+    mock_zmq = MagicMock(spec=EventBridge)
     orch = _make_orchestrator(zmq_server=mock_zmq)
     assert LLMTokenEvent in orch._handlers
 

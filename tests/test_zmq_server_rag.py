@@ -1,4 +1,4 @@
-"""Tests for ZMQServer RAG event forwarding (Wave 4)."""
+"""Tests for EventBridge RAG event forwarding (Wave 4)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from src.core.events import (
     RAGSetEnabledEvent,
     RAGStatusEvent,
 )
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ from src.core.zmq_server import ZMQServer
 
 @pytest.fixture()
 def server_and_queue(tmp_path):
-    """Return a ZMQServer wired to a real queue, with transport mocked out."""
+    """Return an EventBridge wired to a real queue, with transport mocked out."""
     from src.core.config import IPCConfig
     from src.core.state_machine import StateMachine
 
@@ -30,10 +30,10 @@ def server_and_queue(tmp_path):
     eq: queue.Queue = queue.Queue()
     sm = StateMachine()
 
-    with patch("src.core.zmq_server.IPCTransport") as MockTransport:
+    with patch("src.core.event_bridge.IPCTransport") as MockTransport:
         mock_transport = MagicMock()
         MockTransport.return_value = mock_transport
-        srv = ZMQServer(config=config, event_queue=eq, state_machine=sm)
+        srv = EventBridge(config=config, event_queue=eq, state_machine=sm)
 
     return srv, eq, mock_transport
 

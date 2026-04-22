@@ -1,5 +1,5 @@
 """
-Unit tests for ZMQServer (src/core/zmq_server.py).
+Unit tests for EventBridge (src/core/event_bridge.py).
 
 Strategy:
 - IPCTransport is mocked at the class level using pytest-mock / unittest.mock
@@ -33,7 +33,7 @@ from src.core.events import (
     ZMQMessage,
 )
 from src.core.state_machine import LumiState, StateMachine
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +92,10 @@ def zmq_server(
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
     mock_transport: MagicMock,
-) -> ZMQServer:
-    """Construct a ZMQServer with IPCTransport patched out."""
-    with patch("src.core.zmq_server.IPCTransport", return_value=mock_transport):
-        server = ZMQServer(
+) -> EventBridge:
+    """Construct an EventBridge with IPCTransport patched out."""
+    with patch("src.core.event_bridge.IPCTransport", return_value=mock_transport):
+        server = EventBridge(
             config=ipc_config,
             event_queue=event_queue,
             state_machine=state_machine,
@@ -110,7 +110,7 @@ def zmq_server(
 
 @pytest.mark.unit
 def test_state_change_sends_correct_json(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_state_change() must send a JSON frame with event='state_change'
@@ -131,7 +131,7 @@ def test_state_change_sends_correct_json(
 
 @pytest.mark.unit
 def test_inbound_interrupt_posts_event(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     event_queue: queue.Queue[Any],
 ) -> None:
     """A valid inbound 'interrupt' frame must post InterruptEvent to the queue."""
@@ -150,7 +150,7 @@ def test_inbound_interrupt_posts_event(
 
 @pytest.mark.unit
 def test_inbound_user_text_posts_event(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     event_queue: queue.Queue[Any],
 ) -> None:
     """A valid inbound 'user_text' frame must post UserTextEvent with correct text."""
@@ -169,7 +169,7 @@ def test_inbound_user_text_posts_event(
 
 @pytest.mark.unit
 def test_malformed_inbound_logged_and_dropped(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     event_queue: queue.Queue[Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -177,7 +177,7 @@ def test_malformed_inbound_logged_and_dropped(
     anything on the queue.  A WARNING must be emitted."""
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="src.core.zmq_server"):
+    with caplog.at_level(logging.WARNING, logger="src.core.event_bridge"):
         zmq_server._on_raw_message(b"not json {{{")
 
     assert event_queue.empty()
@@ -195,8 +195,8 @@ def test_encode_decode_roundtrip() -> None:
     """Encoding then decoding a frame must produce a ZMQMessage with the
     same event name and payload."""
     original_payload: dict[str, Any] = {"key": "val", "num": 42}
-    raw = ZMQServer._encode("test_event", original_payload)
-    result = ZMQServer._decode(raw)
+    raw = EventBridge._encode("test_event", original_payload)
+    result = EventBridge._decode(raw)
 
     assert result is not None
     assert isinstance(result, ZMQMessage)
@@ -213,7 +213,7 @@ def test_encode_decode_roundtrip() -> None:
 
 @pytest.mark.unit
 def test_viseme_event_forwarded(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_tts_viseme() must send JSON with event='tts_viseme' and the
@@ -239,7 +239,7 @@ def test_viseme_event_forwarded(
 
 @pytest.mark.unit
 def test_error_event_forwarded(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_error() must send JSON with event='error' and the supplied code
@@ -259,7 +259,7 @@ def test_error_event_forwarded(
 
 @pytest.mark.unit
 def test_unknown_inbound_event_dropped(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     event_queue: queue.Queue[Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -269,7 +269,7 @@ def test_unknown_inbound_event_dropped(
 
     frame = _make_wire_bytes("unknown_xyz", {})
 
-    with caplog.at_level(logging.WARNING, logger="src.core.zmq_server"):
+    with caplog.at_level(logging.WARNING, logger="src.core.event_bridge"):
         zmq_server._on_raw_message(frame)
 
     assert event_queue.empty()
@@ -285,7 +285,7 @@ def test_unknown_inbound_event_dropped(
 
 @pytest.mark.unit
 def test_missing_required_field_logged_and_dropped(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     event_queue: queue.Queue[Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -299,7 +299,7 @@ def test_missing_required_field_logged_and_dropped(
         "version": "1.0",
     }).encode("utf-8")
 
-    with caplog.at_level(logging.WARNING, logger="src.core.zmq_server"):
+    with caplog.at_level(logging.WARNING, logger="src.core.event_bridge"):
         zmq_server._on_raw_message(incomplete)
 
     assert event_queue.empty()
@@ -314,7 +314,7 @@ def test_missing_required_field_logged_and_dropped(
 
 @pytest.mark.unit
 def test_tts_start_forwarded(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_tts_start() must send JSON with event='tts_start'."""
@@ -329,7 +329,7 @@ def test_tts_start_forwarded(
 
 @pytest.mark.unit
 def test_tts_stop_forwarded(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_tts_stop() must send JSON with event='tts_stop' and empty payload."""
@@ -343,7 +343,7 @@ def test_tts_stop_forwarded(
 
 @pytest.mark.unit
 def test_transcript_forwarded(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """on_transcript() must send JSON with event='transcript'."""
@@ -357,7 +357,7 @@ def test_transcript_forwarded(
 
 @pytest.mark.unit
 def test_start_delegates_to_transport(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """start() must delegate to transport.start()."""
@@ -367,7 +367,7 @@ def test_start_delegates_to_transport(
 
 @pytest.mark.unit
 def test_stop_delegates_to_transport(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     mock_transport: MagicMock,
 ) -> None:
     """stop() must delegate to transport.stop()."""
@@ -377,7 +377,7 @@ def test_stop_delegates_to_transport(
 
 @pytest.mark.unit
 def test_user_text_with_empty_string_is_dropped(
-    zmq_server: ZMQServer,
+    zmq_server: EventBridge,
     event_queue: queue.Queue[Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -386,7 +386,7 @@ def test_user_text_with_empty_string_is_dropped(
 
     frame = _make_wire_bytes("user_text", {"text": ""})
 
-    with caplog.at_level(logging.WARNING, logger="src.core.zmq_server"):
+    with caplog.at_level(logging.WARNING, logger="src.core.event_bridge"):
         zmq_server._on_raw_message(frame)
 
     assert event_queue.empty()
@@ -400,10 +400,10 @@ def test_state_machine_observer_registered(
     state_machine: StateMachine,
     mock_transport: MagicMock,
 ) -> None:
-    """ZMQServer must register itself as an observer on the StateMachine so
+    """EventBridge must register itself as an observer on the StateMachine so
     transitions automatically trigger on_state_change."""
-    with patch("src.core.zmq_server.IPCTransport", return_value=mock_transport):
-        server = ZMQServer(
+    with patch("src.core.event_bridge.IPCTransport", return_value=mock_transport):
+        server = EventBridge(
             config=ipc_config,
             event_queue=event_queue,
             state_machine=state_machine,

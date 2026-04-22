@@ -5,7 +5,7 @@ These are end-to-end integration tests that verify the full Python IPC stack
 using a fake TCP client acting as the Godot frontend.
 
 Stack under test (no mocking of the transport layer):
-    FakeGodotClient  <--TCP loopback-->  IPCTransport  <-->  ZMQServer
+    FakeGodotClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
                                                                |
                                                         StateMachine / queue.Queue
 
@@ -17,7 +17,7 @@ JSON envelope (outbound):
 
 Fixture strategy:
 - ``free_port``   — OS-assigned port via bind-to-0 trick.
-- ``ipc_stack``   — starts IPCTransport + ZMQServer; tears down in finally.
+- ``ipc_stack``   — starts IPCTransport + EventBridge; tears down in finally.
 - ``FakeGodotClient`` — context manager that connects, sends, and receives
                         length-prefixed JSON frames.
 
@@ -44,7 +44,7 @@ from src.core.events import (
 )
 from src.core.ipc_transport import IPCTransport, _HEADER_FORMAT, _HEADER_SIZE
 from src.core.state_machine import LumiState, StateMachine
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ class FakeGodotClient:
 
     Wire format: 4-byte big-endian uint32 length prefix + UTF-8 JSON body.
 
-    The JSON envelope expected by ZMQServer._decode:
+    The JSON envelope expected by EventBridge._decode:
         {
             "event":     str,
             "payload":   dict,
@@ -100,8 +100,8 @@ class FakeGodotClient:
     def send_message(self, event: str, payload: dict[str, Any]) -> None:
         """Encode and send a length-prefixed JSON frame.
 
-        Wraps the event+payload in the full ZMQServer wire envelope so that
-        ZMQServer._decode() accepts the message.
+        Wraps the event+payload in the full EventBridge wire envelope so that
+        EventBridge._decode() accepts the message.
 
         Args:
             event:   Wire event name (e.g. "interrupt", "user_text").
@@ -224,17 +224,17 @@ def state_machine() -> StateMachine:
 def ipc_stack(
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
-) -> Generator[tuple[ZMQServer, int], None, None]:
-    """Start a real IPCTransport + ZMQServer on an OS-assigned port.
+) -> Generator[tuple[EventBridge, int], None, None]:
+    """Start a real IPCTransport + EventBridge on an OS-assigned port.
 
     Uses port=0 so the OS assigns a free port atomically during bind(),
     eliminating the TOCTOU race of the probe-then-bind pattern.
 
-    Yields ``(zmq_server, bound_port)``.  Tears down in a ``finally`` block
+    Yields ``(event_bridge, bound_port)``.  Tears down in a ``finally`` block
     so sockets are always closed even when the test body raises.
     """
     config = IPCConfig(address="tcp://127.0.0.1", port=0)
-    server = ZMQServer(
+    server = EventBridge(
         config=config,
         event_queue=event_queue,
         state_machine=state_machine,
@@ -244,7 +244,7 @@ def ipc_stack(
         # Let the accept loop bind and start listening before tests connect.
         time.sleep(0.05)
         port = server.bound_port
-        assert port is not None, "ZMQServer.bound_port is None after start()"
+        assert port is not None, "EventBridge.bound_port is None after start()"
         yield server, port
     finally:
         server.stop()
@@ -257,12 +257,12 @@ def ipc_stack(
 
 @pytest.mark.integration
 def test_full_state_lifecycle(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     state_machine: StateMachine,
 ) -> None:
     """Connect a fake client, trigger IDLE→LISTENING, assert state_change frame.
 
-    The ZMQServer registers itself as a StateMachine observer at construction
+    The EventBridge registers itself as a StateMachine observer at construction
     time.  When transition_to(LISTENING) fires, the observer calls _send()
     which writes a length-prefixed frame to the connected client.
     """
@@ -289,12 +289,12 @@ def test_full_state_lifecycle(
 
 @pytest.mark.integration
 def test_interrupt_returns_to_idle(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     event_queue: queue.Queue[Any],
 ) -> None:
-    """Client sends an 'interrupt' frame; ZMQServer posts InterruptEvent.
+    """Client sends an 'interrupt' frame; EventBridge posts InterruptEvent.
 
-    The ZMQServer._on_raw_message callback fires on IPCTransport's recv
+    The EventBridge._on_raw_message callback fires on IPCTransport's recv
     daemon thread and puts an InterruptEvent(source='zmq') onto the queue.
     """
     _, port = ipc_stack
@@ -316,10 +316,10 @@ def test_interrupt_returns_to_idle(
 
 @pytest.mark.integration
 def test_user_text_triggers_event(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     event_queue: queue.Queue[Any],
 ) -> None:
-    """Client sends a 'user_text' frame; ZMQServer posts UserTextEvent.
+    """Client sends a 'user_text' frame; EventBridge posts UserTextEvent.
 
     The posted event must carry the exact 'text' value from the payload.
     """
@@ -342,9 +342,9 @@ def test_user_text_triggers_event(
 
 @pytest.mark.integration
 def test_viseme_forwarding(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
 ) -> None:
-    """ZMQServer.on_tts_viseme() sends a tts_viseme frame to the connected client.
+    """EventBridge.on_tts_viseme() sends a tts_viseme frame to the connected client.
 
     Verifies that viseme phoneme and duration_ms survive the encode→TCP→decode
     round-trip exactly.
@@ -376,7 +376,7 @@ def test_viseme_forwarding(
 
 @pytest.mark.integration
 def test_malformed_client_message_no_crash(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     state_machine: StateMachine,
 ) -> None:
     """A valid length-prefixed frame carrying invalid JSON must not crash the server.
@@ -412,14 +412,14 @@ def test_malformed_client_message_no_crash(
 
 @pytest.mark.integration
 def test_client_reconnect(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     state_machine: StateMachine,
 ) -> None:
     """After the first client closes, a second client must receive subsequent events.
 
     IPCTransport implements a single-client model: when a new connection arrives
     (or is accepted after the previous one dropped), it becomes the active client.
-    ZMQServer.on_state_change() must deliver the frame to the new client.
+    EventBridge.on_state_change() must deliver the frame to the new client.
     """
     _, port = ipc_stack
 

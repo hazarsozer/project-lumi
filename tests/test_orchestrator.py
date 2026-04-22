@@ -18,7 +18,7 @@ from src.core.events import (
 )
 from src.core.orchestrator import Orchestrator
 from src.core.state_machine import LumiState, StateMachine
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 
 
 def _make_orchestrator() -> Orchestrator:
@@ -445,7 +445,7 @@ def test_zmq_server_receives_state_change() -> None:
     and asserting the mock was called.
     """
     mock_speaker = MagicMock(spec=SpeakerThread)
-    mock_zmq = MagicMock(spec=ZMQServer)
+    mock_zmq = MagicMock(spec=EventBridge)
 
     orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, zmq_server=mock_zmq)
 
@@ -497,7 +497,7 @@ def test_shutdown_stops_zmq_server() -> None:
     processed, and asserts that stop() was called exactly once.
     """
     mock_speaker = MagicMock(spec=SpeakerThread)
-    mock_zmq = MagicMock(spec=ZMQServer)
+    mock_zmq = MagicMock(spec=EventBridge)
 
     orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, zmq_server=mock_zmq)
 

@@ -43,7 +43,7 @@ from src.llm.tool_call_parser import parse_tool_calls
 from src.tools import ToolExecutor, ToolRegistry
 from src.tools.os_actions import AppLaunchTool, ClipboardTool, FileInfoTool, WindowListTool
 from src.core.state_machine import LumiState, StateMachine
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
@@ -66,7 +66,7 @@ class Orchestrator:
         *,
         speaker: SpeakerThread | None = None,
         tts: KokoroTTS | None = None,
-        zmq_server: ZMQServer | None = None,
+        zmq_server: EventBridge | None = None,
         ears: Ears | None = None,
         scribe: Scribe | None = None,
     ) -> None:
@@ -161,9 +161,9 @@ class Orchestrator:
 
         # Register built-in handlers.
         # NOTE: TranscriptReadyEvent and SpeechCompletedEvent each receive a
-        # second handler below (on_transcript / on_tts_stop) when a ZMQServer
+        # second handler below (on_transcript / on_tts_stop) when an EventBridge
         # is present.  Both registrations are intentional: the internal handler
-        # runs first (state transitions), then the ZMQ forwarder sends the event
+        # runs first (state transitions), then the IPC forwarder sends the event
         # to Godot.  This ordering is guaranteed by registration order in _dispatch.
         self.register_handler(ShutdownEvent, self._handle_shutdown)
         self.register_handler(EarsErrorEvent, self._handle_ears_error)
@@ -176,18 +176,18 @@ class Orchestrator:
         self.register_handler(UserTextEvent, self._handle_user_text)
         self.register_handler(RAGSetEnabledEvent, self._handle_rag_set_enabled)
 
-        # ZMQServer wiring — optional; injected for testing or when IPC is
+        # EventBridge wiring — optional; injected for testing or when IPC is
         # enabled.  If not injected but config.ipc.enabled is True, create it
         # here using the orchestrator's own queue and state machine so that
         # inbound events from the Godot frontend are posted to this event loop.
-        # When created internally, ZMQServer.__init__ registers on_state_change
+        # When created internally, EventBridge.__init__ registers on_state_change
         # as a state observer.  When injected (e.g. in tests), the caller is
         # responsible for ensuring the state machine is shared — the Orchestrator
         # registers on_state_change explicitly so injected instances also receive
         # state transition forwarding.
-        self._zmq_server: ZMQServer | None = zmq_server
+        self._zmq_server: EventBridge | None = zmq_server
         if self._zmq_server is None and config.ipc.enabled:
-            self._zmq_server = ZMQServer(
+            self._zmq_server = EventBridge(
                 config.ipc, self._event_queue, self._state_machine
             )
             self._zmq_server.start()
@@ -195,7 +195,7 @@ class Orchestrator:
         if self._zmq_server is not None:
             # Injected instances have not had on_state_change registered against
             # this orchestrator's state machine; do it here.  For auto-created
-            # instances ZMQServer.__init__ already registered, so we avoid
+            # instances EventBridge.__init__ already registered, so we avoid
             # double registration by only registering for the injected path.
             if zmq_server is not None:
                 self._state_machine.register_observer(

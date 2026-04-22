@@ -6,12 +6,12 @@ correctly over a real TCP connection, going beyond the unit-level protocol
 conformance tests in ``tests/test_ipc_protocol_conformance.py``.
 
 Stack under test (no mocking of the transport layer):
-    FakeGodotClient  <--TCP loopback-->  IPCTransport  <-->  ZMQServer
+    FakeGodotClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
                                                                |
                                                         StateMachine / queue.Queue
 
 Each test:
-- Spins up a real ``IPCTransport`` + ``ZMQServer`` on OS-assigned port 0.
+- Spins up a real ``IPCTransport`` + ``EventBridge`` on OS-assigned port 0.
 - Connects a ``FakeGodotClient`` that mimics what ``lumi_client.gd`` does.
 - Performs a single meaningful turn (send inbound event OR receive outbound event).
 - Tears down cleanly via fixture ``finally`` blocks.
@@ -50,7 +50,7 @@ from src.core.events import (
     UserTextEvent,
 )
 from src.core.state_machine import LumiState, StateMachine
-from src.core.zmq_server import ZMQServer
+from src.core.event_bridge import EventBridge
 from tests.integration.fake_godot_client import FakeGodotClient
 
 # ---------------------------------------------------------------------------
@@ -90,22 +90,22 @@ def state_machine() -> StateMachine:
 def ipc_stack(
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
-) -> Generator[tuple[ZMQServer, int], None, None]:
-    """Start a real ``IPCTransport`` + ``ZMQServer`` on an OS-assigned port.
+) -> Generator[tuple[EventBridge, int], None, None]:
+    """Start a real ``IPCTransport`` + ``EventBridge`` on an OS-assigned port.
 
     Passes ``port=0`` so the OS assigns a free port atomically during
     ``bind()``, which eliminates the TOCTOU race of the probe-then-bind
-    pattern.  The bound port is read from ``ZMQServer.bound_port`` after
+    pattern.  The bound port is read from ``EventBridge.bound_port`` after
     ``start()`` returns.
 
     Yields:
-        ``(zmq_server, bound_port)``
+        ``(event_bridge, bound_port)``
 
     Tears down in a ``finally`` block so sockets are always closed even
     when the test body raises an exception.
     """
     config = IPCConfig(address="tcp://127.0.0.1", port=0)
-    server = ZMQServer(
+    server = EventBridge(
         config=config,
         event_queue=event_queue,
         state_machine=state_machine,
@@ -116,7 +116,7 @@ def ipc_stack(
         # is ready to accept connections before any test code connects.
         time.sleep(0.05)
         port = server.bound_port
-        assert port is not None, "ZMQServer.bound_port is None after start()"
+        assert port is not None, "EventBridge.bound_port is None after start()"
         yield server, port
     finally:
         server.stop()
@@ -130,12 +130,12 @@ def ipc_stack(
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_client_receives_state_change_on_connect(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     state_machine: StateMachine,
 ) -> None:
     """Connected client receives a ``state_change`` frame when the state transitions.
 
-    The ZMQServer registers itself as a StateMachine observer at construction.
+    The EventBridge registers itself as a StateMachine observer at construction.
     When ``transition_to(LISTENING)`` fires, the observer's ``on_state_change``
     callback serialises the new state to a JSON frame and sends it over the TCP
     connection to the fake client.
@@ -170,12 +170,12 @@ def test_client_receives_state_change_on_connect(
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_client_send_interrupt_posts_to_queue(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     event_queue: queue.Queue[Any],
 ) -> None:
-    """Client sends ``interrupt`` frame; ZMQServer posts ``InterruptEvent`` to queue.
+    """Client sends ``interrupt`` frame; EventBridge posts ``InterruptEvent`` to queue.
 
-    The ZMQServer ``_on_raw_message`` callback runs on IPCTransport's recv
+    The EventBridge ``_on_raw_message`` callback runs on IPCTransport's recv
     daemon thread.  It decodes the frame, matches the ``"interrupt"`` event
     name, and calls ``_handle_interrupt`` which puts an ``InterruptEvent``
     onto ``event_queue``.
@@ -204,10 +204,10 @@ def test_client_send_interrupt_posts_to_queue(
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_client_send_user_text_posts_to_queue(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     event_queue: queue.Queue[Any],
 ) -> None:
-    """Client sends ``user_text`` frame; ZMQServer posts ``UserTextEvent`` to queue.
+    """Client sends ``user_text`` frame; EventBridge posts ``UserTextEvent`` to queue.
 
     The ``_handle_user_text`` method validates that the payload contains a
     non-empty ``"text"`` string before posting to the queue, so the test also
@@ -237,10 +237,10 @@ def test_client_send_user_text_posts_to_queue(
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_client_send_rag_set_enabled_posts_to_queue(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     event_queue: queue.Queue[Any],
 ) -> None:
-    """Client sends ``rag_set_enabled`` frame; ZMQServer posts ``RAGSetEnabledEvent``.
+    """Client sends ``rag_set_enabled`` frame; EventBridge posts ``RAGSetEnabledEvent``.
 
     The ``_handle_rag_set_enabled`` method validates that ``payload["enabled"]``
     is a ``bool`` before posting.  This test confirms the happy path.
@@ -269,12 +269,12 @@ def test_client_send_rag_set_enabled_posts_to_queue(
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_malformed_frame_does_not_crash_server(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
     state_machine: StateMachine,
 ) -> None:
     """A valid length-prefix carrying invalid JSON body must not crash the server.
 
-    ``ZMQServer._on_raw_message`` calls ``_decode()`` which catches
+    ``EventBridge._on_raw_message`` calls ``_decode()`` which catches
     ``json.JSONDecodeError`` and logs a WARNING, returning ``None`` so the
     dispatch path is skipped entirely.
 
@@ -314,9 +314,9 @@ def test_malformed_frame_does_not_crash_server(
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_server_sends_tts_start(
-    ipc_stack: tuple[ZMQServer, int],
+    ipc_stack: tuple[EventBridge, int],
 ) -> None:
-    """``ZMQServer.on_tts_start()`` sends a ``tts_start`` frame to the client.
+    """``EventBridge.on_tts_start()`` sends a ``tts_start`` frame to the client.
 
     ``on_tts_start`` takes an ``LLMResponseReadyEvent``, packages the ``text``
     field and a zero ``duration_ms`` into a payload, and calls ``_send``.

@@ -1,0 +1,153 @@
+# Nightly Live Smoke — Project Lumi
+#
+# SECRET: MODEL_DOWNLOAD_URL
+#   Set this in GitHub repo → Settings → Secrets and variables → Actions.
+#   Value: a direct HTTPS download URL for the quantised model file
+#          `phi-3.5-mini.gguf` (e.g. a pre-signed S3/GCS URL, or a
+#          Hugging Face blob URL).
+#   If the secret is absent (e.g. in forks or when the model is not yet
+#   hosted), the workflow falls back to offline/stub mode automatically —
+#   no step will fail because of a missing secret.
+#   To set it:
+#     gh secret set MODEL_DOWNLOAD_URL --body "https://…/phi-3.5-mini.gguf"
+#
+# NOTE: The regular CI workflow (ci.yml) runs eval_persona.py only through
+# the pytest suite in offline/stub mode.  This nightly job is the only
+# workflow that invokes --live (real LLM inference) when the model secret
+# is present.
+
+name: Nightly Live Smoke
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC daily
+  workflow_dispatch: {}    # allow manual trigger
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Download model
+        # If MODEL_DOWNLOAD_URL is not configured the workflow runs in offline
+        # mode (stub responses).  This allows the job to function safely in
+        # forks and before the model is hosted anywhere.
+        run: |
+          if [ -n "${{ secrets.MODEL_DOWNLOAD_URL }}" ]; then
+            mkdir -p models/llm
+            curl -fsSL "${{ secrets.MODEL_DOWNLOAD_URL }}" -o models/llm/phi-3.5-mini.gguf
+            echo "Model downloaded successfully."
+          else
+            echo "MODEL_DOWNLOAD_URL not set — running in offline/stub mode."
+            echo "SMOKE_OFFLINE=1" >> $GITHUB_ENV
+          fi
+
+      - name: Run persona eval
+        id: eval
+        run: |
+          if [ "${SMOKE_OFFLINE}" = "1" ]; then
+            echo "Mode: offline (stub responses)"
+            uv run python scripts/eval_persona.py --output eval_results/nightly.json
+          else
+            echo "Mode: live (real LLM inference)"
+            uv run python scripts/eval_persona.py --live --output eval_results/nightly.json
+          fi
+
+      - name: Parse and post summary
+        # Runs even when the eval step fails so we always get a summary entry.
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json, os, sys
+
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/stderr")
+
+          try:
+              with open("eval_results/nightly.json") as f:
+                  data = json.load(f)
+
+              # The report schema nests aggregates under "summary".
+              s = data.get("summary", {})
+              pass_rate = s.get("pass_rate", "N/A")
+              passed    = s.get("passed", "N/A")
+              total_checks = s.get("total_criteria_checks", "N/A")
+              total_prompts = s.get("total_prompts", "N/A")
+
+              if isinstance(pass_rate, float):
+                  pass_rate_str = f"{pass_rate:.1%}"
+              else:
+                  pass_rate_str = str(pass_rate)
+
+              lines = [
+                  "## Nightly Persona Eval",
+                  "",
+                  f"| Metric | Value |",
+                  f"|--------|-------|",
+                  f"| Pass rate | {pass_rate_str} |",
+                  f"| Criteria passed | {passed} / {total_checks} |",
+                  f"| Prompts evaluated | {total_prompts} |",
+                  "",
+              ]
+              summary = "\n".join(lines)
+          except Exception as e:
+              summary = f"## Nightly Persona Eval\n\nFailed to parse results: {e}\n"
+
+          with open(summary_path, "a") as f:
+              f.write(summary)
+          EOF
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-eval-${{ github.run_id }}
+          path: eval_results/nightly.json
+          if-no-files-found: warn
+
+      - name: Fail if pass rate below threshold
+        # Threshold: 0.70 (70 %).  The offline baseline achieves 0.80 so this
+        # gate fires only on genuine regressions.
+        # pass_rate in the JSON is a float in [0, 1] (e.g. 0.8), never a
+        # percentage string, so the % branch is a defensive no-op.
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          THRESHOLD = 0.70
+
+          try:
+              with open("eval_results/nightly.json") as f:
+                  data = json.load(f)
+
+              rate = data.get("summary", {}).get("pass_rate", None)
+              if rate is None:
+                  print("ERROR: 'summary.pass_rate' key missing from eval output.")
+                  sys.exit(1)
+
+              # Defensive: handle a hypothetical percentage-string value.
+              if isinstance(rate, str) and "%" in rate:
+                  rate = float(rate.strip("%")) / 100
+              rate = float(rate)
+
+              if rate < THRESHOLD:
+                  print(f"FAIL: pass rate {rate:.1%} < threshold {THRESHOLD:.1%}")
+                  sys.exit(1)
+
+              print(f"OK: pass rate {rate:.1%} >= threshold {THRESHOLD:.1%}")
+          except SystemExit:
+              raise
+          except Exception as e:
+              print(f"ERROR: Could not parse pass rate: {e}")
+              sys.exit(1)
+          EOF
