@@ -154,8 +154,10 @@
 * **Phased rollout:** v1 (identity + brevity), v2 (+ OS tools), v3 (+ code + multi-turn), v4 (+ internet tools)
 * **Reference:** See `ARCHITECTURE.md` Section 5 for full strategy: LoRA config table, dataset category specs, training workflow, tool palette, proof-of-concept experiment gate, and open questions.
 
-**Backlog (blocked — external dependencies):**
-  - Wave H3 — QLoRA fine-tune (`scripts/finetune_lora.py`): blocked on ≥8 GB VRAM GPU
+**GPU status (checked 2026-04-23):** RTX 4070, 12 GB VRAM — **UNBLOCKED** (requirement was ≥8 GB).
+
+**Backlog:**
+  - Wave H3 — QLoRA fine-tune (`scripts/finetune_lora.py`): ~~blocked on ≥8 GB VRAM GPU~~ **UNBLOCKED — RTX 4070 12 GB confirmed**
   - Wave H4 — Merge LoRA adapter: blocked on Wave H3
   - Wave H5 — Evaluate delta (Q4_K_M vs FP16 baseline): blocked on Wave H3
   - Wave H6 — Hot-swap wiring into orchestrator: blocked on Wave H3
