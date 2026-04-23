@@ -225,3 +225,35 @@ class ToolResultEvent:
     success: bool
     output: str
     data: dict  # type: ignore[type-arg]  # dict[str, Any] but frozen needs hashable
+
+
+@dataclass(frozen=True)
+class ConfigSchemaRequestEvent:
+    """Fired when Godot requests the full config schema + current values."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class ConfigUpdateEvent:
+    """Fired when Godot sends a bulk config update.
+
+    ``changes`` is a dict of dotted-path keys → new values (e.g.
+    ``{"audio.sensitivity": 0.7}``).  ``persist`` controls whether the
+    ConfigManager should write the change to ``config.yaml``.
+
+    ``changes`` is typed as bare ``dict`` because frozen dataclasses require
+    all fields to be hashable; ``dict`` is not hashable, so we override
+    ``__eq__`` and mark ``__hash__ = None`` (same pattern as
+    ``RecordingCompleteEvent`` and ``ToolResultEvent``).
+    """
+
+    changes: dict  # type: ignore[type-arg]  # dict[str, Any] — dotted-path keys
+    persist: bool
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ConfigUpdateEvent):
+            return NotImplemented
+        return self.changes == other.changes and self.persist == other.persist
+
+    __hash__ = None  # type: ignore[assignment]
