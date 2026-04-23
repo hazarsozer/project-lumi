@@ -3,12 +3,17 @@ extends HBoxContainer
 
 signal value_changed(field_key: String, new_value: Variant)
 
+const C_TEXT_PRIMARY   := Color(0.859, 0.886, 0.906, 1)
+const C_TEXT_SECONDARY := Color(0.427, 0.486, 0.529, 1)
+const C_ACCENT         := Color(0.0,   0.600, 0.824, 1)
+const C_BORDER         := Color(0.110, 0.165, 0.212, 1)
+const C_SURFACE_TOP    := Color(0.063, 0.118, 0.165, 1)
+
 var field_key: String = ""
 var _control_type: String = ""
 var _control_node: Control = null
 var _label_node: Label = null
 var _restart_badge: Label = null
-# For slider: a companion label that shows the current numeric value.
 var _slider_value_label: Label = null
 var _error_label: Label = null
 
@@ -38,6 +43,8 @@ func setup(key: String, meta: Dictionary, current_value: Variant) -> void:
 		_restart_badge.text = "[↻]"
 		_restart_badge.tooltip_text = "Restart required for this change to take effect."
 		add_child(_restart_badge)
+
+	_apply_row_style()
 
 
 func show_error(message: String) -> void:
@@ -85,6 +92,23 @@ func get_value() -> Variant:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+func _apply_row_style() -> void:
+	add_theme_constant_override("separation", 8)
+	alignment = BoxContainer.ALIGNMENT_CENTER
+
+	if _label_node != null:
+		_label_node.add_theme_color_override("font_color", C_TEXT_SECONDARY)
+		_label_node.add_theme_font_size_override("font_size", 12)
+
+	if _slider_value_label != null:
+		_slider_value_label.add_theme_color_override("font_color", C_TEXT_SECONDARY)
+		_slider_value_label.add_theme_font_size_override("font_size", 11)
+
+	if _restart_badge != null:
+		_restart_badge.add_theme_color_override("font_color", C_ACCENT)
+		_restart_badge.add_theme_font_size_override("font_size", 10)
+
+
 func _build_control(meta: Dictionary, current_value: Variant) -> Control:
 	match _control_type:
 		"slider":
@@ -114,6 +138,22 @@ func _build_slider(meta: Dictionary, current_value: Variant) -> HSlider:
 	slider.custom_minimum_size = Vector2(160, 0)
 	if current_value != null:
 		slider.value = float(current_value)
+
+	var track_style := StyleBoxFlat.new()
+	track_style.bg_color = C_BORDER
+	track_style.set_corner_radius_all(3)
+	track_style.content_margin_top = 3.0
+	track_style.content_margin_bottom = 3.0
+
+	var active_style := StyleBoxFlat.new()
+	active_style.bg_color = C_ACCENT
+	active_style.set_corner_radius_all(3)
+	active_style.content_margin_top = 3.0
+	active_style.content_margin_bottom = 3.0
+
+	slider.add_theme_stylebox_override("slider", track_style)
+	slider.add_theme_stylebox_override("grabber_area", active_style)
+	slider.add_theme_stylebox_override("grabber_area_highlight", active_style)
 
 	# Companion label that mirrors the numeric value.
 	_slider_value_label = Label.new()
