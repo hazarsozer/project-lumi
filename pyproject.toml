@@ -80,6 +80,17 @@ llm = [
     "llama-cpp-python>=0.2.90",
 ]
 
+qlora = [
+    # QLoRA fine-tuning pipeline — Phase 9 Track C.
+    # Install with: uv sync --extra qlora
+    # Requires CUDA 12+ and ~12 GB VRAM (RTX 4070 / 4080 / 3090 confirmed).
+    "transformers>=4.47.0",
+    "peft>=0.14.0",
+    "trl>=0.12.0",
+    "bitsandbytes>=0.44.0",
+    "accelerate>=1.2.0",
+]
+
 rag = [
     # RAG pipeline — only loaded when config.rag.enabled = true.
     # Install with: uv sync --extra rag
