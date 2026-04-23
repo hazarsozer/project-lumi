@@ -12,6 +12,8 @@ extends Node
 @onready var glow_ring: Panel = $CompactOverlay/GlowRing
 
 var _glow_style: StyleBoxFlat = null
+var _drag_active: bool = false
+var _drag_offset: Vector2i = Vector2i.ZERO
 
 # Accent colors per state (matches design_tokens.json).
 const STATE_COLORS: Dictionary = {
@@ -51,6 +53,16 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.ctrl_pressed and event.keycode == KEY_COMMA:
 			_on_settings_pressed()
+	if event is InputEventMouseMotion and _drag_active:
+		DisplayServer.window_set_position(Vector2i(DisplayServer.mouse_get_position()) + _drag_offset)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_drag_active = false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		_drag_active = true
+		_drag_offset = DisplayServer.window_get_position() - Vector2i(DisplayServer.mouse_get_position())
 
 
 func _on_connected() -> void:
@@ -69,6 +81,7 @@ func _on_settings_pressed() -> void:
 	if client._conn_state == "connected":
 		client.request_config_schema()
 	else:
+		_place_panel_beside_overlay(settings_panel)
 		settings_panel.open(_offline_demo_schema(), _offline_demo_values())
 
 
@@ -76,6 +89,7 @@ func _on_chat_pressed() -> void:
 	if chat_panel.visible:
 		chat_panel.hide()
 	else:
+		_place_panel_beside_overlay(chat_panel)
 		chat_panel.show()
 
 
@@ -84,6 +98,7 @@ func _on_chat_message_submitted(text: String) -> void:
 
 
 func _on_config_schema_received(fields: Dictionary, current_values: Dictionary) -> void:
+	_place_panel_beside_overlay(settings_panel)
 	settings_panel.open(fields, current_values)
 
 
@@ -150,6 +165,21 @@ func _apply_state_ui(state: String) -> void:
 	)
 	if _glow_style != null:
 		_glow_style.border_color = color if is_active else Color(0.110, 0.165, 0.212, 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Panel placement — position floating window to the right of the overlay
+# (or left if right side would be off-screen)
+# ---------------------------------------------------------------------------
+
+func _place_panel_beside_overlay(panel: Window) -> void:
+	var overlay_pos := DisplayServer.window_get_position()
+	var screen_size := DisplayServer.screen_get_size()
+	var panel_w := int(panel.size.x)
+	var target_x := overlay_pos.x + 170
+	if target_x + panel_w > screen_size.x:
+		target_x = overlay_pos.x - panel_w - 10
+	panel.position = Vector2i(target_x, max(0, overlay_pos.y))
 
 
 # ---------------------------------------------------------------------------
