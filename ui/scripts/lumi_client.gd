@@ -4,6 +4,8 @@ extends Node
 signal message_received(event_name: String, payload: Dictionary)
 signal connected_to_brain
 signal disconnected_from_brain
+signal config_schema_received(fields: Dictionary, current_values: Dictionary)
+signal config_update_result_received(applied_live: Array, pending_restart: Array, errors: Dictionary)
 
 const HOST: String = "127.0.0.1"
 const PORT: int = 5555
@@ -73,6 +75,14 @@ func send_user_text(text: String) -> void:
 	send_event("user_text", {"text": text})
 
 
+func request_config_schema() -> void:
+	send_event("config_schema_request", {})
+
+
+func send_config_update(changes: Dictionary, persist: bool) -> void:
+	send_event("config_update", {"changes": changes, "persist": persist})
+
+
 func _begin_connect() -> void:
 	_buffer.clear()
 	var err := _stream.connect_to_host(HOST, PORT)
@@ -105,7 +115,19 @@ func _drain_buffer() -> void:
 			_handle_hello(msg)
 			continue
 		if msg.has("event") and msg.has("payload"):
-			emit_signal("message_received", msg["event"], msg["payload"])
+			var ev: String = msg["event"]
+			var pl: Dictionary = msg["payload"]
+			if ev == "config_schema":
+				emit_signal("config_schema_received",
+					pl.get("fields", {}),
+					pl.get("current_values", {}))
+			elif ev == "config_update_result":
+				emit_signal("config_update_result_received",
+					pl.get("applied_live", []),
+					pl.get("pending_restart", []),
+					pl.get("errors", {}))
+			else:
+				emit_signal("message_received", ev, pl)
 		else:
 			push_warning("LumiClient: dropping malformed message (missing 'event' or 'payload')")
 
