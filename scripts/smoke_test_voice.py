@@ -35,9 +35,9 @@ from src.core.events import (
 )
 from src.core.orchestrator import Orchestrator
 from src.core.logging_config import setup_logging
+from src.audio.scribe import Scribe
 
 TIMEOUT_S = 30
-FAKE_AUDIO = b"\x00" * 32000  # 1 s of silence at 16 kHz / 16-bit
 
 setup_logging("WARNING")
 log = logging.getLogger("smoke_test")
@@ -45,6 +45,12 @@ log = logging.getLogger("smoke_test")
 
 def run_smoke_test() -> bool:
     cfg = load_config()
+
+    print("Loading Scribe (faster-whisper)...")
+    scribe = Scribe(
+        model_size=cfg.scribe.model_size,
+        initial_prompt=cfg.scribe.initial_prompt or "Lumi, desktop assistant.",
+    )
 
     observed: dict[str, float] = {}
     failures: list[str] = []
@@ -64,8 +70,8 @@ def run_smoke_test() -> bool:
 
     Orchestrator._dispatch = patched_dispatch
 
-    # Build orchestrator without real audio hardware
-    orch = Orchestrator(cfg)
+    print("Building orchestrator...")
+    orch = Orchestrator(cfg, scribe=scribe)
     t = threading.Thread(target=orch.run, daemon=True)
     t.start()
 
@@ -73,9 +79,11 @@ def run_smoke_test() -> bool:
     time.sleep(0.3)
 
     # Inject wake + fake recording
-    orch._event_queue.put(WakeDetectedEvent())
+    import numpy as np
+    fake_np = np.zeros(16000, dtype=np.int16)  # 1 s silence at 16 kHz
+    orch._event_queue.put(WakeDetectedEvent(timestamp=time.monotonic()))
     time.sleep(0.1)
-    orch._event_queue.put(RecordingCompleteEvent(audio_data=FAKE_AUDIO, sample_rate=16000))
+    orch._event_queue.put(RecordingCompleteEvent(audio=fake_np))
 
     # Wait for pipeline to reach LLM response or TTS
     reached = done_event.wait(timeout=TIMEOUT_S)

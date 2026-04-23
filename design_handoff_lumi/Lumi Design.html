@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Lumi — Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Manrope', system-ui, sans-serif; background: #0b0d12; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: oklch(28% 0.03 245); border-radius: 4px; }
+
+  @keyframes lumiPulse {
+    0%,100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 0.9; transform: scale(1.06); }
+  }
+  @keyframes lumiDot {
+    0%,80%,100% { transform: translateY(0); opacity: 0.4; }
+    40% { transform: translateY(-4px); opacity: 1; }
+  }
+  @keyframes lumiFloat {
+    0%,100% { transform: translateY(0px); }
+    50% { transform: translateY(-5px); }
+  }
+  @keyframes lumiFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .lumi-fadein { animation: lumiFadeIn 0.28s ease both; }
+
+  /* Tweaks panel */
+  #tweaks-panel {
+    position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+    background: oklch(15.5% 0.022 245); border: 1px solid oklch(28% 0.03 245);
+    border-radius: 12px; padding: 16px; width: 220px;
+    box-shadow: 0 8px 36px oklch(0% 0 0 / 0.65);
+    font-family: 'Manrope', system-ui, sans-serif;
+    display: none;
+  }
+  #tweaks-panel.visible { display: block; }
+  .tw-label { font-size: 11px; color: oklch(58% 0.025 240); margin-bottom: 6px; margin-top: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .tw-label:first-child { margin-top: 0; }
+  .tw-title { font-size: 13px; font-weight: 600; color: oklch(91% 0.01 240); margin-bottom: 12px; }
+  .tw-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .tw-row span { font-size: 12px; color: oklch(75% 0.02 240); }
+  .tw-btn { padding: 5px 10px; border-radius: 6px; border: 1px solid oklch(28% 0.03 245); background: oklch(19% 0.026 245); color: oklch(75% 0.02 240); font-size: 11px; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+  .tw-btn:hover { background: oklch(23% 0.03 245); }
+  .tw-btn.active { background: oklch(62% 0.18 222 / 0.2); border-color: oklch(62% 0.18 222 / 0.5); color: oklch(62% 0.18 222); }
+  .tw-toggle { width: 36px; height: 20px; border-radius: 999px; background: oklch(23% 0.03 245); border: none; cursor: pointer; position: relative; transition: background 0.2s; }
+  .tw-toggle.on { background: oklch(62% 0.18 222); }
+  .tw-toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: white; transition: left 0.2s; }
+  .tw-toggle.on::after { left: 19px; }
+</style>
+</head>
+<body>
+
+<script type="text/babel" src="lumi-components.jsx"></script>
+<script type="text/babel" src="lumi-surfaces.jsx"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "avatarState": "idle",
+  "showTokens": true
+}/*EDITMODE-END*/;
+
+// ── Component Sheet ───────────────────────────────────────
+function ComponentSheet() {
+  const col = (label, content) => (
+    <div style={{ display:'flex', flexDirection:'column', gap:T.space.sm, alignItems:'flex-start' }}>
+      <div style={{ fontSize:T.font.xs, color:T.colors.textMuted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:4 }}>{label}</div>
+      {content}
+    </div>
+  );
+
+  const states = ['Normal','Hover','Active','Disabled'];
+  const toggleStates = [false, false, true, false];
+  const disabled = [false, false, false, true];
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:T.space.xxl, padding:T.space.xxl, background:T.colors.surface, borderRadius:T.radius.xl, border:`1px solid ${T.colors.border}` }}>
+      <div style={{ fontSize:T.font.xl, fontWeight:700, color:T.colors.textPri }}>Component Sheet</div>
+
+      {/* Controls grid */}
+      <div style={{ display:'grid', gridTemplateColumns:'120px repeat(4,1fr)', gap:T.space.md, alignItems:'center' }}>
+        {/* Header row */}
+        <div/>
+        {states.map(s=>(
+          <div key={s} style={{ fontSize:T.font.sm, color:T.colors.textMuted, textTransform:'uppercase', letterSpacing:'0.07em' }}>{s}</div>
+        ))}
+
+        {/* Toggle */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Toggle</div>
+        {toggleStates.map((on,i)=>(
+          <LumiToggle key={i} checked={on} onChange={()=>{}} disabled={disabled[i]}/>
+        ))}
+
+        {/* Slider */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Slider</div>
+        {[65,65,65,65].map((v,i)=>(
+          <div key={i} style={{ width:120 }}>
+            <LumiSlider value={v} min={0} max={100} disabled={disabled[i]}/>
+          </div>
+        ))}
+
+        {/* Dropdown */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Dropdown</div>
+        {[false,false,false,true].map((dis,i)=>(
+          <LumiDropdown key={i} value="Option A" options={[]} disabled={dis}/>
+        ))}
+
+        {/* Text Input */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Text Input</div>
+        {[false,false,false,true].map((dis,i)=>(
+          <div key={i} style={{ width:140 }}>
+            <LumiInput value={i===2?'Active text':''} placeholder="Placeholder…" disabled={dis}/>
+          </div>
+        ))}
+
+        {/* Number Input */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Number</div>
+        {[false,false,false,true].map((dis,i)=>(
+          <LumiNumberInput key={i} value={16} disabled={dis}/>
+        ))}
+
+        {/* File Path */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>File Path</div>
+        {[false,false,false,true].map((dis,i)=>(
+          <div key={i} style={{ width:200 }}>
+            <LumiFilePath value="/path/to/file.md" disabled={dis}/>
+          </div>
+        ))}
+
+        {/* Checkbox */}
+        <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Checkbox</div>
+        {[false,false,true,false].map((chk,i)=>(
+          <LumiCheckbox key={i} checked={chk} label="Label" disabled={disabled[i]}/>
+        ))}
+      </div>
+
+      {/* Divider */}
+      <div style={{ height:1, background:T.colors.borderSub }}/>
+
+      {/* Icon Buttons */}
+      <div>
+        <div style={{ fontSize:T.font.lg, fontWeight:600, color:T.colors.textPri, marginBottom:T.space.lg }}>Icon Buttons</div>
+        <div style={{ display:'grid', gridTemplateColumns:'120px repeat(4,1fr)', gap:T.space.md, alignItems:'center' }}>
+          <div/>
+          {states.map(s=>(
+            <div key={s} style={{ fontSize:T.font.sm, color:T.colors.textMuted, textTransform:'uppercase', letterSpacing:'0.07em' }}>{s}</div>
+          ))}
+          <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Settings ⚙</div>
+          {(['normal','hover','active','disabled']).map(s=>(
+            <LumiIconBtn key={s} icon="⚙" state={s}/>
+          ))}
+          <div style={{ fontSize:T.font.md, color:T.colors.textSec }}>Chat 💬</div>
+          {(['normal','hover','active','disabled']).map(s=>(
+            <LumiIconBtn key={s} icon="💬" state={s}/>
+          ))}
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div style={{ height:1, background:T.colors.borderSub }}/>
+
+      {/* Avatar states */}
+      <div>
+        <div style={{ fontSize:T.font.lg, fontWeight:600, color:T.colors.textPri, marginBottom:T.space.lg }}>Avatar States</div>
+        <div style={{ display:'flex', gap:T.space.xxl }}>
+          {Object.entries(STATES).map(([key,st])=>(
+            <div key={key} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:T.space.md }}>
+              <LumiAvatar state={key} size={72}/>
+              <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <div style={{ width:6, height:6, borderRadius:'50%', background:st.color }}/>
+                <span style={{ fontSize:T.font.sm, color:T.colors.textSec }}>{st.label}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div style={{ height:1, background:T.colors.borderSub }}/>
+
+      {/* Typography */}
+      <div>
+        <div style={{ fontSize:T.font.lg, fontWeight:600, color:T.colors.textPri, marginBottom:T.space.lg }}>Typography & Color</div>
+        <div style={{ display:'flex', gap:T.space.xxl }}>
+          <div style={{ display:'flex', flexDirection:'column', gap:T.space.md }}>
+            {[['Display','22px','700'],['Heading','18px','600'],['Body','13px','400'],['Label','11px','500'],['Micro','10px','400']].map(([n,s,w])=>(
+              <div key={n} style={{ display:'flex', alignItems:'baseline', gap:T.space.lg }}>
+                <span style={{ fontSize:11, color:T.colors.textMuted, width:60 }}>{n} {s}</span>
+                <span style={{ fontSize:s, fontWeight:w, color:T.colors.textPri }}>The quick brown fox</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:T.space.sm }}>
+            {[
+              ['bg',T.colors.bg,'Background'],
+              ['surface',T.colors.surface,'Surface'],
+              ['surfaceUp',T.colors.surfaceUp,'Surface Elevated'],
+              ['surfaceTop',T.colors.surfaceTop,'Surface Top'],
+              ['accentBlue',T.colors.accentBlue,'Accent — Idle'],
+              ['accentGreen',T.colors.accentGreen,'Accent — Listening'],
+              ['accentAmber',T.colors.accentAmber,'Accent — Processing'],
+              ['accentWhite',T.colors.accentWhite,'Accent — Speaking'],
+            ].map(([k,v,label])=>(
+              <div key={k} style={{ display:'flex', alignItems:'center', gap:T.space.md }}>
+                <div style={{ width:28, height:18, borderRadius:T.radius.sm, background:v, border:`1px solid ${T.colors.border}` }}/>
+                <span style={{ fontSize:T.font.sm, color:T.colors.textSec, width:140 }}>{label}</span>
+                <span style={{ fontSize:T.font.xs, color:T.colors.textMuted, fontFamily:'monospace' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tokens Display ────────────────────────────────────────
+const TOKENS_JSON = {
+  colors: {
+    background: "oklch(11% 0.018 245)",
+    surface: "oklch(15.5% 0.022 245)",
+    surfaceElevated: "oklch(19% 0.026 245)",
+    surfaceTop: "oklch(23% 0.03 245)",
+    border: "oklch(28% 0.03 245)",
+    borderSubtle: "oklch(22% 0.025 245)",
+    textPrimary: "oklch(91% 0.01 240)",
+    textSecondary: "oklch(58% 0.025 240)",
+    textMuted: "oklch(36% 0.022 240)",
+    accentIdle: "oklch(62% 0.18 222)",
+    accentListening: "oklch(64% 0.18 152)",
+    accentProcessing: "oklch(72% 0.17 65)",
+    accentSpeaking: "oklch(94% 0.012 240)",
+    danger: "oklch(60% 0.18 25)"
+  },
+  spacing: { xs:4, sm:8, md:12, lg:16, xl:24, xxl:32 },
+  borderRadius: { sm:4, md:8, lg:12, xl:16, pill:999 },
+  fontSize: { xs:10, sm:11, md:13, lg:15, xl:18, xxl:22 },
+  opacity: { idle:0.42, active:1, disabled:0.32 },
+  shadows: {
+    sm: "0 2px 8px oklch(0% 0 0 / 0.45)",
+    md: "0 4px 20px oklch(0% 0 0 / 0.55)",
+    lg: "0 8px 36px oklch(0% 0 0 / 0.65)",
+    glowBlue: "0 0 18px oklch(62% 0.18 222 / 0.45)",
+    glowGreen: "0 0 18px oklch(64% 0.18 152 / 0.50)",
+    glowAmber: "0 0 18px oklch(72% 0.17 65 / 0.45)",
+    glowWhite: "0 0 22px oklch(94% 0.012 240 / 0.55)"
+  }
+};
+
+function TokensPanel() {
+  const [copied, setCopied] = React.useState(false);
+  const json = JSON.stringify(TOKENS_JSON, null, 2);
+  const copy = () => {
+    navigator.clipboard?.writeText(json).then(()=>{ setCopied(true); setTimeout(()=>setCopied(false),2000); });
+  };
+  return (
+    <div style={{ background:T.colors.surface, borderRadius:T.radius.xl, border:`1px solid ${T.colors.border}`, overflow:'hidden', minWidth:480 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:`${T.space.md}px ${T.space.lg}px`, borderBottom:`1px solid ${T.colors.borderSub}` }}>
+        <span style={{ fontSize:T.font.lg, fontWeight:600, color:T.colors.textPri }}>Design Tokens</span>
+        <div onClick={copy} style={{ padding:'5px 12px', borderRadius:T.radius.md, background:copied?'oklch(62% 0.18 222 / 0.15)':T.colors.surfaceTop, border:`1px solid ${copied?T.colors.accentBlue:T.colors.border}`, fontSize:T.font.sm, color:copied?T.colors.accentBlue:T.colors.textSec, cursor:'pointer', transition:'all 0.2s' }}>
+          {copied ? '✓ Copied' : 'Copy JSON'}
+        </div>
+      </div>
+      <pre style={{ padding:T.space.lg, fontSize:11, color:T.colors.textSec, lineHeight:1.7, overflowX:'auto', fontFamily:'monospace', maxHeight:400 }}>
+        {json}
+      </pre>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────
+function App() {
+  const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+  const [tweaksVisible, setTweaksVisible] = React.useState(false);
+  const [chatOpen, setChatOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+
+  // Tweaks host protocol
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setTweaksVisible(true);
+      if (e.data?.type === '__deactivate_edit_mode') setTweaksVisible(false);
+    };
+    window.addEventListener('message', handler);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
+  const setTweak = (k, v) => {
+    const next = { ...tweaks, [k]: v };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: next }, '*');
+  };
+
+  const AVATAR_STATES = ['idle','listening','processing','speaking'];
+
+  return (
+    <>
+      <DesignCanvas title="Lumi — Desktop AI Assistant">
+
+        {/* Row 1: Main surfaces */}
+        <DCSection id="surfaces" title="Surfaces">
+          {/* Compact Overlay */}
+          <DCArtboard id="compact" label="Compact Overlay" width={240} height={340}>
+            <div style={{ width:'100%', height:'100%', background:`radial-gradient(ellipse at 30% 70%, oklch(16% 0.03 240), oklch(10% 0.015 245))`, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:T.radius.xl }}>
+              <CompactOverlay
+                avatarState={tweaks.avatarState}
+                onChat={()=>setChatOpen(true)}
+                onSettings={()=>setSettingsOpen(true)}
+              />
+            </div>
+          </DCArtboard>
+
+          {/* Chat Panel */}
+          <DCArtboard id="chat" label="Chat Panel" width={420} height={580}>
+            <div style={{ width:'100%', height:'100%', background:`radial-gradient(ellipse at 60% 30%, oklch(16% 0.03 240), oklch(10% 0.015 245))`, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:T.radius.xl, padding:T.space.lg }}>
+              <div className="lumi-fadein">
+                <ChatPanel onClose={()=>{}}/>
+              </div>
+            </div>
+          </DCArtboard>
+
+          {/* Settings Panel */}
+          <DCArtboard id="settings" label="Settings Panel" width={740} height={600}>
+            <div style={{ width:'100%', height:'100%', background:`radial-gradient(ellipse at 50% 50%, oklch(16% 0.03 240), oklch(10% 0.015 245))`, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:T.radius.xl, padding:T.space.lg }}>
+              <div className="lumi-fadein">
+                <SettingsPanel onClose={()=>{}}/>
+              </div>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* Row 2: Component Sheet */}
+        <DCSection id="components" title="Component Sheet">
+          <DCArtboard id="controls" label="Controls & States" width={1040} height={680}>
+            <div style={{ width:'100%', height:'100%', background:`oklch(10% 0.015 245)`, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:T.radius.xl, padding:T.space.xl }}>
+              <ComponentSheet/>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        {/* Row 3: Tokens */}
+        <DCSection id="tokens" title="Design Tokens">
+          <DCArtboard id="tokens-panel" label="tokens.json" width={580} height={560}>
+            <div style={{ width:'100%', height:'100%', background:`oklch(10% 0.015 245)`, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:T.radius.xl, padding:T.space.xl }}>
+              <TokensPanel/>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+      </DesignCanvas>
+
+      {/* Tweaks Panel */}
+      <div id="tweaks-panel" className={tweaksVisible ? 'visible' : ''}>
+        <div className="tw-title">Tweaks</div>
+        <div className="tw-label">Avatar State</div>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+          {AVATAR_STATES.map(s=>(
+            <button key={s} className={`tw-btn ${tweaks.avatarState===s?'active':''}`} onClick={()=>setTweak('avatarState',s)}>
+              {s}
+            </button>
+          ))}
+        </div>
+        <div className="tw-label">Show Tokens</div>
+        <div className="tw-row">
+          <span>Visible</span>
+          <button className={`tw-toggle ${tweaks.showTokens?'on':''}`} onClick={()=>setTweak('showTokens',!tweaks.showTokens)}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App/>);
+</script>
+
+<div id="root"></div>
+</body>
+</html>

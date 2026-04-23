@@ -1,14 +1,13 @@
 class_name SettingsPanel
-extends CanvasLayer
+extends Window
 
 signal settings_closed
 signal apply_requested(changes: Dictionary, persist: bool)
 
-# Internal state
-var _schema: Dictionary = {}          # fields dict from config_schema
-var _current_values: Dictionary = {}  # current_values dict
-var _dirty_values: Dictionary = {}    # user-changed values not yet applied
-var _row_map: Dictionary = {}         # field_key (String) -> SettingRow
+var _schema: Dictionary = {}
+var _current_values: Dictionary = {}
+var _dirty_values: Dictionary = {}
+var _row_map: Dictionary = {}
 
 @onready var _panel: PanelContainer = $PanelContainer
 @onready var _tab_container: TabContainer = $PanelContainer/VBox/TabContainer
@@ -21,13 +20,13 @@ var _row_map: Dictionary = {}         # field_key (String) -> SettingRow
 
 func _ready() -> void:
 	hide()
+	close_requested.connect(_on_cancel)
 	_apply_btn.pressed.connect(_on_apply)
 	_save_btn.pressed.connect(_on_save)
 	_cancel_btn.pressed.connect(_on_cancel)
 	_close_btn.pressed.connect(_on_cancel)
 
 
-# Open the panel with schema data received from the Brain.
 func open(fields: Dictionary, current_values: Dictionary) -> void:
 	_schema = fields
 	_current_values = current_values
@@ -37,10 +36,6 @@ func open(fields: Dictionary, current_values: Dictionary) -> void:
 	_populate_tabs()
 	show()
 
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 const TAB_FIELDS: Dictionary = {
 	"General": ["edition", "log_level", "json_logs"],
@@ -97,7 +92,7 @@ func _populate_tabs() -> void:
 
 		for key in keys:
 			if not _schema.has(key):
-				continue  # field not in schema (graceful degradation)
+				continue
 			var meta: Dictionary = _schema[key]
 			var current_val: Variant = _current_values.get(key)
 			var row: SettingRow = row_scene.instantiate()
@@ -112,18 +107,15 @@ func handle_update_result(
 		pending_restart: Array,
 		errors: Dictionary
 ) -> void:
-	# Clear all previous error states first.
 	for row in _row_map.values():
 		row.clear_error()
 
-	# Show errors on affected rows.
 	for key in errors.keys():
 		if _row_map.has(key):
 			_row_map[key].show_error(errors[key])
 		else:
 			push_warning("SettingsPanel: error for unknown key '%s': %s" % [key, errors[key]])
 
-	# Show restart bar if any pending_restart fields exist.
 	if pending_restart.size() > 0:
 		_restart_bar.text = "Some changes require a restart to take effect."
 		_restart_bar.show()
@@ -132,7 +124,6 @@ func handle_update_result(
 func _on_row_value_changed(key: String, value: Variant) -> void:
 	_dirty_values[key] = value
 
-	# Show restart bar if any dirty field has restart_required == true.
 	var needs_restart := false
 	for k in _dirty_values.keys():
 		if _schema.get(k, {}).get("restart_required", false):

@@ -2,25 +2,36 @@ extends Node
 
 @onready var client: LumiClient = $LumiClient
 @onready var avatar: AvatarController = $AvatarController
-@onready var text_bubble: TextBubble = $TextBubble
-@onready var citation_panel: CitationPanel = $CitationPanel
-@onready var rag_toggle: RagToggle = $RagToggle
-@onready var settings_panel: SettingsPanel = $SettingsPanel
-@onready var gear_button: Button = $HUD/GearButton
-@onready var close_button: Button = $HUD/CloseButton
-@onready var status_label: Label = $HUD/StatusLabel
+@onready var settings_panel = $SettingsPanel
+@onready var chat_panel = $ChatPanel
+@onready var status_dot: ColorRect = $CompactOverlay/ButtonTray/TrayLayout/StatusDot
+@onready var state_label: Label = $CompactOverlay/ButtonTray/TrayLayout/StateLabel
+@onready var settings_btn: Button = $CompactOverlay/ButtonTray/TrayLayout/SettingsBtn
+@onready var chat_btn: Button = $CompactOverlay/ButtonTray/TrayLayout/ChatBtn
+@onready var sprite: AnimatedSprite2D = $AvatarController/AnimatedSprite2D
+
+# Accent colors per state (matches design_tokens.json).
+const STATE_COLORS: Dictionary = {
+	"idle":       Color(0.0,    0.5961, 0.8196, 1),
+	"listening":  Color(0.0,    0.6627, 0.3137, 1),
+	"processing": Color(0.9216, 0.5373, 0.0,    1),
+	"speaking":   Color(0.8941, 0.9255, 0.9490, 1),
+}
+const OPACITY_IDLE:   float = 0.42
+const OPACITY_ACTIVE: float = 1.0
 
 
 func _ready() -> void:
 	client.message_received.connect(_on_message)
 	client.connected_to_brain.connect(_on_connected)
 	client.disconnected_from_brain.connect(_on_disconnected)
-	rag_toggle.rag_state_changed.connect(_on_rag_state_changed)
 	client.config_schema_received.connect(_on_config_schema_received)
 	client.config_update_result_received.connect(_on_config_update_result_received)
 	settings_panel.apply_requested.connect(_on_settings_apply_requested)
-	gear_button.pressed.connect(_on_gear_pressed)
-	close_button.pressed.connect(func() -> void: get_tree().quit())
+	settings_btn.pressed.connect(_on_settings_pressed)
+	chat_btn.pressed.connect(_on_chat_pressed)
+	chat_panel.message_submitted.connect(_on_chat_message_submitted)
+	_apply_state_ui("idle")
 
 
 func _input(event: InputEvent) -> void:
@@ -28,35 +39,37 @@ func _input(event: InputEvent) -> void:
 		client.send_interrupt()
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.ctrl_pressed and event.keycode == KEY_COMMA:
-			_on_gear_pressed()
+			_on_settings_pressed()
 
 
 func _on_connected() -> void:
-	status_label.text = "Connected to Brain"
-	status_label.add_theme_color_override("font_color", Color(0.2, 0.9, 0.4, 1))
-	_send_rag_config(rag_toggle.is_enabled())
+	state_label.text = "Connected"
+	state_label.add_theme_color_override("font_color", Color(0.0, 0.6627, 0.3137, 1))
 
 
 func _on_disconnected() -> void:
-	status_label.text = "Disconnected"
-	status_label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5, 1))
+	_apply_state_ui("idle")
+	state_label.text = "Disconnected"
+	state_label.add_theme_color_override("font_color", Color(0.427, 0.486, 0.529, 1))
 	avatar.on_state_change("idle")
 
 
-func _on_rag_state_changed(enabled: bool) -> void:
-	_send_rag_config(enabled)
-
-
-func _send_rag_config(enabled: bool) -> void:
-	client.send_event("set_config", {"key": "rag_enabled", "value": enabled})
-
-
-func _on_gear_pressed() -> void:
+func _on_settings_pressed() -> void:
 	if client._conn_state == "connected":
 		client.request_config_schema()
 	else:
-		# Offline demo: open settings panel with a representative sample schema.
 		settings_panel.open(_offline_demo_schema(), _offline_demo_values())
+
+
+func _on_chat_pressed() -> void:
+	if chat_panel.visible:
+		chat_panel.hide()
+	else:
+		chat_panel.show()
+
+
+func _on_chat_message_submitted(text: String) -> void:
+	client.send_event("text_input", {"text": text})
 
 
 func _on_config_schema_received(fields: Dictionary, current_values: Dictionary) -> void:
@@ -77,7 +90,9 @@ func _on_message(event_name: String, payload: Dictionary) -> void:
 	match event_name:
 		"state_change":
 			if payload.has("state"):
-				avatar.on_state_change(payload["state"])
+				var s: String = payload["state"]
+				avatar.on_state_change(s)
+				_apply_state_ui(s)
 			else:
 				push_warning("main.gd: state_change missing 'state' key")
 		"tts_viseme":
@@ -86,21 +101,21 @@ func _on_message(event_name: String, payload: Dictionary) -> void:
 			else:
 				push_warning("main.gd: tts_viseme missing required keys")
 		"tts_start":
-			if text_bubble != null:
-				text_bubble.clear()
+			chat_panel.begin_assistant_turn()
 		"tts_stop":
 			avatar.on_tts_stop()
 		"transcript":
-			push_warning("main.gd: transcript received: %s" % payload.get("text", ""))
+			var text: String = payload.get("text", "")
+			if not text.is_empty():
+				chat_panel.add_user_message(text)
 		"llm_token":
 			if payload.has("token"):
-				if text_bubble != null:
-					text_bubble.add_token(payload["token"])
+				chat_panel.add_token(payload["token"])
 			else:
 				push_warning("main.gd: llm_token missing 'token' key")
 		"rag_retrieval":
 			if payload.has("top_doc_paths"):
-				citation_panel.show_citations(payload)
+				chat_panel.add_citations(payload["top_doc_paths"])
 			else:
 				push_warning("main.gd: rag_retrieval missing 'top_doc_paths' key")
 		"error":
@@ -109,6 +124,19 @@ func _on_message(event_name: String, payload: Dictionary) -> void:
 			pass
 		_:
 			push_warning("main.gd: unhandled event '%s'" % event_name)
+
+
+func _apply_state_ui(state: String) -> void:
+	var color: Color = STATE_COLORS.get(state, STATE_COLORS["idle"])
+	status_dot.color = color
+	var is_active: bool = state != "idle"
+	sprite.modulate.a = OPACITY_ACTIVE if is_active else OPACITY_IDLE
+	var label_text: String = state.capitalize()
+	state_label.text = label_text
+	state_label.add_theme_color_override(
+		"font_color",
+		color if is_active else Color(0.427, 0.486, 0.529, 1)
+	)
 
 
 # ---------------------------------------------------------------------------
@@ -156,9 +184,6 @@ func _offline_demo_schema() -> Dictionary:
 			"restart_required": false, "help": "Kokoro voice identifier."},
 		"tools.enabled": {"label": "Enable OS Tools", "control": "toggle",
 			"restart_required": false, "help": "Allow Lumi to run OS action tools."},
-		"tools.allowed_tools": {"label": "Allowed Tools", "control": "multiselect",
-			"options": ["launch_app", "clipboard", "file_info", "window_list", "rag_ingest"],
-			"restart_required": false, "help": "Tools the executor may invoke."},
 		"rag.enabled": {"label": "Enable RAG", "control": "toggle",
 			"restart_required": false, "help": "Search your personal documents before responding."},
 		"rag.retrieval_top_k": {"label": "Retrieval Top-K", "control": "slider",
@@ -191,7 +216,6 @@ func _offline_demo_values() -> Dictionary:
 		"tts.enabled": true,
 		"tts.voice": "af_heart",
 		"tools.enabled": true,
-		"tools.allowed_tools": ["launch_app", "clipboard", "file_info", "window_list"],
 		"rag.enabled": false,
 		"rag.retrieval_top_k": 8,
 		"ipc.enabled": false,

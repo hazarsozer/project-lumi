@@ -1,12 +1,11 @@
-[gd_scene load_steps=8 format=3 uid="uid://cdmh6n0wailmr"]
+[gd_scene load_steps=7 format=3 uid="uid://cdmh6n0wailmr"]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/lumi_client.gd" id="2_client"]
 [ext_resource type="Script" path="res://scripts/avatar_controller.gd" id="3_avatar"]
-[ext_resource type="PackedScene" path="res://scenes/citation_panel.tscn" id="4_citation_panel"]
-[ext_resource type="PackedScene" path="res://scenes/rag_toggle.tscn" id="5_rag_toggle"]
-[ext_resource type="PackedScene" path="res://scenes/settings_panel.tscn" id="6_settings_panel"]
-[ext_resource type="PackedScene" path="res://scenes/text_bubble.tscn" id="7_text_bubble"]
+[ext_resource type="PackedScene" path="res://scenes/settings_panel.tscn" id="4_settings"]
+[ext_resource type="PackedScene" path="res://scenes/chat_panel.tscn" id="5_chat"]
+[ext_resource type="Theme" path="res://themes/lumi_dark.tres" id="6_theme"]
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
@@ -14,47 +13,66 @@ script = ExtResource("1_main")
 [node name="LumiClient" type="Node" parent="."]
 script = ExtResource("2_client")
 
+[node name="CompactOverlay" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("6_theme")
+
+[node name="ButtonTray" type="Panel" parent="CompactOverlay"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 182.0
+offset_right = 160.0
+offset_bottom = 234.0
+
+[node name="TrayLayout" type="HBoxContainer" parent="CompactOverlay/ButtonTray"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_right = -8.0
+offset_top = 4.0
+offset_bottom = -4.0
+theme_override_constants/separation = 4
+
+[node name="StatusDot" type="ColorRect" parent="CompactOverlay/ButtonTray/TrayLayout"]
+custom_minimum_size = Vector2(8, 8)
+size_flags_vertical = 4
+color = Color(0.0, 0.6, 0.824, 1)
+
+[node name="StateLabel" type="Label" parent="CompactOverlay/ButtonTray/TrayLayout"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Idle"
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.427, 0.486, 0.529, 1)
+
+[node name="Spacer" type="Control" parent="CompactOverlay/ButtonTray/TrayLayout"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SettingsBtn" type="Button" parent="CompactOverlay/ButtonTray/TrayLayout"]
+custom_minimum_size = Vector2(32, 32)
+tooltip_text = "Settings (Ctrl+,)"
+text = "⚙"
+
+[node name="ChatBtn" type="Button" parent="CompactOverlay/ButtonTray/TrayLayout"]
+custom_minimum_size = Vector2(32, 32)
+tooltip_text = "Chat"
+text = "💬"
+
 [node name="AvatarController" type="Node" parent="."]
 script = ExtResource("3_avatar")
 sprite = NodePath("AnimatedSprite2D")
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="AvatarController"]
-position = Vector2(640, 400)
+position = Vector2(80, 105)
+modulate = Color(1, 1, 1, 0.42)
+z_index = 1
 
-[node name="HUD" type="CanvasLayer" parent="."]
-layer = 1
+[node name="SettingsPanel" parent="." instance=ExtResource("4_settings")]
 
-[node name="GearButton" type="Button" parent="HUD"]
-offset_left = 12.0
-offset_top = 12.0
-offset_right = 44.0
-offset_bottom = 44.0
-tooltip_text = "Settings (Ctrl+,)"
-text = "⚙"
-
-[node name="CloseButton" type="Button" parent="HUD"]
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -44.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = 44.0
-tooltip_text = "Quit"
-text = "✕"
-
-[node name="StatusLabel" type="Label" parent="HUD"]
-offset_left = 60.0
-offset_top = 18.0
-offset_right = 400.0
-offset_bottom = 42.0
-text = "Disconnected"
-theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
-theme_override_font_sizes/font_size = 13
-
-[node name="CitationPanel" parent="." instance=ExtResource("4_citation_panel")]
-
-[node name="RagToggle" parent="." instance=ExtResource("5_rag_toggle")]
-
-[node name="SettingsPanel" parent="." instance=ExtResource("6_settings_panel")]
-
-[node name="TextBubble" parent="." instance=ExtResource("7_text_bubble")]
+[node name="ChatPanel" parent="." instance=ExtResource("5_chat")]
