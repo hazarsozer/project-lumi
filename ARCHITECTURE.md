@@ -186,18 +186,19 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Frame protocol | `ipc_protocol.gd` — 4-byte length-prefix encode/decode |
 | Avatar | `AvatarController` drives `AnimatedSprite2D` from Brain state events; placeholder colored-circle sprites in `ui/assets/sprites/` |
 | Avatar (Phase 6) | Real artwork replacing placeholder sprites; Live2D (Standard) / 3D VRM (Pro) |
+| Settings Panel (Phase 8.5) | `ui/scenes/settings_panel.tscn` + `ui/scripts/settings_panel.gd` — gear icon / Ctrl+, entry; 7-tab configuration UI; `SettingRow` widget with 7 control types (toggle, slider, select, text, number, path, multiselect); requests schema from Brain, applies changes live or marks `[↻]` restart-required |
 
 ### Infrastructure
 | Component | Technology |
 |---|---|
 | Language | Python 3.12 |
 | Package Manager | `uv` |
-| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). |
+| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). **Settings wiring (Phase 8.5):** `config_schema_request` / `config_schema`, `config_update` / `config_update_result` wire events for runtime settings panel. |
 | Observability | `src/core/metrics.py` — stdlib histogram (p50/p95/p99) for latency tracking without external deps |
-| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
+| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`). **Runtime config (Phase 8.5):** `src/core/config_runtime.py` — `ConfigManager` + `ConfigObserver` + `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock. `src/core/config_schema.py` — `FIELD_META` dict for 47 user-facing fields. `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover. |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — hard/soft checks; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 820 passed, 4 skipped) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 896 passed, 4 skipped) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)

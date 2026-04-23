@@ -221,6 +221,22 @@
   - Update `ui/TESTING.md` manual checklist with citation panel test cases.
 * **Blocker:** None — `rag_retrieval` wire event is already defined and sent. Godot scene work only.
 
+## ~~25. Phase 8.5 Settings UI~~ — DONE
+
+* **Context:** Runtime configuration editor integrated into Godot overlay; live + restart-required settings with IPC wiring.
+* **Wave S0:** ConfigManager, FIELD_META, config_writer — DONE
+* **Wave S1:** 4 new IPC config wire events — DONE
+* **Wave S2:** ConfigManager wired into Orchestrator — DONE
+* **Wave S3:** Godot settings panel scaffold — DONE
+* **Wave S4:** 7-tab population, error display, restart bar — DONE
+* **Wave S5:** docs + security review — DONE
+* **What was built (896 tests, 4 skipped, 0 failures):**
+  - `src/core/config_runtime.py` — `ConfigManager`, `ConfigObserver`, `ConfigUpdateResult`; live config apply via `dataclasses.replace()`; thread-safe RLock
+  - `src/core/config_schema.py` — `FIELD_META` dict; UI metadata (control type, min/max, restart_required) for 47 user-facing fields
+  - `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover, ruamel.yaml
+  - IPC: `config_schema_request` (Body→Brain), `config_schema` (Brain→Body), `config_update` (Body→Brain), `config_update_result` (Brain→Body)
+  - Godot: settings panel (`ui/scenes/settings_panel.tscn`, `ui/scripts/settings_panel.gd`) — gear icon / Ctrl+, entry; 7 tabs; `SettingRow` widget with 7 control types
+
 ## 24. Real Avatar Artwork — AWAITING ASSETS
 
 * **Context:** The Godot frontend currently uses placeholder colored-circle sprites in `ui/assets/sprites/`. Phase 5 and 6 deferred real artwork.

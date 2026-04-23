@@ -116,6 +116,29 @@
 
 ---
 
+## Configuring Lumi
+
+**`config.yaml`** lives in the repo root; all keys are optional (defaults in `src/core/config.py`). Hardware is auto-detected: set `edition: auto` (or omit) to read VRAM via `nvidia-smi`; choose `light` / `standard` / `pro` to override.
+
+**Configuration sections:**
+- `audio` — microphone sample rate, wake-word sensitivity, VAD threshold, recording timeouts. See `config.yaml` for full docs.
+- `scribe` — faster-whisper model size and quantization. Smaller models run faster on CPU.
+- `llm` — model path, GPU layer offload (`n_gpu_layers`). Phi-3.5 Mini or Gemma 2 by default.
+- `tts` — TTS voice, speech rate. Kokoro ONNX recommended.
+- `ipc` — set `enabled: true` to activate the Godot 4 overlay (default `false`).
+- `tools` — enable/disable OS automation (app launch, clipboard, window list, screenshot).
+- `vision` — screenshot tool settings and moondream2 vision model.
+- `persona` — custom system prompt for personality injection.
+- `rag` — enable/disable personal knowledge base; embedding model path.
+
+**Settings UI (new in Phase 8.5):** Open with the **⚙ gear icon** or **Ctrl+,** while the Godot overlay is running. The panel reads the live schema from the Brain and writes changes back via the IPC channel. Changes marked `[↻]` require a restart:
+- **Live (hot) changes** — audio thresholds, `log_level`, LLM `temperature` / `max_tokens`, TTS `voice`, tools enabled, RAG enabled, persona prompt
+- **Restart required `[↻]`** — model paths, `sample_rate`, IPC settings, `n_gpu_layers`, KV cache quantization
+
+**First-run setup:** Run `uv run python scripts/setup_wizard.py` for guided configuration.
+
+---
+
 ## Architecture Overview
 
 Lumi uses a "Split-Brain" design: a Python backend handles all intelligence and audio processing; a Godot 4 frontend renders the avatar overlay. They communicate over raw TCP with 4-byte length-prefix framing.
