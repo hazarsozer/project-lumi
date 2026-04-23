@@ -20,6 +20,13 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 theme = ExtResource("6_theme")
 
+[node name="GlowRing" type="Panel" parent="CompactOverlay"]
+layout_mode = 0
+offset_left = 10.0
+offset_top = 0.0
+offset_right = 150.0
+offset_bottom = 210.0
+
 [node name="ButtonTray" type="Panel" parent="CompactOverlay"]
 layout_mode = 0
 offset_left = 0.0

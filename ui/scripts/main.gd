@@ -9,6 +9,9 @@ extends Node
 @onready var settings_btn: Button = $CompactOverlay/ButtonTray/TrayLayout/SettingsBtn
 @onready var chat_btn: Button = $CompactOverlay/ButtonTray/TrayLayout/ChatBtn
 @onready var sprite: AnimatedSprite2D = $AvatarController/AnimatedSprite2D
+@onready var glow_ring: Panel = $CompactOverlay/GlowRing
+
+var _glow_style: StyleBoxFlat = null
 
 # Accent colors per state (matches design_tokens.json).
 const STATE_COLORS: Dictionary = {
@@ -31,6 +34,14 @@ func _ready() -> void:
 	settings_btn.pressed.connect(_on_settings_pressed)
 	chat_btn.pressed.connect(_on_chat_pressed)
 	chat_panel.message_submitted.connect(_on_chat_message_submitted)
+	_glow_style = StyleBoxFlat.new()
+	_glow_style.bg_color = Color(0, 0, 0, 0)
+	_glow_style.border_width_left = 2
+	_glow_style.border_width_top = 2
+	_glow_style.border_width_right = 2
+	_glow_style.border_width_bottom = 2
+	_glow_style.set_corner_radius_all(12)
+	glow_ring.add_theme_stylebox_override("panel", _glow_style)
 	_apply_state_ui("idle")
 
 
@@ -137,6 +148,8 @@ func _apply_state_ui(state: String) -> void:
 		"font_color",
 		color if is_active else Color(0.427, 0.486, 0.529, 1)
 	)
+	if _glow_style != null:
+		_glow_style.border_color = color if is_active else Color(0.110, 0.165, 0.212, 0.5)
 
 
 # ---------------------------------------------------------------------------
