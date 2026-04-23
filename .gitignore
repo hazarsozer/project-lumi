@@ -43,6 +43,9 @@ my_model.yaml
 # --- Claude Code (local session data, agent definitions) ---
 .claude/
 
+# --- Godot editor cache (auto-generated, not source) ---
+ui/.godot/
+
 # --- pytest / coverage ---
 .pytest_cache/
 .coverage
