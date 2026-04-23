@@ -345,7 +345,10 @@ class Orchestrator:
         Args:
             event: The transcript event containing the user's spoken text.
         """
-        self._state_machine.transition_to(LumiState.PROCESSING)
+        # _handle_recording_complete already transitioned to PROCESSING when it
+        # started the Scribe thread; only advance if we somehow arrive from LISTENING.
+        if self._state_machine.current_state != LumiState.PROCESSING:
+            self._state_machine.transition_to(LumiState.PROCESSING)
         self._dispatch_user_turn(event.text, source="transcript")
 
     def _handle_user_text(self, event: UserTextEvent) -> None:
@@ -423,6 +426,10 @@ class Orchestrator:
         # remains responsive to InterruptEvents during long inference.
         def _run_inference() -> None:
             try:
+                # Lazy-load the model on first inference call.
+                if not self._model_loader.is_loaded:
+                    logger.info("Loading LLM model on first inference request...")
+                    self._model_loader.load(self._config.llm)
                 response = self._reasoning_router.generate(
                     text, self._llm_cancel_flag,
                     utterance_id=utterance_id, use_rag=use_rag,

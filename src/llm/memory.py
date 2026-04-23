@@ -9,6 +9,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+_MAX_TURNS = 20  # rolling window cap — prevents context-window overflow
+
+
 class ConversationMemory:
     """Stores conversation turns in memory with optional JSON file persistence."""
 
@@ -19,8 +22,10 @@ class ConversationMemory:
         self._file: Path = expanded / "conversation.json"
 
     def add_turn(self, role: str, content: str) -> None:
-        """Append a turn to conversation history."""
+        """Append a turn and keep the rolling window at _MAX_TURNS."""
         self._history.append({"role": role, "content": content})
+        if len(self._history) > _MAX_TURNS:
+            self._history = self._history[-_MAX_TURNS:]
 
     def get_history(self) -> list[dict[str, str]]:
         """Return a shallow copy of the conversation history."""
@@ -55,7 +60,7 @@ class ConversationMemory:
             with self._file.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if isinstance(data, list):
-                self._history = data
+                self._history = data[-_MAX_TURNS:]
             else:
                 logger.warning("Unexpected format in %s — starting fresh", self._file)
                 self._history = []
