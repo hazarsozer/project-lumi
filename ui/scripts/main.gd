@@ -53,16 +53,14 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.ctrl_pressed and event.keycode == KEY_COMMA:
 			_on_settings_pressed()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed and event.position.y < 182:
+			_drag_active = true
+			_drag_offset = DisplayServer.window_get_position() - Vector2i(DisplayServer.mouse_get_position())
+		elif not event.pressed:
+			_drag_active = false
 	if event is InputEventMouseMotion and _drag_active:
 		DisplayServer.window_set_position(Vector2i(DisplayServer.mouse_get_position()) + _drag_offset)
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		_drag_active = false
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		_drag_active = true
-		_drag_offset = DisplayServer.window_get_position() - Vector2i(DisplayServer.mouse_get_position())
 
 
 func _on_connected() -> void:
