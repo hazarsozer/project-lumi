@@ -25,6 +25,8 @@ dependencies = [
     "webrtcvad>=2.0.10",
     # IPC messaging — planned for Phase 3 inter-process communication
     "pyzmq>=26.0.0",
+    # WebSocket server — ws_bridge.py relay between Tauri/React and Brain TCP
+    "websockets>=13.0",
     # YAML config file parsing — direct dep, currently transitively via faster-whisper
     "pyyaml>=6.0",
 ]
