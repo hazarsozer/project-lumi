@@ -22,6 +22,7 @@ cleanup() {
   for pid in "${PIDS[@]}"; do
     kill -KILL "${pid}" 2>/dev/null || true
   done
+  fuser -k 1420/tcp 2>/dev/null || true
   kill -- -$$ 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
@@ -47,7 +48,8 @@ echo "[lumi]   bridge pid=${PIDS[-1]} -> ${LOG_DIR}/ws_bridge.log"
 sleep 1
 
 echo "[lumi] starting Tauri dev..."
-npm run tauri dev --prefix app >"${LOG_DIR}/tauri.log" 2>&1 &
+fuser -k 1420/tcp 2>/dev/null || true
+GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 npm run tauri dev --prefix app >"${LOG_DIR}/tauri.log" 2>&1 &
 PIDS+=($!)
 echo "[lumi]   tauri pid=${PIDS[-1]} -> ${LOG_DIR}/tauri.log"
 

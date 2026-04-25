@@ -1,5 +1,4 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for Lumi overlay",
   "windows": ["overlay", "chat", "settings"],
@@ -7,6 +6,12 @@
     "core:default",
     "core:event:default",
     "core:webview:default",
-    "core:window:default"
+    "core:webview:allow-get-all-webviews",
+    "core:window:default",
+    "core:window:allow-get-all-windows",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-is-visible",
+    "core:window:allow-set-focus"
   ]
 }

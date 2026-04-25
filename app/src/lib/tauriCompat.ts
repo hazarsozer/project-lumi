@@ -36,13 +36,14 @@ export const tauriListen = async <T>(
 };
 
 /**
- * Get all Tauri webview windows.
- * Returns an empty array in browser mode.
+ * Get a Tauri window by its label using Window.getByLabel (maps to
+ * core:window:allow-get-all-windows permission).
+ * Returns null in browser mode or if not found.
  */
-export const tauriGetAllWindows = async (): Promise<
-  Array<{ label: string; isVisible: () => Promise<boolean>; hide: () => Promise<void>; show: () => Promise<void>; setFocus: () => Promise<void> }>
-> => {
-  if (!isTauri()) return [];
-  const { getAllWebviewWindows } = await import("@tauri-apps/api/webviewWindow");
-  return getAllWebviewWindows();
+export const tauriGetWindowByLabel = async (
+  label: string,
+): Promise<{ isVisible: () => Promise<boolean>; hide: () => Promise<void>; show: () => Promise<void>; setFocus: () => Promise<void> } | null> => {
+  if (!isTauri()) return null;
+  const { Window } = await import("@tauri-apps/api/window");
+  return Window.getByLabel(label);
 };

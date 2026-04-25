@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { tauriEmit, tauriListen, tauriGetAllWindows } from "./lib/tauriCompat";
+import { tauriEmit, tauriListen, tauriGetWindowByLabel } from "./lib/tauriCompat";
 import { useBrainSocket } from "./state/useBrainSocket";
 import { useLumiState } from "./state/useLumiState";
 import { CompactOverlay } from "./components/CompactOverlay";
@@ -62,8 +62,7 @@ function OverlayRoot() {
   }, [client]);
 
   const toggleWindow = useCallback(async (label: "chat" | "settings") => {
-    const all = await tauriGetAllWindows();
-    const target = all.find((w) => w.label === label);
+    const target = await tauriGetWindowByLabel(label);
     if (!target) return;
     if (await target.isVisible()) {
       await target.hide();
@@ -125,8 +124,8 @@ function ChatRoot() {
   }, []);
 
   const handleClose = useCallback(async () => {
-    const all = await tauriGetAllWindows();
-    await all.find((w) => w.label === "chat")?.hide();
+    const win = await tauriGetWindowByLabel("chat");
+    await win?.hide();
   }, []);
 
   return (
@@ -150,8 +149,8 @@ function SettingsRoot() {
   );
 
   const handleClose = useCallback(async () => {
-    const all = await tauriGetAllWindows();
-    await all.find((w) => w.label === "settings")?.hide();
+    const win = await tauriGetWindowByLabel("settings");
+    await win?.hide();
   }, []);
 
   return <SettingsPanel onUpdate={handleUpdate} onClose={handleClose} />;

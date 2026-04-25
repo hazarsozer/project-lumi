@@ -129,7 +129,7 @@ llm:
 tts:
   # Whether TTS is active.  Set to false to run in silent mode without
   # loading any model files (useful for headless or CI environments).
-  enabled: true
+  enabled: false
 
   # Kokoro voice identifier.  "af_heart" is the default English voice.
   # Other available voices depend on the bundled voices.bin file.
