@@ -11,13 +11,16 @@ interface LumiCheckboxProps {
   onChange?: (value: boolean) => void;
 }
 
-export function LumiCheckbox({ checked, label, disabled = false }: LumiCheckboxProps) {
+export function LumiCheckbox({ checked, label, disabled = false, onChange }: LumiCheckboxProps) {
   return (
-    <label style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      cursor: disabled ? 'not-allowed' : 'pointer',
-      opacity: disabled ? T.opacity.disabled : 1,
-    }}>
+    <label
+      onClick={() => !disabled && onChange?.(!checked)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? T.opacity.disabled : 1,
+      }}
+    >
       <div style={{
         width: 15, height: 15, borderRadius: T.radius.sm,
         background: checked ? T.colors.accentBlue : 'transparent',

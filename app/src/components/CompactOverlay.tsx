@@ -59,11 +59,15 @@ export function CompactOverlay({ brainState, onSettingsClick, onChatClick, onMic
           flexShrink: 0,
         }} />
 
-        <span style={{
-          fontSize: T.font.sm, color: T.colors.textSec,
-          letterSpacing: '0.02em', marginRight: T.space.sm,
-          whiteSpace: 'nowrap',
-        }}>
+        <span
+          key={brainState}
+          style={{
+            fontSize: T.font.sm, color: T.colors.textSec,
+            letterSpacing: '0.02em', marginRight: T.space.sm,
+            whiteSpace: 'nowrap',
+            animation: 'lumiStatePop 0.3s ease',
+          }}
+        >
           {st.label}
         </span>
 

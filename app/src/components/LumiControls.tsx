@@ -38,6 +38,7 @@ interface LumiSliderProps {
   value: number;
   min: number;
   max: number;
+  step?: number;
   label?: string;
   minLabel?: string;
   maxLabel?: string;
@@ -45,19 +46,31 @@ interface LumiSliderProps {
   onChange?: (value: number) => void;
 }
 
-export function LumiSlider({ value, min, max, label, minLabel, maxLabel, disabled = false }: LumiSliderProps) {
+export function LumiSlider({ value, min, max, step = 1, label, minLabel, maxLabel, disabled = false, onChange }: LumiSliderProps) {
   const pct = ((value - min) / (max - min)) * 100;
+  const displayValue = step < 1 ? value.toFixed(step < 0.1 ? 2 : 1) : String(value);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, opacity: disabled ? T.opacity.disabled : 1 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         {label && <span style={{ fontSize: T.font.sm, color: T.colors.textSec }}>{label}</span>}
-        <span style={{ fontSize: T.font.sm, color: T.colors.accentBlue, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        <span style={{ fontSize: T.font.sm, color: T.colors.accentBlue, fontVariantNumeric: 'tabular-nums' }}>{displayValue}</span>
       </div>
       <div style={{ position: 'relative', height: 4, borderRadius: T.radius.pill, background: T.colors.surfaceTop }}>
         <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${pct}%`, borderRadius: T.radius.pill, background: T.colors.accentBlue }} />
-        <div style={{ position: 'absolute', top: '50%', left: `${pct}%`, transform: 'translate(-50%,-50%)', width: 12, height: 12, borderRadius: T.radius.pill, background: T.colors.textPri, border: `2px solid ${T.colors.accentBlue}`, cursor: disabled ? 'not-allowed' : 'ew-resize' }} />
+        <div style={{ position: 'absolute', top: '50%', left: `${pct}%`, transform: 'translate(-50%,-50%)', width: 12, height: 12, borderRadius: T.radius.pill, background: T.colors.textPri, border: `2px solid ${T.colors.accentBlue}`, pointerEvents: 'none' }} />
+        {/* Transparent native range input layered on top for drag interaction */}
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange?.(Number(e.target.value))}
+          style={{ position: 'absolute', top: -6, left: 0, width: '100%', height: 16, opacity: 0, cursor: disabled ? 'not-allowed' : 'ew-resize', margin: 0, padding: 0 }}
+        />
       </div>
-      {(minLabel || maxLabel) && (
+      {(minLabel ?? maxLabel) && (
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ fontSize: T.font.xs, color: T.colors.textMuted }}>{minLabel}</span>
           <span style={{ fontSize: T.font.xs, color: T.colors.textMuted }}>{maxLabel}</span>
@@ -76,18 +89,35 @@ interface LumiDropdownProps {
   onChange?: (value: string) => void;
 }
 
-export function LumiDropdown({ value, disabled = false }: LumiDropdownProps) {
+export function LumiDropdown({ value, options, disabled = false, onChange }: LumiDropdownProps) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '7px 10px', borderRadius: T.radius.md, background: T.colors.surfaceTop,
-      border: `1px solid ${T.colors.border}`, cursor: disabled ? 'not-allowed' : 'pointer',
-      opacity: disabled ? T.opacity.disabled : 1, minWidth: 160,
-    }}>
-      <span style={{ fontSize: T.font.md, color: T.colors.textPri }}>{value}</span>
-      <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
-        <path d="M1 1l4 4 4-4" stroke={T.colors.textMuted} strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
+    <div style={{ position: 'relative', minWidth: 160 }}>
+      {/* Visual layer */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '7px 10px', borderRadius: T.radius.md, background: T.colors.surfaceTop,
+        border: `1px solid ${T.colors.border}`,
+        opacity: disabled ? T.opacity.disabled : 1,
+        pointerEvents: 'none',
+      }}>
+        <span style={{ fontSize: T.font.md, color: T.colors.textPri }}>{value}</span>
+        <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
+          <path d="M1 1l4 4 4-4" stroke={T.colors.textMuted} strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </div>
+      {/* Native select — invisible, captures all interaction */}
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange?.(e.target.value)}
+        style={{
+          position: 'absolute', inset: 0, opacity: 0,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          width: '100%', height: '100%',
+        }}
+      >
+        {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
     </div>
   );
 }
@@ -100,9 +130,10 @@ interface LumiInputProps {
   disabled?: boolean;
   type?: string;
   suffix?: string;
+  onChange?: (value: string) => void;
 }
 
-export function LumiInput({ value, placeholder, disabled = false, type = 'text', suffix }: LumiInputProps) {
+export function LumiInput({ value, placeholder, disabled = false, type = 'text', suffix, onChange }: LumiInputProps) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 6,
@@ -110,11 +141,18 @@ export function LumiInput({ value, placeholder, disabled = false, type = 'text',
       border: `1px solid ${T.colors.border}`,
       opacity: disabled ? T.opacity.disabled : 1, flex: 1,
     }}>
-      <input readOnly value={value} placeholder={placeholder} type={type} style={{
-        background: 'transparent', border: 'none', outline: 'none', flex: 1,
-        fontSize: T.font.md, color: disabled ? T.colors.textMuted : T.colors.textPri,
-        fontFamily: 'inherit', cursor: disabled ? 'not-allowed' : 'text',
-      }} />
+      <input
+        value={value}
+        placeholder={placeholder}
+        type={type}
+        disabled={disabled}
+        onChange={(e) => onChange?.(e.target.value)}
+        style={{
+          background: 'transparent', border: 'none', outline: 'none', flex: 1,
+          fontSize: T.font.md, color: disabled ? T.colors.textMuted : T.colors.textPri,
+          fontFamily: 'inherit', cursor: disabled ? 'not-allowed' : 'text',
+        }}
+      />
       {suffix && <span style={{ fontSize: T.font.sm, color: T.colors.textMuted }}>{suffix}</span>}
     </div>
   );
@@ -127,9 +165,17 @@ interface LumiNumberInputProps {
   min?: number;
   max?: number;
   disabled?: boolean;
+  onChange?: (value: number) => void;
 }
 
-export function LumiNumberInput({ value, disabled = false }: LumiNumberInputProps) {
+export function LumiNumberInput({ value, min, max, disabled = false, onChange }: LumiNumberInputProps) {
+  function adjust(delta: number) {
+    if (disabled) return;
+    const next = value + delta;
+    if (min !== undefined && next < min) return;
+    if (max !== undefined && next > max) return;
+    onChange?.(next);
+  }
   return (
     <div style={{
       display: 'flex', alignItems: 'center',
@@ -141,11 +187,22 @@ export function LumiNumberInput({ value, disabled = false }: LumiNumberInputProp
         background: 'transparent', border: 'none', outline: 'none', flex: 1,
         fontSize: T.font.md, color: disabled ? T.colors.textMuted : T.colors.textPri,
         fontFamily: 'inherit', textAlign: 'center', padding: '7px 4px',
-        cursor: disabled ? 'not-allowed' : 'text',
+        cursor: 'default',
       }} />
       <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${T.colors.border}` }}>
         {(['+', '−'] as const).map((s) => (
-          <div key={s} style={{ padding: '3px 7px', cursor: 'pointer', color: T.colors.textSec, fontSize: 10, lineHeight: '11px', borderBottom: s === '+' ? `1px solid ${T.colors.border}` : 'none' }}>{s}</div>
+          <div
+            key={s}
+            onClick={() => adjust(s === '+' ? 1 : -1)}
+            style={{
+              padding: '3px 7px', cursor: disabled ? 'not-allowed' : 'pointer',
+              color: T.colors.textSec, fontSize: 10, lineHeight: '11px',
+              borderBottom: s === '+' ? `1px solid ${T.colors.border}` : 'none',
+              userSelect: 'none',
+            }}
+          >
+            {s}
+          </div>
         ))}
       </div>
     </div>

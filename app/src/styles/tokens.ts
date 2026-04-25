@@ -86,4 +86,13 @@ export const GLOBAL_KEYFRAMES = `
   0%, 100% { transform: translateY(0);   opacity: 0.4; }
   50%       { transform: translateY(-4px); opacity: 1; }
 }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lumiStatePop {
+  0%   { transform: scale(0.95); opacity: 0.6; }
+  60%  { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1);    opacity: 1; }
+}
 `;
