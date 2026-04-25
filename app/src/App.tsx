@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
-import { emit, listen } from "@tauri-apps/api/event";
+import { tauriEmit, tauriListen, tauriGetAllWindows } from "./lib/tauriCompat";
 import { useBrainSocket } from "./state/useBrainSocket";
 import { useLumiState } from "./state/useLumiState";
 import { CompactOverlay } from "./components/CompactOverlay";
@@ -8,6 +7,13 @@ import { ChatPanel, type Message } from "./components/ChatPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import type { LumiBrainEvent } from "./ipc/events";
 import type { AvatarStateKey } from "./styles/tokens";
+
+// Safe mapping from any string → AvatarStateKey with 'idle' fallback
+const VALID_AVATAR_STATES = ["idle", "listening", "processing", "speaking"] as const;
+const toAvatarState = (s: string): AvatarStateKey =>
+  (VALID_AVATAR_STATES as readonly string[]).includes(s.toLowerCase())
+    ? (s.toLowerCase() as AvatarStateKey)
+    : "idle";
 
 // ── Window routing ────────────────────────────────────────────────────────────
 type WindowKind = "overlay" | "chat" | "settings";
@@ -30,32 +36,33 @@ function OverlayRoot() {
 
   // Re-broadcast every brain event to Chat/Settings windows via Tauri event bus
   useEffect(() => {
-    client.onEvent((evt: LumiBrainEvent) => {
-      void emit(EV_BRAIN, evt);
+    const unsub = client.onEvent((evt: LumiBrainEvent) => {
+      void tauriEmit(EV_BRAIN, evt);
     });
+    return unsub;
   }, [client]);
 
   // Forward send-text requests from Chat window to Brain
   useEffect(() => {
-    const p = listen<{ text: string }>(EV_SEND, (e) => {
-      client.send({ event: "user_text", payload: { text: e.payload.text } });
+    const p = tauriListen<{ text: string }>(EV_SEND, (payload) => {
+      client.send({ event: "user_text", payload: { text: payload.text } });
     });
     return () => { void p.then((fn) => fn()); };
   }, [client]);
 
   // Forward config-update requests from Settings window to Brain
   useEffect(() => {
-    const p = listen<{ changes: Record<string, unknown>; persist: boolean }>(
+    const p = tauriListen<{ changes: Record<string, unknown>; persist: boolean }>(
       EV_CONFIG_UPDATE,
-      (e) => {
-        client.send({ event: "config_update", payload: e.payload });
+      (payload) => {
+        client.send({ event: "config_update", payload });
       },
     );
     return () => { void p.then((fn) => fn()); };
   }, [client]);
 
   const toggleWindow = useCallback(async (label: "chat" | "settings") => {
-    const all = await getAllWebviewWindows();
+    const all = await tauriGetAllWindows();
     const target = all.find((w) => w.label === label);
     if (!target) return;
     if (await target.isVisible()) {
@@ -66,7 +73,7 @@ function OverlayRoot() {
     }
   }, []);
 
-  const avatarState = (state.brainState.toLowerCase() as AvatarStateKey);
+  const avatarState = toAvatarState(state.brainState);
 
   return (
     <CompactOverlay
@@ -87,11 +94,10 @@ function ChatRoot() {
   const [brainState, setBrainState] = useState<AvatarStateKey>("idle");
 
   useEffect(() => {
-    const p = listen<LumiBrainEvent>(EV_BRAIN, (e) => {
-      const evt = e.payload;
+    const p = tauriListen<LumiBrainEvent>(EV_BRAIN, (evt) => {
       switch (evt.event) {
         case "state_change":
-          setBrainState(evt.payload.state.toLowerCase() as AvatarStateKey);
+          setBrainState(toAvatarState(evt.payload.state));
           break;
         case "transcript":
           setMessages((prev) => [
@@ -115,11 +121,11 @@ function ChatRoot() {
   }, []);
 
   const handleSend = useCallback((text: string) => {
-    void emit(EV_SEND, { text });
+    void tauriEmit(EV_SEND, { text });
   }, []);
 
   const handleClose = useCallback(async () => {
-    const all = await getAllWebviewWindows();
+    const all = await tauriGetAllWindows();
     await all.find((w) => w.label === "chat")?.hide();
   }, []);
 
@@ -138,13 +144,13 @@ function ChatRoot() {
 function SettingsRoot() {
   const handleUpdate = useCallback(
     (changes: Record<string, unknown>, persist: boolean) => {
-      void emit(EV_CONFIG_UPDATE, { changes, persist });
+      void tauriEmit(EV_CONFIG_UPDATE, { changes, persist });
     },
     [],
   );
 
   const handleClose = useCallback(async () => {
-    const all = await getAllWebviewWindows();
+    const all = await tauriGetAllWindows();
     await all.find((w) => w.label === "settings")?.hide();
   }, []);
 

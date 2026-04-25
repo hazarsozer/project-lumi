@@ -87,6 +87,7 @@ class WsBridge:
         self._ws_port = ws_port
         self._ws_client: ServerConnection | None = None
         self._ws_lock = asyncio.Lock()
+        self._tcp_writer: asyncio.StreamWriter | None = None
 
     async def _handle_ws(self, ws: ServerConnection) -> None:
         async with self._ws_lock:

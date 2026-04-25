@@ -51,7 +51,8 @@ export function useLumiState(client: BrainClient): LumiState {
       }
     }
 
-    client.onEvent(handleEvent);
+    const unsub = client.onEvent(handleEvent);
+    return unsub;
   }, [client]);
 
   return lumiState;
