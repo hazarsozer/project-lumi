@@ -35,12 +35,13 @@ at deep internal call sites. This means:
 from __future__ import annotations
 
 import queue
+import sys
+import types
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Audio data fixtures
@@ -97,9 +98,11 @@ def mock_sounddevice() -> Generator[MagicMock, None, None]:
     Yields the top-level ``sounddevice`` mock so individual tests can
     inspect call counts or configure side-effects.
     """
-    with patch("sounddevice.InputStream") as mock_stream_cls, \
-         patch("sounddevice.play") as mock_play, \
-         patch("sounddevice.wait") as mock_wait:
+    with (
+        patch("sounddevice.InputStream") as mock_stream_cls,
+        patch("sounddevice.play") as mock_play,
+        patch("sounddevice.wait") as mock_wait,
+    ):
 
         # Make InputStream usable as a context manager
         mock_stream_instance = MagicMock()
@@ -143,8 +146,10 @@ def mock_whisper_model() -> Generator[MagicMock, None, None]:
 
     # Patch both the original module and the name as bound inside scribe.py
     # (``from faster_whisper import WhisperModel``).
-    with patch("faster_whisper.WhisperModel", return_value=mock_instance), \
-         patch("src.audio.scribe.WhisperModel", return_value=mock_instance) as mock_cls:
+    with (
+        patch("faster_whisper.WhisperModel", return_value=mock_instance),
+        patch("src.audio.scribe.WhisperModel", return_value=mock_instance) as mock_cls,
+    ):
         yield mock_cls
 
 
@@ -181,10 +186,12 @@ def mock_oww_model() -> Generator[MagicMock, None, None]:
     # ``from openwakeword.vad import VAD``).
     # Patching the original module paths alone would not intercept calls
     # already resolved in the ears module namespace.
-    with patch("src.audio.ears.Model", return_value=mock_model_instance) as mock_cls, \
-         patch("src.audio.ears.VAD", return_value=mock_vad_instance), \
-         patch("openwakeword.model.Model", return_value=mock_model_instance), \
-         patch("openwakeword.vad.VAD", return_value=mock_vad_instance):
+    with (
+        patch("src.audio.ears.Model", return_value=mock_model_instance) as mock_cls,
+        patch("src.audio.ears.VAD", return_value=mock_vad_instance),
+        patch("openwakeword.model.Model", return_value=mock_model_instance),
+        patch("openwakeword.vad.VAD", return_value=mock_vad_instance),
+    ):
         yield mock_cls
 
 
@@ -213,7 +220,16 @@ def mock_llama_cpp() -> Generator[MagicMock, None, None]:
     """
     mock_instance = MagicMock()
     mock_instance.return_value = {"choices": [{"text": "mock response"}]}
-    mock_instance.create_completion.return_value = {"choices": [{"text": "mock response"}]}
+    mock_instance.create_completion.return_value = {
+        "choices": [{"text": "mock response"}]
+    }
+    mock_cls = MagicMock(return_value=mock_instance)
 
-    with patch("llama_cpp.Llama", return_value=mock_instance) as mock_cls:
+    # llama_cpp is an optional extra not installed on CI. Inject a fake module
+    # into sys.modules so the lazy `import llama_cpp` inside ModelLoader.load()
+    # picks up the mock without requiring the real package.
+    mock_module = types.ModuleType("llama_cpp")
+    mock_module.Llama = mock_cls  # type: ignore[attr-defined]
+
+    with patch.dict(sys.modules, {"llama_cpp": mock_module}):
         yield mock_cls

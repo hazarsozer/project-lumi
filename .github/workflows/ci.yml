@@ -42,6 +42,9 @@ jobs:
       - name: Install system audio libraries
         run: sudo apt-get install -y portaudio19-dev libportaudio2
 
+      - name: Install sqlite-vec
+        run: uv pip install sqlite-vec
+
       - name: Run tests with coverage
         # --cov-fail-under=80 enforces the project's 80 % minimum coverage gate.
         # --continue-on-collection-errors lets pytest run all collectable tests

@@ -36,8 +36,10 @@ These failing tests are intentional regression markers.  The fix would be:
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -46,7 +48,6 @@ import pytest
 from src.core.config import LLMConfig, VisionConfig
 from src.llm.model_loader import ModelLoader
 from src.tools.vision import ScreenshotTool
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -217,9 +218,13 @@ def test_no_deadlock_on_sequential_use() -> None:
             "choices": [{"text": "mocked description"}]
         }
 
-        # Patch llama_cpp.Llama inside both modules.
+        # llama_cpp is not installed on CI — inject a fake module so the lazy
+        # import inside ModelLoader.load() and vision.py both see the mock.
+        _llama_mod = types.ModuleType("llama_cpp")
+        _llama_mod.Llama = mock_llama  # type: ignore[attr-defined]
+
         with (
-            patch("llama_cpp.Llama", return_value=mock_llama),
+            patch.dict(sys.modules, {"llama_cpp": _llama_mod}),
             patch("src.tools.vision.llama_cpp") as mock_vision_llama,
         ):
             mock_vision_instance = MagicMock()
