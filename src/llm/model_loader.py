@@ -83,8 +83,12 @@ class ModelLoader:
                     ) from exc
                 raise
 
-        logger.info("Model loaded from %s (n_gpu_layers=%d, n_ctx=%d)",
-                     model_path, config.n_gpu_layers, config.context_length)
+        logger.info(
+            "Model loaded from %s (n_gpu_layers=%d, n_ctx=%d)",
+            model_path,
+            config.n_gpu_layers,
+            config.context_length,
+        )
 
     def unload(self) -> None:
         """Release the model reference so memory can be reclaimed."""

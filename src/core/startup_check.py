@@ -101,7 +101,7 @@ def _check_stt_model(model_path: str) -> None:
             "STT model directory not found: '%s'. "
             "faster-whisper will attempt to download the model on first use. "
             "Pre-download with: "
-            "uv run python -c \"from faster_whisper import WhisperModel; "
+            'uv run python -c "from faster_whisper import WhisperModel; '
             "WhisperModel('%s', device='cpu', compute_type='int8')\"",
             model_path,
             model_path,
@@ -173,14 +173,14 @@ def _check_llm_package() -> None:
     """
     try:
         import llama_cpp  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError(
             "llama-cpp-python is not installed but is required for LLM inference.\n"
             "Install with:\n"
             "  uv sync --extra llm\n"
             "Note: building llama-cpp-python requires CMake and a C++ compiler.\n"
             "  sudo apt install cmake build-essential  # Debian/Ubuntu"
-        )
+        ) from exc
 
     logger.info("llama-cpp-python package check passed.")
 
@@ -197,13 +197,13 @@ def _check_tts_package(enabled: bool) -> None:
         return
     try:
         import kokoro_onnx  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError(
             "kokoro-onnx is not installed but config.tts.enabled is True.\n"
             "TTS playback requires the tts extra:\n"
             "  uv sync --extra tts\n"
             "To run without TTS, set config.tts.enabled = false in config.yaml."
-        )
+        ) from exc
 
     logger.info("kokoro-onnx package check passed.")
 

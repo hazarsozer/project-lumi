@@ -72,7 +72,9 @@ class PromptEngine:
         When *system_prompt* is ``None``, the instance default is used (which
         is either the config-supplied persona or ``DEFAULT_SYSTEM_PROMPT``).
         """
-        sys = system_prompt if system_prompt is not None else self._default_system_prompt
+        sys = (
+            system_prompt if system_prompt is not None else self._default_system_prompt
+        )
         sys_block = f"{sys}\n\n[Relevant notes]\n{rag_context}" if rag_context else sys
         parts: list[str] = [f"<|system|>\n{sys_block}<|end|>"]
 

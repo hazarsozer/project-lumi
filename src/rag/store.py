@@ -58,7 +58,7 @@ class ChunkRecord:
 @dataclass(frozen=True)
 class SearchHit:
     chunk_id: int
-    score: float    # higher = more relevant (normalised to [0, 1] range)
+    score: float  # higher = more relevant (normalised to [0, 1] range)
     text: str
     doc_path: str
     chunk_idx: int
@@ -179,10 +179,14 @@ class DocumentStore:
         )
 
     def get_document_by_path(self, path: str) -> DocumentRecord | None:
-        row = self._conn().execute(
-            "SELECT id, path, sha256, ingested_at FROM documents WHERE path = ?",
-            (path,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT id, path, sha256, ingested_at FROM documents WHERE path = ?",
+                (path,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return DocumentRecord(
@@ -225,11 +229,15 @@ class DocumentStore:
         )
 
     def get_chunk_by_id(self, chunk_id: int) -> ChunkRecord | None:
-        row = self._conn().execute(
-            "SELECT id, document_id, chunk_idx, text, char_start, char_end "
-            "FROM chunks WHERE id = ?",
-            (chunk_id,),
-        ).fetchone()
+        row = (
+            self._conn()
+            .execute(
+                "SELECT id, document_id, chunk_idx, text, char_start, char_end "
+                "FROM chunks WHERE id = ?",
+                (chunk_id,),
+            )
+            .fetchone()
+        )
         if row is None:
             return None
         return ChunkRecord(
@@ -303,8 +311,10 @@ class DocumentStore:
         clean_query = self._sanitize_fts_query(query)
         if not clean_query:
             return []
-        rows = self._conn().execute(
-            """
+        rows = (
+            self._conn()
+            .execute(
+                """
             SELECT c.id       AS chunk_id,
                    c.text,
                    c.chunk_idx,
@@ -317,8 +327,10 @@ class DocumentStore:
             ORDER BY raw_score DESC
             LIMIT ?
             """,
-            (clean_query, top_k),
-        ).fetchall()
+                (clean_query, top_k),
+            )
+            .fetchall()
+        )
 
         if not rows:
             return []
@@ -335,9 +347,7 @@ class DocumentStore:
             for r in rows
         ]
 
-    def search_vectors(
-        self, embedding: list[float], top_k: int
-    ) -> list[SearchHit]:
+    def search_vectors(self, embedding: list[float], top_k: int) -> list[SearchHit]:
         """k-nearest-neighbour search via sqlite-vec.
 
         Distance is L2; we convert to a similarity score in [0, 1] via
@@ -345,8 +355,10 @@ class DocumentStore:
         with search_fts().
         """
         serialised = sqlite_vec.serialize_float32(embedding)
-        rows = self._conn().execute(
-            """
+        rows = (
+            self._conn()
+            .execute(
+                """
             SELECT v.chunk_id,
                    v.distance,
                    c.text,
@@ -359,8 +371,10 @@ class DocumentStore:
               AND k = ?
             ORDER BY v.distance
             """,
-            (serialised, top_k),
-        ).fetchall()
+                (serialised, top_k),
+            )
+            .fetchall()
+        )
 
         return [
             SearchHit(
@@ -379,12 +393,8 @@ class DocumentStore:
 
     def stats(self) -> StoreStats:
         conn = self._conn()
-        doc_count: int = conn.execute(
-            "SELECT COUNT(*) FROM documents"
-        ).fetchone()[0]
-        chunk_count: int = conn.execute(
-            "SELECT COUNT(*) FROM chunks"
-        ).fetchone()[0]
+        doc_count: int = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        chunk_count: int = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         row = conn.execute(
             "SELECT value FROM meta WHERE key = 'last_indexed'"
         ).fetchone()

@@ -41,7 +41,7 @@ class Citation:
 class RAGResult:
     """Return value of RAGRetriever.retrieve()."""
 
-    context: str                   # trimmed text block ready for prompt injection
+    context: str  # trimmed text block ready for prompt injection
     citations: tuple[Citation, ...]
     latency_ms: int
     hit_count: int
@@ -96,7 +96,9 @@ class RAGRetriever:
         """
         import time
 
-        budget_chars = max_chars if max_chars is not None else self._config.context_char_budget
+        budget_chars = (
+            max_chars if max_chars is not None else self._config.context_char_budget
+        )
         timeout_s = self._config.retrieval_timeout_s
 
         result_box: list[RAGResult] = []
@@ -104,7 +106,9 @@ class RAGRetriever:
 
         def _work() -> None:
             try:
-                result_box.append(self._retrieve_inner(query, cancel_flag, budget_chars))
+                result_box.append(
+                    self._retrieve_inner(query, cancel_flag, budget_chars)
+                )
             except Exception as exc:
                 exc_box.append(exc)
 
@@ -118,7 +122,9 @@ class RAGRetriever:
         if worker.is_alive():
             logger.warning(
                 "RAG retrieval timed out after %.0f ms (budget %.0f ms) for query: %.60s",
-                elapsed_ms, timeout_s * 1000, query,
+                elapsed_ms,
+                timeout_s * 1000,
+                query,
             )
             return _EMPTY
 
@@ -171,8 +177,11 @@ class RAGRetriever:
 
         # Score threshold: skip if top result is below the floor.
         if not fused or fused[0][1] < self._config.min_score:
-            logger.debug("RAG: top fused score %.4f below threshold %.4f — skipping.",
-                         fused[0][1] if fused else 0.0, self._config.min_score)
+            logger.debug(
+                "RAG: top fused score %.4f below threshold %.4f — skipping.",
+                fused[0][1] if fused else 0.0,
+                self._config.min_score,
+            )
             return _EMPTY
 
         # Build a lookup from chunk_id → hit for text retrieval.
@@ -203,12 +212,14 @@ class RAGRetriever:
                 break
 
             context_parts.append(hit.text)
-            citations.append(Citation(
-                chunk_id=chunk_id,
-                doc_path=hit.doc_path,
-                chunk_idx=hit.chunk_idx,
-                score=score,
-            ))
+            citations.append(
+                Citation(
+                    chunk_id=chunk_id,
+                    doc_path=hit.doc_path,
+                    chunk_idx=hit.chunk_idx,
+                    score=score,
+                )
+            )
             used_chars += chunk_len
 
         if not context_parts:
@@ -217,6 +228,6 @@ class RAGRetriever:
         return RAGResult(
             context="\n\n".join(context_parts),
             citations=tuple(citations),
-            latency_ms=0,   # filled in by the outer call
+            latency_ms=0,  # filled in by the outer call
             hit_count=len(fused),
         )

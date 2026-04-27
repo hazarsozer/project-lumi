@@ -145,7 +145,9 @@ class ScreenshotTool:
 
         try:
             description = self._describe(png_bytes)
-            logger.info("ScreenshotTool: description complete (%d chars).", len(description))
+            logger.info(
+                "ScreenshotTool: description complete (%d chars).", len(description)
+            )
             return ToolResult(
                 success=True,
                 output=description,

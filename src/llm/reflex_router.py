@@ -12,9 +12,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-_GREETING_PATTERN = re.compile(
-    r"\b(hello|hi|hey|howdy|greetings)\b", re.IGNORECASE
-)
+_GREETING_PATTERN = re.compile(r"\b(hello|hi|hey|howdy|greetings)\b", re.IGNORECASE)
 _TIME_PATTERN = re.compile(
     r"\b(what\s+time|current\s+time|time\s+is\s+it)\b", re.IGNORECASE
 )

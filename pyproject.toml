@@ -155,6 +155,10 @@ select = ["E", "W", "F", "I", "UP", "B", "PLC"]
 ignore = [
     # Allow long lines that black cannot shorten (e.g. URLs in comments).
     "E501",
+    # Lazy imports of optional heavy dependencies (kokoro, scipy, PIL) inside
+    # try/except blocks are intentional — they avoid import-time crashes when
+    # optional extras are not installed.
+    "PLC0415",
 ]
 
 [tool.ruff.lint.per-file-ignores]

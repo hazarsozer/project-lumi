@@ -98,7 +98,7 @@ class EventBridge:
         # takes a plain hostname/IP string, not a ZMQ-style URI.
         host = config.address
         if host.startswith(_TCP_SCHEME):
-            host = host[len(_TCP_SCHEME):]
+            host = host[len(_TCP_SCHEME) :]
 
         self._transport: IPCTransport = IPCTransport(host=host, port=config.port)
         self._transport.set_on_message(self._on_raw_message)
@@ -106,9 +106,7 @@ class EventBridge:
         # Register as a state observer so every transition is forwarded to Body.
         state_machine.register_observer(self.on_state_change)
 
-        logger.debug(
-            "EventBridge initialised — transport %s:%d", host, config.port
-        )
+        logger.debug("EventBridge initialised — transport %s:%d", host, config.port)
 
     # ------------------------------------------------------------------
     # Lifecycle

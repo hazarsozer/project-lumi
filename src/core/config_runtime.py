@@ -40,8 +40,8 @@ from src.core.config import (
     PersonaConfig,
     RAGConfig,
     ScribeConfig,
-    TTSConfig,
     ToolsConfig,
+    TTSConfig,
     VisionConfig,
 )
 from src.core.config_schema import FIELD_META
@@ -136,9 +136,7 @@ def _coerce_value(key: str, value: Any, meta: dict) -> tuple[Any, str | None]:
         import math
 
         if isinstance(value, float) and not math.isfinite(value):
-            return None, (
-                f"Field '{key}' value {value!r} is not a finite number."
-            )
+            return None, (f"Field '{key}' value {value!r} is not a finite number.")
         # Hard absolute ceiling: no config value should ever exceed 1 billion.
         # This prevents a compromised client from passing absurdly large integers
         # (e.g. 2**53) that cause downstream consumers to attempt impossible

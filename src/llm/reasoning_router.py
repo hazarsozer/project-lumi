@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from typing import Any
+
+# Optional RAG import — only resolved when a retriever is actually injected.
+# Using TYPE_CHECKING avoids a circular-import risk at module load time.
+from typing import TYPE_CHECKING, Any
 
 from src.core.config import LLMConfig
 from src.core.events import LLMTokenEvent, RAGRetrievalEvent
@@ -13,9 +16,6 @@ from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
 
-# Optional RAG import — only resolved when a retriever is actually injected.
-# Using TYPE_CHECKING avoids a circular-import risk at module load time.
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.rag.retriever import RAGRetriever
 
@@ -37,7 +37,7 @@ class ReasoningRouter:
         memory: ConversationMemory,
         config: LLMConfig,
         event_queue: queue.Queue[Any] | None = None,
-        retriever: "RAGRetriever | None" = None,
+        retriever: RAGRetriever | None = None,
     ) -> None:
         self._model_loader = model_loader
         self._prompt_engine = prompt_engine
@@ -55,7 +55,9 @@ class ReasoningRouter:
             if result.context:
                 logger.debug(
                     "RAG: %d hits, %d chars, %d ms",
-                    result.hit_count, len(result.context), result.latency_ms,
+                    result.hit_count,
+                    len(result.context),
+                    result.latency_ms,
                 )
             if self._event_queue is not None and result.hit_count > 0:
                 top_paths = tuple(c.doc_path for c in result.citations)
@@ -115,7 +117,9 @@ class ReasoningRouter:
         truncated = self._prompt_engine.truncate_history(
             history, self._config.context_length // 2
         )
-        prompt = self._prompt_engine.build_prompt(text, truncated, rag_context=rag_context)
+        prompt = self._prompt_engine.build_prompt(
+            text, truncated, rag_context=rag_context
+        )
         model = self._model_loader.model
 
         collected: list[str] = []
