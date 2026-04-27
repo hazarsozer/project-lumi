@@ -60,6 +60,7 @@ from src.tools.os_actions import (
     FileInfoTool,
     WindowListTool,
 )
+from src.tools.rag_ingest import RagIngestTool
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ class Orchestrator:
             self._tool_registry.register(ClipboardTool())
             self._tool_registry.register(FileInfoTool())
             self._tool_registry.register(WindowListTool())
+            self._tool_registry.register(RagIngestTool(rag_config=config.rag))
 
         # Register ScreenshotTool if vision is enabled.
         if config.vision.enabled:

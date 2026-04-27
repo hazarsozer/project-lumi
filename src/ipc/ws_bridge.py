@@ -137,7 +137,11 @@ class WsBridge:
                 logger.debug("No WS client connected; dropping Brain message.")
                 continue
             try:
-                await ws.send(frame.decode())
+                # Send bytes directly if the frame is binary; decode to str only
+                # for text payloads.  websockets.send() accepts both str and bytes,
+                # so we let the type drive the wire format rather than assuming
+                # all IPC frames are UTF-8 text (audio/image frames are not).
+                await ws.send(frame if isinstance(frame, bytes) else frame.decode())
             except Exception as exc:
                 logger.warning("Failed to send to WS client: %s", exc)
 

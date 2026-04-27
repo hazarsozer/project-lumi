@@ -32,12 +32,15 @@ if "--setup" in _sys.argv:
 
 import logging
 import signal
+import subprocess
+import sys
 
 from src.audio.ears import Ears
 from src.audio.scribe import Scribe
 from src.core.config import load_config
 from src.core.events import ShutdownEvent
 from src.core.logging_config import setup_logging
+from src.core.metrics import MetricsCollector
 from src.core.orchestrator import Orchestrator
 from src.core.startup_check import run_startup_checks
 
@@ -46,8 +49,20 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     setup_logging()
+
+    metrics = MetricsCollector()
+    metrics.start_periodic_logging()
+
     config = load_config()
     run_startup_checks(config)
+
+    # Optionally spawn the WebSocket bridge as a subprocess.
+    ws_bridge_proc: subprocess.Popen[bytes] | None = None
+    if config.ipc.enabled:
+        ws_bridge_proc = subprocess.Popen(
+            [sys.executable, "-m", "src.ipc.ws_bridge"],
+        )
+        logger.info("Started ws_bridge subprocess (pid=%d).", ws_bridge_proc.pid)
 
     # Construct audio-in pipeline components.
     # Ears reads the wake-word model path and sensitivity from AudioConfig.
@@ -64,8 +79,18 @@ def main() -> None:
     )
 
     orchestrator = Orchestrator(config, ears=ears, scribe=scribe)
-    signal.signal(signal.SIGINT, lambda s, f: orchestrator.post_event(ShutdownEvent()))
-    signal.signal(signal.SIGTERM, lambda s, f: orchestrator.post_event(ShutdownEvent()))
+
+    def _shutdown(signum: int, frame: object) -> None:
+        orchestrator.post_event(ShutdownEvent())
+        if ws_bridge_proc is not None:
+            ws_bridge_proc.terminate()
+            try:
+                ws_bridge_proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                ws_bridge_proc.kill()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
     orchestrator.run()
 
 

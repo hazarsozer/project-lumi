@@ -636,13 +636,13 @@ async def test_tcp_to_ws_loop_send_exception_is_caught(
     data = _tcp_frame(payload1) + _tcp_frame(payload2)
     reader = _make_stream_reader(data)
 
-    sent_successfully: list[str] = []
+    sent_successfully: list[str | bytes] = []
     send_call_count = 0
 
     class _FaultyServerConn:
         """Mimics a ServerConnection whose first send() raises."""
 
-        async def send(self, msg: str) -> None:
+        async def send(self, msg: str | bytes) -> None:
             nonlocal send_call_count
             send_call_count += 1
             if send_call_count == 1:
@@ -658,7 +658,8 @@ async def test_tcp_to_ws_loop_send_exception_is_caught(
     )
 
     # The second frame must have been delivered despite the first send failing.
-    assert sent_successfully == [payload2.decode()], (
+    # Frames are sent as bytes (the binary-safe path); decode only for comparison.
+    assert sent_successfully == [payload2], (
         f"Expected second frame to be sent after first failed; got {sent_successfully!r}"
     )
 
