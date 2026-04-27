@@ -9,13 +9,19 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("sentence_transformers")
 
-def _run_ingest(corpus: Path, db: Path, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
+
+def _run_ingest(
+    corpus: Path, db: Path, extra_args: list[str] | None = None
+) -> subprocess.CompletedProcess:
     cmd = [
         sys.executable,
         "scripts/ingest_docs.py",
-        "--corpus", str(corpus),
-        "--db", str(db),
+        "--corpus",
+        str(corpus),
+        "--db",
+        str(db),
     ] + (extra_args or [])
     return subprocess.run(cmd, capture_output=True, text=True)
 
@@ -66,7 +72,10 @@ class TestIngestScript:
         result = _run_ingest(corpus, db, extra_args=["--force"])
         assert result.returncode == 0
         # With --force, skipped count should be 0 — file should be re-ingested.
-        assert "SKIPPED" not in result.stderr.upper() or "0 skipped" in result.stderr.lower()
+        assert (
+            "SKIPPED" not in result.stderr.upper()
+            or "0 skipped" in result.stderr.lower()
+        )
 
     def test_changed_file_reingested(self, tmp_path: Path):
         corpus = tmp_path / "docs"

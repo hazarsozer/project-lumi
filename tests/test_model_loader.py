@@ -20,7 +20,6 @@ from src.core.config import LLMConfig
 # RED: these imports will fail until src/llm/model_loader.py is written.
 from src.llm.model_loader import ModelLoader  # type: ignore[import]
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -90,8 +89,9 @@ def test_unload_sets_not_loaded(mock_llama_cpp: MagicMock) -> None:
 
 
 @pytest.mark.unit
-def test_load_missing_model_path_raises() -> None:
+def test_load_missing_model_path_raises(mock_llama_cpp: MagicMock) -> None:
     """load() with a path that does not exist on disk must raise FileNotFoundError."""
+    mock_llama_cpp.side_effect = ValueError("file does not exist")
     config = _config_with_path("/nonexistent/path/to/model.gguf")
     loader = ModelLoader()
     with pytest.raises(FileNotFoundError):
@@ -110,7 +110,9 @@ def test_model_raises_after_unload(mock_llama_cpp: MagicMock) -> None:
 
 
 @pytest.mark.unit
-def test_load_passes_config_fields_to_llama(mock_llama_cpp: MagicMock, tmp_path: object) -> None:
+def test_load_passes_config_fields_to_llama(
+    mock_llama_cpp: MagicMock, tmp_path: object
+) -> None:
     """load() must forward n_gpu_layers and context_length to llama_cpp.Llama."""
     config = LLMConfig(n_gpu_layers=4, context_length=2048)
     loader = ModelLoader()
@@ -120,7 +122,9 @@ def test_load_passes_config_fields_to_llama(mock_llama_cpp: MagicMock, tmp_path:
 
 
 @pytest.mark.unit
-def test_load_reraises_non_file_not_found_value_error(mock_llama_cpp: MagicMock) -> None:
+def test_load_reraises_non_file_not_found_value_error(
+    mock_llama_cpp: MagicMock,
+) -> None:
     """load() must re-raise a ValueError that does NOT contain 'does not exist'
     (line 47 — the bare ``raise`` at the end of the except ValueError block)."""
     # Configure the mock Llama constructor to raise a ValueError whose message
@@ -182,8 +186,10 @@ def test_kv_cache_quant_graceful_fallback(
         loader.load(config)
 
     # Warning logged about fallback.
-    assert any("TurboQuant" in rec.message or "falling back" in rec.message.lower()
-               for rec in caplog.records)
+    assert any(
+        "TurboQuant" in rec.message or "falling back" in rec.message.lower()
+        for rec in caplog.records
+    )
 
     # Two calls: one that raised, one retry without the quant kwargs.
     assert mock_llama_cpp.call_count == 2

@@ -31,6 +31,7 @@ def _make_orchestrator() -> Orchestrator:
 # Basic construction
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 def test_orchestrator_initial_state_is_idle() -> None:
     orch = _make_orchestrator()
@@ -46,6 +47,7 @@ def test_orchestrator_has_llm_cancel_flag() -> None:
 # ---------------------------------------------------------------------------
 # post_event and register_handler dispatch
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 @pytest.mark.timeout(3)
@@ -92,6 +94,7 @@ def test_unhandled_event_type_does_not_crash() -> None:
 # ShutdownEvent exits run()
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 @pytest.mark.timeout(3)
 def test_shutdown_event_exits_run() -> None:
@@ -124,6 +127,7 @@ def test_shutdown_from_background_thread() -> None:
 # ---------------------------------------------------------------------------
 # InterruptEvent handling
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 @pytest.mark.timeout(3)
@@ -186,9 +190,12 @@ def test_interrupt_in_idle_is_ignored() -> None:
 # _handle_transcript: reflex fast-path
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 @pytest.mark.timeout(5)
-def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking() -> None:
+def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking() -> (
+    None
+):
     """Reflex hit: LISTENING→PROCESSING→SPEAKING→IDLE full lifecycle.
 
     _handle_transcript posts LLMResponseReadyEvent and transitions to SPEAKING.
@@ -209,7 +216,9 @@ def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    with patch.object(orch._reflex_router, "route", return_value="Hello! How can I help you?"):
+    with patch.object(
+        orch._reflex_router, "route", return_value="Hello! How can I help you?"
+    ):
         orch.state_machine.transition_to(LumiState.LISTENING)
         orch.post_event(TranscriptReadyEvent(text="hello"))
         orch.run()  # exits when ShutdownEvent is processed
@@ -226,9 +235,12 @@ def test_handle_transcript_reflex_hit_posts_response_and_transitions_to_speaking
 # _handle_transcript: reasoning slow-path — successful generation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 @pytest.mark.timeout(5)
-def test_handle_transcript_reasoning_path_posts_response_and_transitions_to_speaking() -> None:
+def test_handle_transcript_reasoning_path_posts_response_and_transitions_to_speaking(
+    mock_llama_cpp: MagicMock,
+) -> None:
     """Reasoning path: daemon thread generates response, posts LLMResponseReadyEvent,
     transitions to SPEAKING.
 
@@ -248,11 +260,15 @@ def test_handle_transcript_reasoning_path_posts_response_and_transitions_to_spea
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    def _fake_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
+    def _fake_generate(
+        text: str, cancel_flag: threading.Event, **kwargs: object
+    ) -> str:
         return "Paris is the capital of France."
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate),
+    ):
         orch.state_machine.transition_to(LumiState.LISTENING)
         orch.post_event(TranscriptReadyEvent(text="What is the capital of France?"))
         orch.run()  # exits when _on_llm_response posts ShutdownEvent
@@ -269,9 +285,12 @@ def test_handle_transcript_reasoning_path_posts_response_and_transitions_to_spea
 # _handle_transcript: reasoning slow-path — InterruptedError during generation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 @pytest.mark.timeout(5)
-def test_handle_transcript_reasoning_interrupted_error_logged_no_state_change() -> None:
+def test_handle_transcript_reasoning_interrupted_error_logged_no_state_change(
+    mock_llama_cpp: MagicMock,
+) -> None:
     """InterruptedError during generation is logged; state stays in PROCESSING
     (the inference thread exits cleanly without transitioning to IDLE).
 
@@ -286,19 +305,25 @@ def test_handle_transcript_reasoning_interrupted_error_logged_no_state_change() 
     # the except InterruptedError block returns from _run_inference).
     thread_done = threading.Event()
 
-    def _raise_interrupted(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
+    def _raise_interrupted(
+        text: str, cancel_flag: threading.Event, **kwargs: object
+    ) -> str:
         raise InterruptedError("cancelled mid-stream")
 
     original_generate = _raise_interrupted
 
-    def _wrapped_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
+    def _wrapped_generate(
+        text: str, cancel_flag: threading.Event, **kwargs: object
+    ) -> str:
         try:
             return original_generate(text, cancel_flag)
         finally:
             thread_done.set()
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_wrapped_generate):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_wrapped_generate),
+    ):
         orch.state_machine.transition_to(LumiState.LISTENING)
         orch.post_event(TranscriptReadyEvent(text="long query"))
 
@@ -315,6 +340,7 @@ def test_handle_transcript_reasoning_interrupted_error_logged_no_state_change() 
 # ---------------------------------------------------------------------------
 # _handle_transcript: reasoning slow-path — unexpected Exception
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 @pytest.mark.timeout(8)
@@ -338,11 +364,15 @@ def test_handle_transcript_reasoning_unexpected_exception_transitions_to_idle() 
 
     orch.state_machine.register_observer(_on_transition)
 
-    def _raise_generic(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
+    def _raise_generic(
+        text: str, cancel_flag: threading.Event, **kwargs: object
+    ) -> str:
         raise RuntimeError("GPU exploded")
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_raise_generic):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_raise_generic),
+    ):
         orch.state_machine.transition_to(LumiState.LISTENING)
 
         # Run the event loop in a background thread so it can dispatch
@@ -365,9 +395,12 @@ def test_handle_transcript_reasoning_unexpected_exception_transitions_to_idle() 
 # _handle_transcript: stale-state guard — response discarded when no longer PROCESSING
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 @pytest.mark.timeout(8)
-def test_handle_transcript_stale_state_response_discarded() -> None:
+def test_handle_transcript_stale_state_response_discarded(
+    mock_llama_cpp: MagicMock,
+) -> None:
     """If state is no longer PROCESSING when inference completes, the response
     is discarded and no LLMResponseReadyEvent is posted.
 
@@ -385,7 +418,9 @@ def test_handle_transcript_stale_state_response_discarded() -> None:
     thread_entered = threading.Event()
     inference_guard_checked = threading.Event()
 
-    def _slow_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
+    def _slow_generate(
+        text: str, cancel_flag: threading.Event, **kwargs: object
+    ) -> str:
         thread_entered.set()
         hold_thread.wait(timeout=5.0)
         return "stale response"
@@ -394,13 +429,17 @@ def test_handle_transcript_stale_state_response_discarded() -> None:
     # guard and is about to return (the guard is the last thing before the
     # post_event/transition block, so returning from generate means the guard
     # will be evaluated next).
-    def _wrapped_generate(text: str, cancel_flag: threading.Event, **kwargs: object) -> str:
+    def _wrapped_generate(
+        text: str, cancel_flag: threading.Event, **kwargs: object
+    ) -> str:
         result = _slow_generate(text, cancel_flag)
         inference_guard_checked.set()
         return result
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_wrapped_generate):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_wrapped_generate),
+    ):
         # Run the event loop in a background thread.
         loop_thread = threading.Thread(target=orch.run, daemon=True)
         loop_thread.start()
@@ -435,6 +474,7 @@ def test_handle_transcript_stale_state_response_discarded() -> None:
 # ZMQServer integration — observer wiring, UserTextEvent, shutdown
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 @pytest.mark.timeout(3)
 def test_zmq_server_receives_state_change() -> None:
@@ -452,7 +492,9 @@ def test_zmq_server_receives_state_change() -> None:
     # Trigger a valid state transition.
     orch.state_machine.transition_to(LumiState.LISTENING)
 
-    mock_zmq.on_state_change.assert_called_once_with(LumiState.IDLE, LumiState.LISTENING)
+    mock_zmq.on_state_change.assert_called_once_with(
+        LumiState.IDLE, LumiState.LISTENING
+    )
 
 
 @pytest.mark.unit
@@ -475,9 +517,7 @@ def test_user_text_routes_to_llm() -> None:
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    with patch.object(
-        orch._reflex_router, "route", return_value="Hi from reflex!"
-    ):
+    with patch.object(orch._reflex_router, "route", return_value="Hi from reflex!"):
         # Post from IDLE (the production case: Godot sends text while idle).
         # _handle_user_text must step through IDLE→LISTENING→PROCESSING itself.
         orch.post_event(UserTextEvent(text="hello from body"))

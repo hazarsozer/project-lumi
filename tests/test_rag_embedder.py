@@ -6,6 +6,8 @@ import threading
 
 import pytest
 
+pytest.importorskip("sentence_transformers")
+
 from src.rag.embedder import Embedder, get_embedder
 
 pytestmark = pytest.mark.slow  # skipped unless -m slow
@@ -33,11 +35,12 @@ class TestEmbedderSlow:
 
     def test_similar_texts_have_high_cosine_similarity(self):
         import math
+
         emb = Embedder(self.MODEL)
         v1, v2 = emb.encode(["The cat sat on the mat.", "A cat was sitting on a mat."])
         dot = sum(a * b for a, b in zip(v1, v2))
-        mag1 = math.sqrt(sum(a ** 2 for a in v1))
-        mag2 = math.sqrt(sum(b ** 2 for b in v2))
+        mag1 = math.sqrt(sum(a**2 for a in v1))
+        mag2 = math.sqrt(sum(b**2 for b in v2))
         cosine = dot / (mag1 * mag2)
         assert cosine > 0.8
 

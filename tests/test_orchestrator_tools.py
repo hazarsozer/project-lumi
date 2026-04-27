@@ -59,13 +59,17 @@ def _make_orchestrator(
 
 @pytest.mark.unit
 @pytest.mark.timeout(8)
-def test_tool_call_in_response_triggers_second_generate() -> None:
+def test_tool_call_in_response_triggers_second_generate(
+    mock_llama_cpp: MagicMock,
+) -> None:
     """When the LLM returns a tool-call block, the orchestrator executes the
     tool and makes a second generate() call with the tool results injected.
     """
     orch = _make_orchestrator()
 
-    tool_call_response = '<tool_call>{"tool":"file_info","args":{"path":"/tmp"}}</tool_call>'
+    tool_call_response = (
+        '<tool_call>{"tool":"file_info","args":{"path":"/tmp"}}</tool_call>'
+    )
     final_response = "Done."
 
     call_count: list[int] = [0]
@@ -89,9 +93,11 @@ def test_tool_call_in_response_triggers_second_generate() -> None:
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate), \
-         patch.object(orch._tool_executor, "execute", return_value=[mock_tool_result]):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate),
+        patch.object(orch._tool_executor, "execute", return_value=[mock_tool_result]),
+    ):
 
         loop_thread = threading.Thread(target=orch.run, daemon=True)
         loop_thread.start()
@@ -113,7 +119,7 @@ def test_tool_call_in_response_triggers_second_generate() -> None:
 
 @pytest.mark.unit
 @pytest.mark.timeout(8)
-def test_no_tool_calls_in_response_single_generate() -> None:
+def test_no_tool_calls_in_response_single_generate(mock_llama_cpp: MagicMock) -> None:
     """When the LLM returns plain text with no tool-call blocks, generate() is
     called exactly once.
     """
@@ -134,8 +140,10 @@ def test_no_tool_calls_in_response_single_generate() -> None:
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate),
+    ):
 
         loop_thread = threading.Thread(target=orch.run, daemon=True)
         loop_thread.start()
@@ -183,7 +191,7 @@ def test_llm_token_event_handler_registered_with_zmq() -> None:
 
 @pytest.mark.unit
 @pytest.mark.timeout(8)
-def test_utterance_id_passed_to_generate() -> None:
+def test_utterance_id_passed_to_generate(mock_llama_cpp: MagicMock) -> None:
     """The orchestrator passes a non-empty utterance_id kwarg to generate()."""
     orch = _make_orchestrator()
 
@@ -191,7 +199,10 @@ def test_utterance_id_passed_to_generate() -> None:
     response_received = threading.Event()
 
     def _fake_generate(
-        text: str, cancel_flag: threading.Event, utterance_id: str = "", **kwargs: object
+        text: str,
+        cancel_flag: threading.Event,
+        utterance_id: str = "",
+        **kwargs: object,
     ) -> str:
         captured_utterance_ids.append(utterance_id)
         return "response"
@@ -202,8 +213,10 @@ def test_utterance_id_passed_to_generate() -> None:
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate),
+    ):
 
         loop_thread = threading.Thread(target=orch.run, daemon=True)
         loop_thread.start()
@@ -229,13 +242,15 @@ def test_utterance_id_passed_to_generate() -> None:
 
 @pytest.mark.unit
 @pytest.mark.timeout(8)
-def test_tool_executor_cancel_flag_passed() -> None:
+def test_tool_executor_cancel_flag_passed(mock_llama_cpp: MagicMock) -> None:
     """When the LLM returns a tool-call block, execute() is called with the
     orchestrator's _llm_cancel_flag threading.Event.
     """
     orch = _make_orchestrator()
 
-    tool_call_response = '<tool_call>{"tool":"file_info","args":{"path":"/tmp"}}</tool_call>'
+    tool_call_response = (
+        '<tool_call>{"tool":"file_info","args":{"path":"/tmp"}}</tool_call>'
+    )
     captured_cancel_flags: list[threading.Event] = []
     response_received = threading.Event()
 
@@ -261,9 +276,11 @@ def test_tool_executor_cancel_flag_passed() -> None:
 
     orch.register_handler(LLMResponseReadyEvent, _on_llm_response)
 
-    with patch.object(orch._reflex_router, "route", return_value=None), \
-         patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate), \
-         patch.object(orch._tool_executor, "execute", side_effect=_fake_execute):
+    with (
+        patch.object(orch._reflex_router, "route", return_value=None),
+        patch.object(orch._reasoning_router, "generate", side_effect=_fake_generate),
+        patch.object(orch._tool_executor, "execute", side_effect=_fake_execute),
+    ):
 
         loop_thread = threading.Thread(target=orch.run, daemon=True)
         loop_thread.start()
