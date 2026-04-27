@@ -26,6 +26,7 @@ import logging
 import queue
 import threading
 import time as _time
+from typing import Any
 
 import numpy as np
 import sounddevice as sd
@@ -45,7 +46,7 @@ _RETRY_DELAY_S = 0.25  # seconds to wait between retries
 
 
 class Ears:
-    def __init__(self, sensitivity: float = 0.5, model_paths: list[str] = None):
+    def __init__(self, sensitivity: float = 0.5, model_paths: list[str] | None = None):
         """
         Implementation of the threaded microphone listener.
         Args:
@@ -55,10 +56,10 @@ class Ears:
 
         self.sensitivity = sensitivity
         self.listening = False
-        self._event_queue: queue.Queue | None = None
+        self._event_queue: queue.Queue[Any] | None = None
 
         # The buffer
-        self.audio_queue = queue.Queue()
+        self.audio_queue: queue.Queue[Any] = queue.Queue()
 
         # The model
         logger.info("Loading the model...")
@@ -77,12 +78,14 @@ class Ears:
                 and "inference_framework" not in original_init.__code__.co_varnames
             ):
 
-                def _patched_audiofeatures_init(self, *args, **kwargs):
+                def _patched_audiofeatures_init(
+                    self: Any, *args: Any, **kwargs: Any
+                ) -> None:
                     # Drop unsupported kwarg and delegate to original initializer
                     kwargs.pop("inference_framework", None)
-                    return original_init(self, *args, **kwargs)
+                    original_init(self, *args, **kwargs)
 
-                AudioFeatures.__init__ = _patched_audiofeatures_init  # type: ignore[assignment]
+                AudioFeatures.__init__ = _patched_audiofeatures_init
         except Exception as e:
             logger.warning(
                 "Could not apply openwakeword AudioFeatures compatibility patch: %s", e
@@ -111,7 +114,9 @@ class Ears:
         # Cooldown timestamp (monotonic seconds) to ignore audio after a wake event
         self._cooldown_until = 0.0
 
-    def _mic_callback(self, indata, frames, time, status):
+    def _mic_callback(
+        self, indata: np.ndarray, frames: int, time: Any, status: Any
+    ) -> None:
         """
         Callback function for the microphone.
         """
@@ -121,7 +126,9 @@ class Ears:
 
         self.audio_queue.put(indata.copy())
 
-    def record_command_with_vad(self, timeout=10.0, silence_limit=1.5):
+    def record_command_with_vad(
+        self, timeout: float = 10.0, silence_limit: float = 1.5
+    ) -> np.ndarray:
         """
         Records audio from the queue until VAD detects silence or timeout is reached.
         Args:
@@ -174,7 +181,7 @@ class Ears:
 
         return np.concatenate(recorded_chunks)
 
-    def _consumer_loop(self):
+    def _consumer_loop(self) -> None:
         """
         This runs in the background thread and processes the audio data.
         Posts WakeDetectedEvent to the event queue on wake word detection.
@@ -282,7 +289,7 @@ class Ears:
                     )
                 )
 
-    def start(self, event_queue: queue.Queue) -> None:
+    def start(self, event_queue: queue.Queue[Any]) -> None:
         """
         Start the listener in a separate thread.
         Args:
@@ -300,7 +307,7 @@ class Ears:
         # Starting the thread
         self.thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """
         Stop the listener.
         """
@@ -317,16 +324,14 @@ if __name__ == "__main__":
     _logging_main.basicConfig(level=_logging_main.DEBUG)
     _main_logger = _logging_main.getLogger(__name__)
 
-    def wake_up_action():
-        _main_logger.info("Wake up action!")
-
-    ears = Ears(sensitivity=0.5)
+    _eq: queue.Queue[Any] = queue.Queue()
+    _ears = Ears(sensitivity=0.5)
 
     try:
-        ears.start(on_wake_callback=wake_up_action)
+        _ears.start(_eq)
         while True:
             _time_main.sleep(1)
 
     except KeyboardInterrupt:
         _main_logger.info("Stopping ears...")
-        ears.stop()
+        _ears.stop()

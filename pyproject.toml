@@ -113,6 +113,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
     "black>=24.0",
+    "types-PyYAML>=6.0",
 ]
 
 [tool.pytest.ini_options]
@@ -180,13 +181,10 @@ module = [
     "openwakeword.*",
     "faster_whisper.*",
     "sounddevice.*",
-    "soundfile.*",
     "scipy.*",
-    "colorama.*",
-    "webrtcvad.*",
-    "zmq.*",
     "llama_cpp.*",
     "kokoro_onnx.*",
+    "PIL.*",
     # RAG optional deps — only installed with --extra rag
     "sentence_transformers.*",
     "sqlite_vec.*",

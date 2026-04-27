@@ -110,8 +110,8 @@ class VisemeEvent:
 
     utterance_id: str  # binds this viseme to its utterance
     phoneme: str  # IPA or ARPAbet phoneme string
-    start_ms: int  # offset from utterance start, milliseconds
-    duration_ms: int  # phoneme duration, milliseconds
+    start_ms: float  # offset from utterance start, milliseconds
+    duration_ms: float  # phoneme duration, milliseconds
 
 
 @dataclass(frozen=True)

@@ -84,7 +84,9 @@ class Scribe:
         self.model = WhisperModel(model_size, device=device, compute_type="int8")
         logger.info("Whisper model loaded successfully on %s.", device)
 
-    def transcribe(self, audio_data, initial_prompt: str = None):
+    def transcribe(
+        self, audio_data: np.ndarray, initial_prompt: str | None = None
+    ) -> str:
         """
         Transcribe the audio to text.
         Args:

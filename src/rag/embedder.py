@@ -40,7 +40,7 @@ class Embedder:
             return
         logger.info("Loading embedding model '%s' (CPU) ...", self._model_name)
         from sentence_transformers import (
-            SentenceTransformer,  # type: ignore[import-untyped]
+            SentenceTransformer,
         )
 
         self._model = SentenceTransformer(self._model_name, device="cpu")
@@ -71,7 +71,7 @@ class Embedder:
         with self._lock:
             self._ensure_loaded()
             assert self._model is not None
-            return self._model.get_sentence_embedding_dimension()  # type: ignore[return-value]
+            return self._model.get_sentence_embedding_dimension()
 
 
 def get_embedder(model_name: str) -> Embedder:

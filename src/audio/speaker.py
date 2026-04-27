@@ -58,7 +58,7 @@ def _resample(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarr
         import scipy.signal  # optional heavy dependency
 
         g = gcd(source_rate, target_rate)
-        return scipy.signal.resample_poly(
+        return scipy.signal.resample_poly(  # type: ignore[no-any-return]
             audio_f32, target_rate // g, source_rate // g
         ).astype(np.float32)
     except ImportError:

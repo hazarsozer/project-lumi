@@ -35,9 +35,9 @@ logger = logging.getLogger(__name__)
 # tests can patch it via "llama_cpp.Llama"; fall back to None when the package
 # is not installed (vision will still run in capture-only mode).
 try:
-    import llama_cpp  # type: ignore[import-untyped]
+    import llama_cpp
 except ImportError:  # pragma: no cover
-    llama_cpp = None  # type: ignore[assignment]
+    llama_cpp = None
 
 # Temporary file used when scrot is the capture backend.
 _SCROT_TMP: str = "/tmp/lumi_screenshot.png"
@@ -262,7 +262,7 @@ class ScreenshotTool:
     def _capture_pillow(self) -> bytes | None:
         """Capture via Pillow ImageGrab. Returns PNG bytes or None."""
         try:
-            from PIL import ImageGrab  # type: ignore[import-untyped]
+            from PIL import ImageGrab
 
             img = ImageGrab.grab()
             buf = io.BytesIO()
@@ -292,7 +292,7 @@ class ScreenshotTool:
         """
         max_res = self._config.max_resolution
         try:
-            from PIL import Image  # type: ignore[import-untyped]
+            from PIL import Image
 
             img = Image.open(io.BytesIO(png_bytes))
             width, height = img.size
@@ -374,7 +374,7 @@ class ScreenshotTool:
                 "Describe what you see in this screenshot.\n"
             )
 
-            result = self._vision_model.create_completion(
+            result: Any = self._vision_model.create_completion(
                 prompt,
                 max_tokens=256,
                 temperature=0.1,

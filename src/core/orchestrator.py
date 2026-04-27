@@ -709,7 +709,7 @@ class Orchestrator:
         )
         thread.start()
 
-    def _run_scribe(self, audio: object) -> None:
+    def _run_scribe(self, audio: Any) -> None:
         """Run Scribe.transcribe() and post the result to the event queue.
 
         Executed in a daemon thread started by _handle_recording_complete.

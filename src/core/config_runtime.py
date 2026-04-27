@@ -110,7 +110,7 @@ _TOP_LEVEL_SCALARS: frozenset[str] = frozenset(["edition", "log_level", "json_lo
 # ---------------------------------------------------------------------------
 
 
-def _coerce_value(key: str, value: Any, meta: dict) -> tuple[Any, str | None]:
+def _coerce_value(key: str, value: Any, meta: dict[str, Any]) -> tuple[Any, str | None]:
     """Attempt to coerce and range-check ``value`` according to ``meta``.
 
     Returns:

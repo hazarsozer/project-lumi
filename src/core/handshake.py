@@ -30,8 +30,14 @@ import json
 import logging
 import threading
 from collections.abc import Callable
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+class _Sendable(Protocol):
+    def send(self, data: bytes) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Named constants
@@ -65,7 +71,7 @@ class HandshakeHandler:
         All public methods acquire ``_lock`` before mutating state.
     """
 
-    def __init__(self, transport: object) -> None:
+    def __init__(self, transport: _Sendable) -> None:
         """
         Args:
             transport: Any object that has a ``.send(bytes)`` method.
@@ -162,7 +168,7 @@ class HandshakeHandler:
         }
         return json.dumps(msg, ensure_ascii=False).encode("utf-8")
 
-    def _try_parse_hello_ack(self, raw: bytes) -> dict | None:
+    def _try_parse_hello_ack(self, raw: bytes) -> dict[str, Any] | None:
         """Attempt to parse ``raw`` as a hello_ack frame.
 
         Returns the parsed dict if it is a hello_ack, otherwise None.
@@ -181,7 +187,7 @@ class HandshakeHandler:
 
         return obj
 
-    def _consume_hello_ack(self, ack: dict) -> None:
+    def _consume_hello_ack(self, ack: dict[str, Any]) -> None:
         """Process a parsed hello_ack dict.
 
         Must be called with ``_lock`` held.

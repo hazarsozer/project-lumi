@@ -37,11 +37,12 @@ import logging
 import threading
 import time
 from collections import defaultdict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Type alias for snapshot values: either a histogram dict or an integer counter.
-_SnapshotValue = dict | int
+_SnapshotValue = dict[str, Any] | int
 
 
 def _percentile(sorted_values: list[float], pct: float) -> float:

@@ -219,6 +219,7 @@ class DocumentStore:
         )
         conn.commit()
         chunk_id = cur.lastrowid
+        assert chunk_id is not None
         return ChunkRecord(
             id=chunk_id,
             document_id=document_id,

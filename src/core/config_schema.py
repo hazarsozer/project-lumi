@@ -12,6 +12,8 @@ config stack.
 
 from __future__ import annotations
 
+from typing import Any
+
 # ---------------------------------------------------------------------------
 # FIELD_META: one entry per user-facing config field
 # ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ from __future__ import annotations
 #   options          : list[str]     (select / multiselect only)
 # ---------------------------------------------------------------------------
 
-FIELD_META: dict[str, dict] = {
+FIELD_META: dict[str, dict[str, Any]] = {
     # -------------------------------------------------------------------------
     # Top-level scalars
     # -------------------------------------------------------------------------

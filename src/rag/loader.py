@@ -89,7 +89,7 @@ def _load_text(path: Path) -> str:
 
 def _load_pdf(path: Path) -> str:
     try:
-        from pypdf import PdfReader  # type: ignore[import-untyped]
+        from pypdf import PdfReader
     except ImportError as exc:
         raise IngestError(
             "pypdf is required to load PDF files. " "Install it with: uv add pypdf"

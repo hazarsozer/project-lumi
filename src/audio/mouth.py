@@ -245,7 +245,7 @@ class KokoroTTS:
             return
 
         try:
-            import kokoro_onnx  # type: ignore[import]
+            import kokoro_onnx
 
             self._kokoro = kokoro_onnx.Kokoro(self._model_path, self._voices_path)
             logger.info("KokoroTTS: loaded model from %r", self._model_path)
