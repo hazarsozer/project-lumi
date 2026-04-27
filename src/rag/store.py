@@ -113,6 +113,7 @@ class DocumentStore:
 
         try:
             import sqlite_vec  # optional extra; only needed at RAG runtime
+
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
@@ -280,6 +281,7 @@ class DocumentStore:
         conn = self._conn()
         # vec0 virtual tables do not support INSERT OR REPLACE; delete first.
         import sqlite_vec  # optional extra; only needed at RAG runtime
+
         conn.execute("DELETE FROM vectors WHERE chunk_id = ?", (chunk_id,))
         conn.execute(
             "INSERT INTO vectors(chunk_id, embedding) VALUES (?, ?)",
@@ -356,6 +358,7 @@ class DocumentStore:
         with search_fts().
         """
         import sqlite_vec  # optional extra; only needed at RAG runtime
+
         serialised = sqlite_vec.serialize_float32(embedding)
         rows = (
             self._conn()
