@@ -39,9 +39,11 @@ jobs:
       - name: Type-check (mypy)
         run: uv run mypy src/
 
+      - name: Install system audio libraries
+        run: sudo apt-get install -y portaudio19-dev libportaudio2
+
       - name: Run tests with coverage
         # --cov-fail-under=80 enforces the project's 80 % minimum coverage gate.
-        # Tests that require hardware (microphone, GPU) are excluded via the
-        # "unit" and "integration" marks; "slow" tests are also skipped in CI
-        # unless the test suite explicitly handles the missing hardware.
-        run: uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80
+        # --continue-on-collection-errors lets pytest run all collectable tests
+        # even when optional extras (llm, rag) are absent on the CI runner.
+        run: uv run pytest --cov=src --cov-report=term-missing --cov-fail-under=80 --continue-on-collection-errors
