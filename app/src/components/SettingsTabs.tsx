@@ -11,9 +11,14 @@ export interface SettingsValues {
   autostart: boolean;
   notifications: boolean;
   trayIcon: boolean;
+  language: string;
+  updateChannel: string;
   voiceActivation: boolean;
   volume: number;
   micSensitivity: number;
+  voice: string;
+  mic: string;
+  speakingRate: number;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -37,7 +42,9 @@ export interface SettingsValues {
 
 export const DEFAULT_SETTINGS: SettingsValues = {
   autostart: true, notifications: false, trayIcon: true,
+  language: 'English (US)', updateChannel: 'Stable',
   voiceActivation: true, volume: 72, micSensitivity: 45,
+  voice: 'Lumi Default', mic: 'Built-in Microphone', speakingRate: 1.0,
   model: 'lumi-2-local', temperature: 0.68, maxTokens: 2048,
   systemPrompt: '',
   contextFiles: true, calendarAccess: false, clipboardWatch: true,
@@ -55,32 +62,27 @@ function Col({ children }: { children: React.ReactNode }) {
 }
 
 export function GeneralTab({ vals, set }: { vals: SettingsValues; set: Setter }) {
-  const [language, setLanguage] = useState('English (US)');
-  const [updateChannel, setUpdateChannel] = useState('Stable');
   return (
     <Col>
       <SettingRow label="Launch at login" desc="Start Lumi when your computer starts" restart control={<LumiToggle checked={vals.autostart} onChange={(v) => set('autostart', v)} />} />
       <SettingRow label="Desktop notifications" desc="Show system notifications for responses" control={<LumiToggle checked={vals.notifications} onChange={(v) => set('notifications', v)} />} />
       <SettingRow label="System tray icon" desc="Show Lumi in the menu bar / taskbar tray" control={<LumiToggle checked={vals.trayIcon} onChange={(v) => set('trayIcon', v)} />} />
-      <SettingRow label="Language" control={<LumiDropdown value={language} options={['English (US)', 'English (UK)', 'French', 'German', 'Japanese']} onChange={setLanguage} />} />
-      <SettingRow label="Update channel" control={<LumiDropdown value={updateChannel} options={['Stable', 'Beta', 'Nightly']} onChange={setUpdateChannel} />} />
+      <SettingRow label="Language" control={<LumiDropdown value={vals.language} options={['English (US)', 'English (UK)', 'French', 'German', 'Japanese']} onChange={(v) => set('language', v)} />} />
+      <SettingRow label="Update channel" control={<LumiDropdown value={vals.updateChannel} options={['Stable', 'Beta', 'Nightly']} onChange={(v) => set('updateChannel', v)} />} />
       <SettingRow label="Data folder" desc="Where Lumi stores local data" control={<LumiFilePath value="/Users/alex/Library/Application Support/Lumi" />} />
     </Col>
   );
 }
 
 export function VoiceTab({ vals, set }: { vals: SettingsValues; set: Setter }) {
-  const [voice, setVoice] = useState('Lumi Default');
-  const [mic, setMic] = useState('Built-in Microphone');
-  const [speakingRate, setSpeakingRate] = useState(1.0);
   return (
     <Col>
       <SettingRow label="Wake word activation" desc='Respond to "Hey Lumi"' control={<LumiToggle checked={vals.voiceActivation} onChange={(v) => set('voiceActivation', v)} />} />
       <SettingRow label="Output volume" control={<div style={{ width: 180 }}><LumiSlider value={vals.volume} min={0} max={100} minLabel="0%" maxLabel="100%" onChange={(v) => set('volume', v)} /></div>} />
       <SettingRow label="Mic sensitivity" control={<div style={{ width: 180 }}><LumiSlider value={vals.micSensitivity} min={0} max={100} minLabel="Low" maxLabel="High" onChange={(v) => set('micSensitivity', v)} /></div>} />
-      <SettingRow label="Voice" control={<LumiDropdown value={voice} options={['Lumi Default', 'Aria', 'Echo', 'Nova']} onChange={setVoice} />} />
-      <SettingRow label="Microphone" control={<LumiDropdown value={mic} options={['Built-in Microphone', 'External Mic', 'Airpods Pro']} onChange={setMic} />} />
-      <SettingRow label="Speaking rate" control={<div style={{ width: 180 }}><LumiSlider value={speakingRate} min={0.5} max={2.0} step={0.1} minLabel="0.5×" maxLabel="2×" onChange={setSpeakingRate} /></div>} />
+      <SettingRow label="Voice" control={<LumiDropdown value={vals.voice} options={['Lumi Default', 'Aria', 'Echo', 'Nova']} onChange={(v) => set('voice', v)} />} />
+      <SettingRow label="Microphone" control={<LumiDropdown value={vals.mic} options={['Built-in Microphone', 'External Mic', 'Airpods Pro']} onChange={(v) => set('mic', v)} />} />
+      <SettingRow label="Speaking rate" control={<div style={{ width: 180 }}><LumiSlider value={vals.speakingRate} min={0.5} max={2.0} step={0.1} minLabel="0.5×" maxLabel="2×" onChange={(v) => set('speakingRate', v)} /></div>} />
     </Col>
   );
 }
@@ -130,9 +132,11 @@ export function PrivacyTab({ vals, set }: { vals: SettingsValues; set: Setter })
     <Col>
       <SettingRow label="Send usage analytics" desc="Anonymous telemetry to improve Lumi" control={<LumiToggle checked={vals.telemetry} onChange={(v) => set('telemetry', v)} />} />
       <SettingRow label="Send crash reports" control={<LumiToggle checked={vals.crashReports} onChange={(v) => set('crashReports', v)} />} />
-      <SettingRow label="Store conversation history" desc="Persists chats locally between sessions" control={<LumiToggle checked={true} onChange={() => {}} />} />
+      {/* not yet wired to config schema */}
+      <SettingRow label="Store conversation history" desc="Persists chats locally between sessions" control={<LumiToggle checked={true} onChange={() => {}} disabled />} />
       <SettingRow label="History retention" control={<LumiDropdown value={retention} options={['7 days', '30 days', '90 days', 'Forever', 'Never']} onChange={setRetention} />} />
-      <SettingRow label="Encryption at rest" desc="Encrypt local data with your login password" restart control={<LumiToggle checked={false} onChange={() => {}} />} />
+      {/* not yet wired to config schema */}
+      <SettingRow label="Encryption at rest" desc="Encrypt local data with your login password" restart control={<LumiToggle checked={false} onChange={() => {}} disabled />} />
       <div style={{ margin: `${T.space.sm}px ${T.space.md}px`, padding: T.space.md, borderRadius: T.radius.md, background: 'oklch(60% 0.18 25 / 0.08)', border: '1px solid oklch(60% 0.18 25 / 0.25)' }}>
         <div style={{ fontSize: T.font.sm, color: T.colors.danger }}>Clear all conversation history — this cannot be undone.</div>
         <div style={{ marginTop: T.space.sm, padding: '6px 14px', borderRadius: T.radius.md, background: 'oklch(60% 0.18 25 / 0.18)', border: `1px solid ${T.colors.danger}`, display: 'inline-flex', cursor: 'pointer', fontSize: T.font.sm, color: T.colors.danger }}>Clear History</div>

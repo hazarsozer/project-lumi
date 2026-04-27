@@ -11,7 +11,7 @@
 
 ## Current Status
 
-**Phases 1–7 complete. MVP-ready: voice assistant pipeline + OS tools + personal knowledge base RAG.**
+**Phases 1–8.5 complete. MVP-ready: voice assistant pipeline + OS tools + personal knowledge base RAG + runtime settings UI.**
 
 | Phase | Name | Status |
 |---|---|---|
@@ -22,6 +22,9 @@
 | 5 | The Body (Visuals + IPC) | COMPLETE |
 | 6 | The Hands (OS Control) | COMPLETE |
 | 7 | RAG Personal Knowledge Base | COMPLETE |
+| 8.5 | Settings UI (Runtime Config) | COMPLETE |
+| 9 | Avatar Artwork | NOT STARTED |
+| 9.5 | Tauri UI Overlay | IN PROGRESS |
 
 ---
 
@@ -39,10 +42,11 @@
 - Startup validation halts on missing wake word model, wrong openwakeword version, or no microphone
 - Structured logging (human-readable or JSON) via `src/core/logging_config.py`
 - **Godot 4 transparent overlay** (`ui/`) connects to the Python Brain via raw TCP on port 5555; drives an animated avatar from Brain state events. Set `ipc.enabled: true` in `config.yaml` to activate the IPC server.
+- **Runtime settings panel** — open with gear icon or Ctrl+, in the Godot overlay; reads live config schema from Brain, applies hot changes instantly, marks restart-required fields with `[↻]`
 - **RAG personal knowledge base** — hybrid BM25 + vector kNN retrieval (SQLite FTS5 + sqlite-vec), RRF fusion, `all-MiniLM-L6-v2` embeddings; `scripts/ingest_docs.py` to index personal documents; off by default
 - OS automation tools: app launch, clipboard, file info, window list, screenshot analysis (moondream2)
 - LLM token streaming to Godot overlay; per-viseme-group mouth animations (Kokoro lip-sync)
-- ~749 tests at 91% coverage (80% gate enforced in CI); behavioral regression contract suite in `tests/test_regression.py`
+- ~932 tests collected (925 passing, 4 skipped at last run); 80% coverage gate enforced in CI; behavioral regression contract suite in `tests/test_regression.py`
 
 ---
 
@@ -88,7 +92,7 @@
 ### Phase 5: The Body — Complete
 
 - [x] Raw TCP IPC server (`src/core/ipc_transport.py`, 4-byte length-prefix framing)
-- [x] Event bridge (`src/core/zmq_server.py`, `ZMQServer` — translates internal events ↔ JSON wire protocol)
+- [x] Event bridge (`src/core/event_bridge.py`, `EventBridge` — translates internal events ↔ JSON wire protocol; `src/core/zmq_server.py` is a backwards-compatibility shim)
 - [x] Godot 4 transparent overlay (`ui/`) — 200×200 borderless window, X11/Wayland
 - [x] `StreamPeerTCP` IPC client (`ui/scripts/lumi_client.gd`) with auto-reconnect
 - [x] Avatar controller (`ui/scripts/avatar_controller.gd`) drives `AnimatedSprite2D` from Brain state events
@@ -111,8 +115,16 @@
 - [x] `scripts/measure_rag_latency.py` — end-to-end latency benchmark (gate p95 < 2.0 s)
 - [x] ZMQ wiring: `rag_retrieval`, `rag_status` outbound; `rag_set_enabled` inbound
 - [x] RAG off by default (`config.rag.enabled: false`); enable + `uv sync --extra rag` to activate
-- [ ] Godot citation panel UI (deferred)
 - [ ] Real avatar artwork
+
+### Phase 8.5: Settings UI (Runtime Config) — Complete
+
+- [x] `src/core/config_runtime.py` — `ConfigManager`, `ConfigObserver`, `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock
+- [x] `src/core/config_schema.py` — `FIELD_META` dict; UI metadata (control type, min/max, restart_required) for 47 user-facing fields
+- [x] `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover
+- [x] IPC wire events: `config_schema_request` (Body→Brain), `config_schema` (Brain→Body), `config_update` (Body→Brain), `config_update_result` (Brain→Body)
+- [x] Godot settings panel (`ui/scenes/settings_panel.tscn`, `ui/scripts/settings_panel.gd`) — gear icon / Ctrl+, entry; 7 tabs; `SettingRow` widget with 7 control types
+- [x] `scripts/setup_wizard.py` — guided first-run configuration
 
 ---
 
@@ -169,7 +181,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | TTS | Kokoro-82M ONNX |
 | Knowledge retrieval | Hybrid BM25+vec RAG (Phase 7); SQLite FTS5 + sqlite-vec; all-MiniLM-L6-v2 |
 | Frontend | Godot 4 (`ui/`; set `ipc.enabled: true` to activate) |
-| IPC | Raw TCP, 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; no pyzmq) |
+| IPC | Raw TCP, 4-byte length-prefix framing (`IPCTransport` + `EventBridge`; no pyzmq) |
 | IPC handshake | Version negotiation via `src/core/handshake.py` (`hello` / `hello_ack`) |
 | Metrics | Stdlib histogram module `src/core/metrics.py` (p50/p95/p99, no external deps) |
 | Testing | pytest + pytest-cov (80% coverage gate) |

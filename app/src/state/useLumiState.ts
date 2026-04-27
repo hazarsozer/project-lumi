@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { BrainClient } from "../ipc/client";
+import type { IBrainClient } from "../ipc/client";
 import type { BrainState, LumiBrainEvent } from "../ipc/events";
 
 interface LumiState {
@@ -16,7 +16,7 @@ const INITIAL_STATE: LumiState = {
   currentUtterance: "",
 };
 
-export function useLumiState(client: BrainClient): LumiState {
+export function useLumiState(client: IBrainClient): LumiState {
   const [lumiState, setLumiState] = useState<LumiState>(INITIAL_STATE);
 
   useEffect(() => {

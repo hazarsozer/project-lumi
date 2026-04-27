@@ -1,6 +1,5 @@
 import type { LumiBrainEvent, OutboundEvent } from "./events";
-
-type ConnectionState = "connecting" | "connected" | "disconnected";
+import type { ConnectionState, IBrainClient } from "./client";
 
 // Scripted conversation token sequence for streaming simulation
 const STREAM_TOKENS = [
@@ -14,11 +13,12 @@ const STREAM_TOKENS = [
  * BrainClient is expected. Runs a scripted event loop with setTimeout/setInterval
  * — no real WebSocket involved.
  */
-export class MockBrainClient {
+export class MockBrainClient implements IBrainClient {
   private handlers: Array<(e: LumiBrainEvent) => void> = [];
   private stateHandlers: Array<(s: ConnectionState) => void> = [];
   private _state: ConnectionState = "disconnected";
   private timers: ReturnType<typeof setTimeout>[] = [];
+  private intervals: ReturnType<typeof setInterval>[] = [];
 
   get state(): ConnectionState {
     return this._state;
@@ -36,6 +36,8 @@ export class MockBrainClient {
   disconnect(): void {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    for (const id of this.intervals) clearInterval(id);
+    this.intervals = [];
     this._setState("disconnected");
   }
 
@@ -135,8 +137,6 @@ export class MockBrainClient {
 
     // Run immediately, then repeat every CYCLE_MS
     runCycle();
-    const intervalId = setInterval(runCycle, CYCLE_MS);
-    // Store cast to setTimeout return type so the cleanup loop handles it
-    this.timers.push(intervalId as unknown as ReturnType<typeof setTimeout>);
+    this.intervals.push(setInterval(runCycle, CYCLE_MS));
   }
 }

@@ -44,21 +44,31 @@ function OverlayRoot() {
 
   // Forward send-text requests from Chat window to Brain
   useEffect(() => {
+    let cancelled = false;
     const p = tauriListen<{ text: string }>(EV_SEND, (payload) => {
       client.send({ event: "user_text", payload: { text: payload.text } });
     });
-    return () => { void p.then((fn) => fn()); };
+    return () => {
+      cancelled = true;
+      // If the promise resolves after unmount, skip the unlisten call —
+      // the listener was never fully established before the component was torn down.
+      void p.then((fn) => { if (cancelled) return; fn(); });
+    };
   }, [client]);
 
   // Forward config-update requests from Settings window to Brain
   useEffect(() => {
+    let cancelled = false;
     const p = tauriListen<{ changes: Record<string, unknown>; persist: boolean }>(
       EV_CONFIG_UPDATE,
       (payload) => {
         client.send({ event: "config_update", payload });
       },
     );
-    return () => { void p.then((fn) => fn()); };
+    return () => {
+      cancelled = true;
+      void p.then((fn) => { if (cancelled) return; fn(); });
+    };
   }, [client]);
 
   const toggleWindow = useCallback(async (label: "chat" | "settings") => {
@@ -93,6 +103,7 @@ function ChatRoot() {
   const [brainState, setBrainState] = useState<AvatarStateKey>("idle");
 
   useEffect(() => {
+    let cancelled = false;
     const p = tauriListen<LumiBrainEvent>(EV_BRAIN, (evt) => {
       switch (evt.event) {
         case "state_change":
@@ -116,7 +127,10 @@ function ChatRoot() {
           break;
       }
     });
-    return () => { void p.then((fn) => fn()); };
+    return () => {
+      cancelled = true;
+      void p.then((fn) => { if (cancelled) return; fn(); });
+    };
   }, []);
 
   const handleSend = useCallback((text: string) => {

@@ -1,6 +1,16 @@
 import type { LumiBrainEvent, OutboundEvent, WireMessage } from "./events";
 
-type ConnectionState = "connecting" | "connected" | "disconnected";
+export type ConnectionState = "connecting" | "connected" | "disconnected";
+
+/** Public API shared by BrainClient and MockBrainClient. */
+export interface IBrainClient {
+  readonly state: ConnectionState;
+  connect(): void;
+  disconnect(): void;
+  send(event: OutboundEvent): void;
+  onEvent(handler: (e: LumiBrainEvent) => void): () => void;
+  onStateChange(handler: (s: ConnectionState) => void): () => void;
+}
 
 export const BACKOFF_STEPS_MS = [1000, 2000, 4000, 8000];
 const KNOWN_BRAIN_EVENTS = new Set([
@@ -15,7 +25,7 @@ function isLumiBrainEvent(raw: WireMessage): raw is WireMessage & LumiBrainEvent
 
 const MAX_OUTBOUND_QUEUE = 32;
 
-export class BrainClient {
+export class BrainClient implements IBrainClient {
   private ws: WebSocket | null = null;
   private handlers: Array<(e: LumiBrainEvent) => void> = [];
   private stateHandlers: Array<(s: ConnectionState) => void> = [];
@@ -45,15 +55,28 @@ export class BrainClient {
     };
     ws.onmessage = (ev: MessageEvent<string>) => this._dispatch(ev.data);
     ws.onclose = () => { this._setState("disconnected"); this._scheduleReconnect(); };
-    ws.onerror = () => ws.close();
+    ws.onerror = () => {
+      this._notifyError("WebSocket error");
+      ws.close();
+    };
   }
 
   private _dispatch(data: string): void {
     let wire: WireMessage;
     try { wire = JSON.parse(data) as WireMessage; } catch { return; }
     if (!isLumiBrainEvent(wire)) return;
-    const typed = wire as unknown as LumiBrainEvent;
-    for (const h of this.handlers) h(typed);
+    // wire is now WireMessage & { event: LumiBrainEvent['event'] }.
+    // Consumers (useLumiState) narrow by e.event before accessing e.payload,
+    // so we pass the intersection rather than asserting the full LumiBrainEvent shape.
+    // isLumiBrainEvent has verified the event name; payload is validated by
+    // consumers via per-event narrowing (e.event === "state_change" etc.).
+    const narrowed = wire as unknown as LumiBrainEvent;
+    for (const h of this.handlers) h(narrowed);
+  }
+
+  private _notifyError(message: string): void {
+    const errEvent: LumiBrainEvent = { event: "error", payload: { code: "ws_error", message } };
+    for (const h of this.handlers) h(errEvent);
   }
 
   disconnect(): void {

@@ -88,6 +88,8 @@ class WsBridge:
         self._ws_client: ServerConnection | None = None
         self._ws_lock = asyncio.Lock()
         self._tcp_writer: asyncio.StreamWriter | None = None
+        self._tcp_write_lock = asyncio.Lock()
+        self._ws_task: asyncio.Task[None] | None = None
 
     async def _handle_ws(self, ws: ServerConnection) -> None:
         async with self._ws_lock:
@@ -100,9 +102,8 @@ class WsBridge:
 
         try:
             async for raw in ws:
-                if isinstance(raw, bytes):
-                    raw = raw.decode()
-                logger.debug("WS→TCP: %d bytes", len(raw))
+                payload = raw if isinstance(raw, bytes) else raw.encode()
+                logger.debug("WS→TCP: %d bytes", len(payload))
                 # Queued via a shared writer — the TCP→WS loop owns the reader;
                 # we need access to the writer here.  The writer is stored on
                 # the bridge instance while the TCP session is live.
@@ -111,8 +112,9 @@ class WsBridge:
                     logger.debug("No TCP connection; dropping WS message.")
                     continue
                 try:
-                    writer.write(_tcp_frame(raw.encode()))
-                    await writer.drain()
+                    async with self._tcp_write_lock:
+                        writer.write(_tcp_frame(payload))
+                        await writer.drain()
                 except OSError as exc:
                     logger.warning("Failed to write to Brain: %s", exc)
         except Exception as exc:
@@ -140,8 +142,6 @@ class WsBridge:
                 logger.warning("Failed to send to WS client: %s", exc)
 
     async def run(self) -> None:
-        self._tcp_writer: asyncio.StreamWriter | None = None
-
         async def _ws_serve() -> None:
             async with websockets.serve(
                 self._handle_ws,
@@ -151,18 +151,26 @@ class WsBridge:
                 logger.info("WS server listening on ws://127.0.0.1:%d", self._ws_port)
                 await asyncio.get_running_loop().create_future()  # run forever
 
-        asyncio.create_task(_ws_serve())
+        self._ws_task = asyncio.create_task(_ws_serve())
 
-        while True:
-            async with _connect_tcp_with_backoff(
-                self._tcp_host, self._tcp_port
-            ) as (reader, writer):
-                self._tcp_writer = writer
+        try:
+            while True:
+                async with _connect_tcp_with_backoff(
+                    self._tcp_host, self._tcp_port
+                ) as (reader, writer):
+                    self._tcp_writer = writer
+                    try:
+                        await self._tcp_to_ws_loop(reader)
+                    finally:
+                        self._tcp_writer = None
+                # After TCP session ends, loop back and reconnect with backoff.
+        finally:
+            if self._ws_task is not None:
+                self._ws_task.cancel()
                 try:
-                    await self._tcp_to_ws_loop(reader)
-                finally:
-                    self._tcp_writer = None
-            # After TCP session ends, loop back and reconnect with backoff.
+                    await self._ws_task
+                except asyncio.CancelledError:
+                    pass
 
 
 # ---------------------------------------------------------------------------
