@@ -21,8 +21,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import sqlite_vec
-
 from src.core.config import RAGConfig
 from src.rag.errors import RAGUnavailableError
 
@@ -114,6 +112,7 @@ class DocumentStore:
         conn.row_factory = sqlite3.Row
 
         try:
+            import sqlite_vec  # optional extra; only needed at RAG runtime
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
@@ -280,6 +279,7 @@ class DocumentStore:
         """Store the embedding vector for a chunk, replacing any existing row."""
         conn = self._conn()
         # vec0 virtual tables do not support INSERT OR REPLACE; delete first.
+        import sqlite_vec  # optional extra; only needed at RAG runtime
         conn.execute("DELETE FROM vectors WHERE chunk_id = ?", (chunk_id,))
         conn.execute(
             "INSERT INTO vectors(chunk_id, embedding) VALUES (?, ?)",
@@ -355,6 +355,7 @@ class DocumentStore:
         1 / (1 + distance) so that higher score = more relevant, consistent
         with search_fts().
         """
+        import sqlite_vec  # optional extra; only needed at RAG runtime
         serialised = sqlite_vec.serialize_float32(embedding)
         rows = (
             self._conn()

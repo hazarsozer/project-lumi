@@ -12,8 +12,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import llama_cpp
-
 from src.core.config import LLMConfig
 
 logger = logging.getLogger(__name__)
@@ -49,6 +47,8 @@ class ModelLoader:
         Raises:
             FileNotFoundError: If ``config.model_path`` does not exist on disk.
         """
+        import llama_cpp  # optional extra; only needed at inference time
+
         model_path = Path(config.model_path)
 
         kwargs: dict[str, Any] = {
