@@ -1,0 +1,80 @@
+{
+  "colors": {
+    "background":       "#010409",
+    "surface":          "#040d14",
+    "surfaceElevated":  "#09141e",
+    "surfaceTop":       "#101e2a",
+    "border":           "#1c2a36",
+    "borderSubtle":     "#101b25",
+    "textPrimary":      "#dbe2e7",
+    "textSecondary":    "#6d7c87",
+    "textMuted":        "#323e47",
+    "accentIdle":       "#0099d2",
+    "accentListening":  "#00a950",
+    "accentProcessing": "#eb8900",
+    "accentSpeaking":   "#e4ecf2",
+    "danger":           "#d64745"
+  },
+  "spacing": {
+    "xs":  4,
+    "sm":  8,
+    "md":  12,
+    "lg":  16,
+    "xl":  24,
+    "xxl": 32
+  },
+  "borderRadius": {
+    "sm":   4,
+    "md":   8,
+    "lg":   12,
+    "xl":   16,
+    "pill": 9999
+  },
+  "fontSize": {
+    "xs":  10,
+    "sm":  12,
+    "md":  14,
+    "lg":  16,
+    "xl":  18,
+    "xxl": 22
+  },
+  "opacity": {
+    "idle":     0.42,
+    "active":   1.0,
+    "disabled": 0.32
+  },
+  "animation": {
+    "durationFast":   150,
+    "durationNormal": 250,
+    "durationSlow":   400,
+    "easing":         "ease_in_out"
+  },
+  "overlay": {
+    "avatarWidth":    140,
+    "avatarHeight":   210,
+    "trayHeight":     48,
+    "trayPaddingH":   12,
+    "overlapOffset":  28,
+    "windowWidth":    160,
+    "windowHeight":   260
+  },
+  "chatPanel": {
+    "width":       380,
+    "height":      540,
+    "headerHeight": 48,
+    "inputHeight":  48
+  },
+  "settingsPanel": {
+    "width":         680,
+    "height":        540,
+    "sidebarWidth":  140,
+    "headerHeight":  52,
+    "footerHeight":  56
+  },
+  "states": {
+    "idle":       { "accent": "#0099d2", "opacity": 0.42, "label": "Idle" },
+    "listening":  { "accent": "#00a950", "opacity": 1.0,  "label": "Listening" },
+    "processing": { "accent": "#eb8900", "opacity": 1.0,  "label": "Processing" },
+    "speaking":   { "accent": "#e4ecf2", "opacity": 1.0,  "label": "Speaking" }
+  }
+}

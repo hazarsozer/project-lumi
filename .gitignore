@@ -43,6 +43,14 @@ my_model.yaml
 # --- Claude Code (local session data, agent definitions) ---
 .claude/
 
+# --- Godot editor cache (auto-generated, not source) ---
+ui/.godot/
+
+# --- Tauri / Node ---
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+
 # --- pytest / coverage ---
 .pytest_cache/
 .coverage
@@ -60,3 +68,4 @@ useful-agents.md
 
 # --- Fine-tuning datasets (large, regenerable) ---
 data/finetune/*.jsonl
+.run_logs/

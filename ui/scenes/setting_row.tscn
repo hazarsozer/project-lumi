@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://setting_row"]
+
+[ext_resource type="Script" path="res://scripts/setting_row.gd" id="1_row"]
+
+[node name="SettingRow" type="HBoxContainer"]
+script = ExtResource("1_row")
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 40)

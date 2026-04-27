@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 7 complete + Waves E3–G5 merged (2026-04-21).
+> Last updated to reflect actual state as of Phase 8.5 complete (Settings UI; 2026-04-26).
 
 ---
 
@@ -37,7 +37,7 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 ### The Nerves (IPC)
 - **Protocol:** Raw TCP, 4-byte big-endian uint32 length prefix + UTF-8 JSON body
 - **Transport class:** `IPCTransport` (`src/core/ipc_transport.py`) — single-client, two daemon threads (`ipc-accept`, `ipc-recv`), stdlib `socket` only (no pyzmq)
-- **Event bridge:** `ZMQServer` (`src/core/zmq_server.py`) — sits on top of `IPCTransport`, translates outbound internal events to JSON wire frames, translates inbound JSON frames to internal events posted to the orchestrator queue
+- **Event bridge:** `EventBridge` (`src/core/event_bridge.py`) — sits on top of `IPCTransport`, translates outbound internal events to JSON wire frames, translates inbound JSON frames to internal events posted to the orchestrator queue. `src/core/zmq_server.py` is a backwards-compatibility shim that re-exports `EventBridge` as `ZMQServer`.
 - **Enabled by:** `config.ipc.enabled: true` in `config.yaml` (default `false`; keep `false` for headless / CI runs)
 - **Default endpoint:** `tcp://127.0.0.1:5555`
 - **Format:** `{ "event": string, "payload": object, "timestamp": float, "version": string }`
@@ -54,6 +54,10 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 | `error` | Brain → Body | `{ "code": string, "message": string }` |
 | `interrupt` | Body → Brain | `{}` |
 | `user_text` | Body → Brain | `{ "text": string }` |
+| `config_schema_request` | Body → Brain | `{}` |
+| `config_schema` | Brain → Body | `{ "fields": [...], "current": {...} }` |
+| `config_update` | Body → Brain | `{ "changes": { "dotted.key": value, ... }, "persist": bool }` |
+| `config_update_result` | Brain → Body | `{ "success": bool, "errors": [...], "restart_required": bool }` |
 
 ---
 
@@ -77,6 +81,10 @@ The pipeline is event-driven. All components post typed, frozen dataclass events
 | `InterruptEvent` | Any source (Body via ZMQ, new wake word) | Orchestrator |
 | `ShutdownEvent` | main.py / signal handler | Orchestrator |
 | `UserTextEvent` | ZMQ server (Body → Brain) | Orchestrator |
+| `EarsErrorEvent` | Ears thread (after all retries exhausted) | Orchestrator |
+| `ToolResultEvent` | Async tool callback (e.g. rag_ingest) | Orchestrator |
+| `ConfigSchemaRequestEvent` | EventBridge (Body → Brain) | Orchestrator |
+| `ConfigUpdateEvent` | EventBridge (Body → Brain) | Orchestrator / ConfigManager |
 
 `ZMQMessage` is also defined in `src/core/events.py` as the wire-format dataclass for ZMQ IPC communication (`event`, `payload`, `timestamp`, `version`).
 
@@ -136,7 +144,7 @@ When the Orchestrator receives `InterruptEvent` while in `PROCESSING` or `SPEAKI
 
 The `LumiState` enum defines exactly four states: `IDLE`, `LISTENING`, `PROCESSING`, `SPEAKING`. The `StateMachine` class enforces all valid transitions and notifies registered observers. `InvalidTransitionError` is raised for any illegal transition attempt.
 
-State transitions are published to the Body via `state_change` IPC events. `ZMQServer` registers itself as a `StateMachine` observer so every transition is forwarded automatically when the IPC server is enabled.
+State transitions are published to the Body via `state_change` IPC events. `EventBridge` registers itself as a `StateMachine` observer so every transition is forwarded automatically when the IPC server is enabled.
 
 ---
 
@@ -186,18 +194,19 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Frame protocol | `ipc_protocol.gd` — 4-byte length-prefix encode/decode |
 | Avatar | `AvatarController` drives `AnimatedSprite2D` from Brain state events; placeholder colored-circle sprites in `ui/assets/sprites/` |
 | Avatar (Phase 6) | Real artwork replacing placeholder sprites; Live2D (Standard) / 3D VRM (Pro) |
+| Settings Panel | `ui/scenes/settings_panel.tscn` + `ui/scripts/settings_panel.gd` — gear icon / Ctrl+, entry; 7-tab configuration UI; `SettingRow` widget with 7 control types (toggle, slider, select, text, number, path, multiselect); requests schema from Brain via `config_schema_request`, applies changes live or marks `[↻]` restart-required |
 
 ### Infrastructure
 | Component | Technology |
 |---|---|
 | Language | Python 3.12 |
 | Package Manager | `uv` |
-| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `ZMQServer`; stdlib `socket`, no pyzmq). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). |
+| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `EventBridge`; stdlib `socket`, no pyzmq). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). **Settings wiring (Phase 8.5):** `config_schema_request` / `config_schema`, `config_update` / `config_update_result` wire events for runtime settings panel. |
 | Observability | `src/core/metrics.py` — stdlib histogram (p50/p95/p99) for latency tracking without external deps |
-| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`) |
+| Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`). **Runtime config (Phase 8.5):** `src/core/config_runtime.py` — `ConfigManager` + `ConfigObserver` + `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock. `src/core/config_schema.py` — `FIELD_META` dict for 47 user-facing fields. `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover. |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — hard/soft checks; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 820 passed, 4 skipped) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 932 collected, 925 passed, 4 skipped at last run) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)
@@ -212,7 +221,7 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | WindowListTool | `src/tools/os_actions.py` | `wmctrl -l` parse; graceful fail if absent |
 | ScreenshotTool | `src/tools/vision.py` | grim → scrot → Pillow fallback; moondream2 GGUF description; 30s idle unload; VRAM mutex with LLM |
 | Viseme extraction | `src/audio/viseme_map.py` + `src/audio/mouth.py` | 8 viseme groups; `map_phoneme()` strips stress digits; `VisemeEvent` posted per phoneme |
-| Token streaming | `src/llm/reasoning_router.py` + `src/core/zmq_server.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Godot |
+| Token streaming | `src/llm/reasoning_router.py` + `src/core/event_bridge.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Godot |
 | Config | `ToolsConfig` + `VisionConfig` in `src/core/config.py`; `tools:` + `vision:` keys in `config.yaml` | |
 
 **Tool-call flow (two-pass):** `_run_inference` → LLM generates `<tool_call>` block → `ToolExecutor.execute()` → result injected into conversation → second LLM pass → `LLMResponseReadyEvent`.
@@ -470,7 +479,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 
 ## 7. Actual Directory Structure
 
-Current state as of 2026-04-17 (Phase 7 complete):
+Current state as of 2026-04-26 (Phase 8.5 complete):
 
 ```
 Lumi/
@@ -500,8 +509,9 @@ Lumi/
 │   ├── test_state_machine.py   # All valid/invalid transition branches
 │   ├── test_tool_call_parser.py # parse_tool_calls: extraction, validation, recovery
 │   ├── test_utils.py           # play_ready_sound() unit tests
-│   ├── test_zmq_server.py      # ZMQServer: outbound events, inbound parsing, lifecycle (16 tests)
-│   ├── test_zmq_server_rag.py  # ZMQServer RAG event forwarding (9 tests)
+│   ├── test_zmq_server.py      # EventBridge (via ZMQServer shim): outbound events, inbound parsing, lifecycle (16 tests)
+│   ├── test_zmq_server_rag.py  # EventBridge RAG event forwarding (9 tests)
+│   ├── test_zmq_server_token.py # EventBridge on_llm_token() wire frame (3 tests)
 │   ├── test_rag_config.py      # RAGConfig loading and validation
 │   ├── test_rag_store.py       # DocumentStore: upsert, FTS5, kNN, WAL
 │   ├── test_rag_chunker.py     # chunk_text: overlap, edge cases
@@ -518,12 +528,35 @@ Lumi/
 │   ├── test_orchestrator_audio_wiring.py # Wake-while-speaking interrupt (3 tests)
 │   ├── test_orchestrator_recovery.py # Orchestrator: memory.save() crash → IDLE recovery (5 tests)
 │   ├── test_reasoning_router_rag.py # use_rag flag, _maybe_retrieve (7 tests)
+│   ├── test_reasoning_router_streaming.py # Token streaming path
 │   ├── test_regression.py          # 6 behavioral contract regressions (persona + state invariants)
 │   ├── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
+│   ├── test_orchestrator_tools.py  # Orchestrator tool registry wiring
 │   ├── test_tool_rag_ingest.py     # rag_ingest tool (15 tests)
+│   ├── test_tool_executor.py       # ToolExecutor: allowlist gate, timeout, cancel
+│   ├── test_tool_registry.py       # ToolRegistry: register, get, list_tools
+│   ├── test_os_actions.py          # AppLaunchTool, ClipboardTool, FileInfoTool, WindowListTool
+│   ├── test_viseme_map.py          # map_phoneme(): 8 viseme groups, stress digit stripping
+│   ├── test_mouth_visemes.py       # KokoroTTS _post_visemes() integration
+│   ├── test_vision.py              # ScreenshotTool: fallback chain, moondream2 stub
 │   ├── test_vram_mutex_concurrent.py # _VRAM_LOCK mutual exclusion under concurrency (3 tests)
+│   ├── test_logging_config.py      # setup_logging(): human-readable and JSON modes
+│   ├── test_startup_check.py       # run_startup_checks(): hard/soft checks
+│   ├── test_model_quality.py       # Automated model quality assertions (identity, tool calls, brevity)
 │   ├── test_domain_router.py       # DomainRouter.classify(): all 6 domains + general fallback (39 tests)
 │   ├── test_model_registry.py      # ModelRegistry: register, load, unload, properties (11 tests)
+│   ├── test_ears_recovery.py       # EarsErrorEvent, retry loop, orchestrator handler (6 tests)
+│   ├── test_e2e_smoke.py           # End-to-end smoke tests
+│   ├── test_kokoro_phoneme_discovery.py # Kokoro phoneme tuple format discovery
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── test_config_runtime.py  # ConfigManager, ConfigObserver, ConfigUpdateResult
+│   │   ├── test_config_writer.py   # Atomic YAML write, .bak rollover
+│   │   ├── test_event_bridge_config.py # config_schema_request/config_update wire events
+│   │   └── test_orchestrator_reconfigure.py # Live config apply via Orchestrator
+│   ├── ipc/
+│   │   ├── __init__.py
+│   │   └── test_ws_bridge.py       # WebSocket-to-TCP bridge (ws_bridge.py)
 │   └── integration/
 │       ├── __init__.py
 │       ├── fake_godot_client.py    # Test helper: real TCP client simulating Godot Body
@@ -544,8 +577,19 @@ Lumi/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py           # LumiConfig, AudioConfig, ScribeConfig, LLMConfig, TTSConfig, IPCConfig,
+│   │   │                       #   ToolsConfig, VisionConfig, PersonaConfig, RAGConfig,
 │   │   │                       #   load_config(), detect_edition()
-│   │   ├── events.py           # Frozen event types + ZMQMessage dataclass
+│   │   ├── config_runtime.py   # ConfigManager, ConfigObserver, ConfigUpdateResult;
+│   │   │                       #   live apply via dataclasses.replace(); thread-safe RLock
+│   │   ├── config_schema.py    # FIELD_META dict; UI metadata for 47 user-facing config fields
+│   │   ├── config_writer.py    # Atomic YAML write (tmp + fsync + rename), .bak rollover
+│   │   ├── event_bridge.py     # EventBridge: event translation bridge over IPCTransport;
+│   │   │                       #   Brain → Body (state_change, transcript, tts_start, tts_viseme,
+│   │   │                       #   tts_stop, llm_token, rag_retrieval, rag_status, error,
+│   │   │                       #   config_schema, config_update_result);
+│   │   │                       #   Body → Brain (interrupt, user_text, rag_set_enabled,
+│   │   │                       #   config_schema_request, config_update)
+│   │   ├── events.py           # Frozen event dataclasses + ZMQMessage wire-format type
 │   │   ├── handshake.py        # IPC version handshake (hello / hello_ack); 100% coverage
 │   │   ├── ipc_transport.py    # IPCTransport: single-client TCP server, 4-byte length-prefix framing,
 │   │   │                       #   two daemon threads (ipc-accept, ipc-recv), stdlib socket only
@@ -553,15 +597,13 @@ Lumi/
 │   │   ├── metrics.py          # Stdlib histogram module (p50/p95/p99, thread-safe); 95% coverage
 │   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling,
 │   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring,
-│   │   │                       #   ZMQServer injection, _handle_user_text handler
+│   │   │                       #   EventBridge injection, _handle_user_text handler,
+│   │   │                       #   _handle_config_schema_request, _handle_config_update
 │   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation;
 │   │   │                       #   _check_llm_package(), _check_tts_package(), _check_rag_packages()
 │   │   ├── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
 │   │   │                       #   StateMachine, InvalidTransitionError, unregister_observer()
-│   │   └── zmq_server.py       # ZMQServer: event translation bridge over IPCTransport;
-│   │                           #   Brain → Body (state_change, transcript, tts_start, tts_viseme,
-│   │                           #   tts_stop, llm_token, rag_retrieval, rag_status, error);
-│   │                           #   Body → Brain (interrupt, user_text, rag_set_enabled)
+│   │   └── zmq_server.py       # Backwards-compatibility shim: re-exports EventBridge as ZMQServer
 │   └── llm/
 │       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
 │       │                       #   ConversationMemory, ModelLoader, PromptEngine
@@ -579,6 +621,9 @@ Lumi/
 │       │                       #   posts RAGRetrievalEvent after retrieval
 │       ├── reflex_router.py    # Regex fast-path: greetings, time queries, RAG intent
 │       └── tool_call_parser.py # <tool_call> extractor + JSON recovery (parse_tool_calls)
+│   ├── ipc/
+│   │   ├── __init__.py
+│   │   └── ws_bridge.py        # WebSocket-to-TCP relay: bridges Tauri/React (WS :8765) to Brain (TCP :5555)
 │   └── rag/
 │       ├── __init__.py         # Public exports: DocumentStore, RAGRetriever, Embedder, chunk_text
 │       ├── chunker.py          # chunk_text() — sliding-window text splitting
@@ -592,24 +637,39 @@ Lumi/
 ├── ui/                         # Godot 4 frontend project
 │   ├── project.godot           # Godot project descriptor
 │   ├── assets/
-│   │   └── sprites/            # Placeholder colored-circle sprites (Phase 5); real art in Phase 6
+│   │   └── sprites/            # Placeholder colored-circle sprites (Phase 5); real art pending
 │   ├── scenes/
 │   │   ├── avatar.tscn         # AnimatedSprite2D scene
-│   │   └── main.tscn           # Root scene (wires client signals)
+│   │   ├── chat_panel.tscn     # Chat panel overlay scene
+│   │   ├── main.tscn           # Root scene (wires client signals)
+│   │   ├── setting_row.tscn    # Reusable settings row widget scene
+│   │   └── settings_panel.tscn # Settings panel scene (7 tabs, gear / Ctrl+, entry)
 │   ├── scripts/
 │   │   ├── avatar_controller.gd # Drives AnimatedSprite2D from Brain state events
-│   │   ├── citation_panel.gd   # Citation panel (latency header, query subtitle, path truncation, 8s auto-hide)
+│   │   ├── chat_panel.gd       # Chat panel: displays streamed LLM tokens and transcripts
 │   │   ├── ipc_protocol.gd     # 4-byte length-prefix frame encode/decode
 │   │   ├── lumi_client.gd      # StreamPeerTCP client with auto-reconnect (2 s retry); sends hello_ack
-│   │   ├── main.gd             # Root scene logic: wires signals, Escape → interrupt, Ctrl+R → RAG toggle
-│   │   └── rag_toggle.gd       # Green/grey RAG pill (Ctrl+R); ConfigFile persistence
+│   │   ├── main.gd             # Root scene logic: wires signals, Escape → interrupt
+│   │   ├── setting_row.gd      # SettingRow widget: 7 control types (toggle, slider, select, text, number, path, multiselect)
+│   │   └── settings_panel.gd   # Settings panel: requests config schema, applies changes, marks [↻] restart-required
+│   ├── themes/
+│   │   ├── design_tokens.json  # Design token definitions (colors, typography, spacing)
+│   │   └── lumi_dark.tres      # Godot theme resource (dark mode)
 │   ├── README.md               # Godot setup and running instructions
 │   └── TESTING.md              # Manual test checklist for Godot frontend
 ├── scripts/
+│   ├── check_config_schema.py  # CLI: print config schema fields and current values
+│   ├── doctor.py               # Pre-flight diagnostics: check deps, model files, hardware
 │   ├── eval_persona.py         # 20 prompts × 8 criteria persona eval; offline (--dry-run) + live (--live) modes
 │   ├── ingest_docs.py          # CLI: chunk + embed + store personal documents into RAG store
 │   ├── measure_base_latency.py # Benchmark: LLM-only p95 gate (< 1.7 s; Phase 7 entry gate)
-│   └── measure_rag_latency.py  # Benchmark: retrieval+LLM p95 gate (< 2.0 s)
+│   ├── measure_rag_latency.py  # Benchmark: retrieval+LLM p95 gate (< 2.0 s)
+│   ├── run_lumi.sh             # Shell launcher: sets up env and starts Python Brain
+│   ├── setup_wizard.py         # Guided first-run configuration wizard
+│   ├── smoke_live.py           # Manual smoke test: real microphone + live model (requires hardware)
+│   ├── smoke_test_voice.py     # Voice pipeline smoke test
+│   ├── synth_dataset.py        # Synthetic training data generation for fine-tuning
+│   └── train_lumi.py           # QLoRA fine-tune entrypoint (SFTTrainer; requires ≥8 GB VRAM)
 ├── config.yaml                 # Runtime configuration (all keys optional, defaults in config.py)
 ├── ARCHITECTURE.md             # This file
 ├── README.md
@@ -622,8 +682,7 @@ Planned additions (not yet created):
 
 ```
 scripts/
-├── train_lumi.py               # QLoRA training entrypoint (Phase 3+; blocked on ≥8 GB VRAM GPU)
-└── merge_lora.py               # Adapter merge + GGUF export (Phase 3+; blocked on train_lumi.py)
+└── merge_lora.py               # Adapter merge + GGUF export (Phase 3+; blocked on train_lumi.py Wave H3)
 ```
 
 ---
@@ -672,9 +731,9 @@ scripts/
 - [x] Replace `print()` → `logger.info()` in `src/audio/scribe.py`
 - [x] `Orchestrator._handle_transcript()` — reflex fast-path + reasoning daemon thread wired
 
-**Remaining:**
-- [ ] Coverage gate ≥80% on all `src/llm/` and `src/core/` modules (Wave 4)
-- [ ] Full code review (Wave 4)
+**Wave 4 — COMPLETE:**
+- [x] Coverage gate ≥80% on all `src/llm/` and `src/core/` modules (88% overall; see TODO item 18)
+- [x] Full code review (Wave B1, 2026-04-19)
 
 ### Phase 4: The Mouth (TTS) — COMPLETE
 *Goal: High-quality voice response without GPU.*
@@ -688,11 +747,11 @@ scripts/
 *Goal: Transparent, interactive desktop overlay + IPC transport to Python Brain.*
 
 - [x] `src/core/ipc_transport.py` — raw TCP server, 4-byte big-endian length prefix, single-client, two daemon threads
-- [x] `src/core/zmq_server.py` — event translation bridge: internal events ↔ JSON wire protocol
+- [x] `src/core/event_bridge.py` (`EventBridge`) — event translation bridge: internal events ↔ JSON wire protocol
 - [x] `src/core/state_machine.py` — `unregister_observer()` added
 - [x] `src/core/config.py` — `IPCConfig.enabled` field added (default `false`)
-- [x] `src/core/orchestrator.py` — ZMQServer injection, `_handle_user_text` handler, shutdown cleanup
-- [x] `src/main.py` — ZMQServer auto-created when `config.ipc.enabled = true`
+- [x] `src/core/orchestrator.py` — EventBridge injection, `_handle_user_text` handler, shutdown cleanup
+- [x] `src/main.py` — EventBridge auto-created when `config.ipc.enabled = true`
 - [x] Godot 4 frontend scaffold (`ui/`) — transparent 200×200 borderless overlay, `StreamPeerTCP` client, avatar controller, IPC protocol GDScript
 - [x] `tests/test_ipc_transport.py` — 7 tests
 - [x] `tests/test_zmq_server.py` — 16 tests
@@ -709,7 +768,7 @@ scripts/
 - [x] LLM token streaming — `LLMTokenEvent` per token; `llm_token` wire frame to Godot
 - [x] Viseme extraction — `src/audio/viseme_map.py` (8 groups); `VisemeEvent` posted from `mouth.py`
 - [x] Orchestrator two-pass tool-call loop + `utterance_id` threading
-- [x] Godot: `text_bubble.gd`/`.tscn` for streaming display; per-viseme-group mouth animations
+- [x] Godot: `chat_panel.gd`/`chat_panel.tscn` for streaming display; per-viseme-group mouth animations
 - [x] 534 tests passing, 4 skipped; `vision.py` at 86% coverage
 - [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
 - [ ] LightRAG Option A (deferred to Phase 7)
@@ -731,12 +790,25 @@ scripts/
 - [x] `src/llm/reflex_router.py` — `route_rag_intent()` for intent detection
 - [x] `src/core/events.py` — `RAGRetrievalEvent`, `RAGStatusEvent`, `RAGSetEnabledEvent`
 - [x] `src/core/orchestrator.py` — RAGRetriever at startup; intent check; `_handle_rag_set_enabled()`
-- [x] `src/core/zmq_server.py` — `on_rag_retrieval()`, `on_rag_status()` outbound; `rag_set_enabled` inbound
+- [x] `src/core/event_bridge.py` (`EventBridge`) — `on_rag_retrieval()`, `on_rag_status()` outbound; `rag_set_enabled` inbound
 - [x] `src/core/config.py` — `RAGConfig` added to `LumiConfig`
 - [x] `scripts/ingest_docs.py` — CLI to chunk, embed, and store documents
 - [x] `scripts/measure_rag_latency.py` — end-to-end latency benchmark (gate: p95 < 2.0 s)
 - [x] Base latency gate: p95 = 0.431 s (threshold 1.7 s) — PASS
 - [x] 534 tests passing, 4 skipped
 - [x] RAG disabled by default (`config.rag.enabled: false`)
-- [ ] Godot citation panel UI (deferred — Wave 4 Godot)
 - [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
+
+### Phase 8.5: Settings UI (Runtime Config) — COMPLETE
+*Goal: Users can configure Lumi at runtime without restarting, via the Godot overlay.*
+
+- [x] `src/core/config_runtime.py` — `ConfigManager`, `ConfigObserver`, `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock
+- [x] `src/core/config_schema.py` — `FIELD_META` dict; 47 user-facing fields with control type, min/max, restart_required metadata
+- [x] `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover
+- [x] `src/core/event_bridge.py` — `config_schema_request` / `config_schema` / `config_update` / `config_update_result` wire events wired
+- [x] `src/core/events.py` — `ConfigSchemaRequestEvent`, `ConfigUpdateEvent` added
+- [x] `src/core/orchestrator.py` — `_handle_config_schema_request()`, `_handle_config_update()` handlers
+- [x] `ui/scenes/settings_panel.tscn` + `ui/scripts/settings_panel.gd` — gear icon / Ctrl+, entry; 7 tabs
+- [x] `ui/scenes/setting_row.tscn` + `ui/scripts/setting_row.gd` — `SettingRow` widget, 7 control types
+- [x] `scripts/setup_wizard.py` — guided first-run configuration wizard
+- [x] `tests/core/` — `test_config_runtime.py`, `test_config_writer.py`, `test_event_bridge_config.py`, `test_orchestrator_reconfigure.py`

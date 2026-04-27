@@ -40,6 +40,8 @@ from typing import Any
 
 from src.core.config import IPCConfig
 from src.core.events import (
+    ConfigSchemaRequestEvent,
+    ConfigUpdateEvent,
     InterruptEvent,
     LLMResponseReadyEvent,
     LLMTokenEvent,
@@ -245,6 +247,52 @@ class EventBridge:
         payload: dict[str, Any] = {"code": code, "message": message}
         self._send("error", payload)
 
+    def send_config_schema(
+        self,
+        fields: dict[str, Any],
+        current_values: dict[str, Any],
+    ) -> None:
+        """Send the full config schema and current values to Godot.
+
+        Called by the orchestrator (or a dedicated handler) after it receives
+        a ``ConfigSchemaRequestEvent``.  The ``fields`` dict mirrors the
+        structure of ``FIELD_META`` from ``config_schema.py``; ``current_values``
+        maps the same dotted-path keys to their live values.
+
+        Args:
+            fields:         Schema metadata keyed by dotted config path.
+            current_values: Current runtime values keyed by dotted config path.
+        """
+        payload: dict[str, Any] = {
+            "fields": fields,
+            "current_values": current_values,
+        }
+        self._send("config_schema", payload)
+
+    def send_config_update_result(
+        self,
+        applied_live: list[str],
+        pending_restart: list[str],
+        errors: dict[str, str],
+    ) -> None:
+        """Send the result of a ``config_update`` back to Godot.
+
+        Called by the orchestrator after it processes a ``ConfigUpdateEvent``
+        through ``ConfigManager.apply()``.
+
+        Args:
+            applied_live:    Keys applied immediately without a restart.
+            pending_restart: Keys whose changes take effect after a restart.
+            errors:          Dotted-path key → human-readable error for any
+                             rejected change.
+        """
+        payload: dict[str, Any] = {
+            "applied_live": applied_live,
+            "pending_restart": pending_restart,
+            "errors": errors,
+        }
+        self._send("config_update_result", payload)
+
     # ------------------------------------------------------------------
     # Inbound handling (Body → Brain)
     # ------------------------------------------------------------------
@@ -270,6 +318,10 @@ class EventBridge:
             self._handle_user_text(msg.payload)
         elif event_name == "rag_set_enabled":
             self._handle_rag_set_enabled(msg.payload)
+        elif event_name == "config_schema_request":
+            self._handle_config_schema_request(msg.payload)
+        elif event_name == "config_update":
+            self._handle_config_update(msg.payload)
         else:
             logger.warning(
                 "EventBridge: received unknown inbound event %r; dropping.", event_name
@@ -321,6 +373,79 @@ class EventBridge:
 
         self._event_queue.put(UserTextEvent(text=text))
         logger.debug("EventBridge: posted UserTextEvent(text=%r) to queue.", text)
+
+    def _handle_config_schema_request(self, payload: dict[str, Any]) -> None:
+        """Post a ConfigSchemaRequestEvent to the orchestrator queue.
+
+        The payload for ``config_schema_request`` is always an empty dict;
+        no validation is required — the event carries no data.
+
+        Args:
+            payload: Wire payload (ignored; event carries no parameters).
+        """
+        self._event_queue.put(ConfigSchemaRequestEvent())
+        logger.debug("EventBridge: posted ConfigSchemaRequestEvent to queue.")
+
+    # Fields that must never be changed over the IPC wire.  Allowing a
+    # compromised Godot client to mutate these could redirect the IPC socket
+    # to listen on 0.0.0.0 (network-exposed) or change the port in ways that
+    # break the local-only security boundary.  These fields require a deliberate
+    # edit of config.yaml by the user, not a remote wire command.
+    _WIRE_BLOCKED_KEYS: frozenset[str] = frozenset(
+        [
+            "ipc.address",
+            "ipc.port",
+            "ipc.enabled",
+        ]
+    )
+
+    def _handle_config_update(self, payload: dict[str, Any]) -> None:
+        """Validate and post a ConfigUpdateEvent to the orchestrator queue.
+
+        Validation rules:
+        - ``changes`` must be present and must be a ``dict``.
+        - ``persist`` must be present and must be a ``bool``.
+        - ``changes`` must not contain IPC binding keys (``ipc.address``,
+          ``ipc.port``, ``ipc.enabled``).  Allowing those over the wire would
+          let a compromised client open the IPC socket to the network.
+
+        Args:
+            payload: Wire payload; must contain ``"changes"`` (dict) and
+                     ``"persist"`` (bool).
+        """
+        changes = payload.get("changes")
+        persist = payload.get("persist", False)
+
+        if not isinstance(changes, dict):
+            logger.warning(
+                "EventBridge: config_update payload missing or invalid 'changes'; "
+                "dropping. payload=%r",
+                payload,
+            )
+            return
+
+        if not isinstance(persist, bool):
+            logger.warning(
+                "EventBridge: config_update 'persist' must be bool; "
+                "dropping. payload=%r",
+                payload,
+            )
+            return
+
+        # Reject any attempt to mutate IPC binding fields over the wire.
+        blocked = self._WIRE_BLOCKED_KEYS.intersection(changes.keys())
+        if blocked:
+            logger.warning(
+                "EventBridge: config_update attempted to mutate restricted IPC "
+                "field(s) %r over the wire; dropping entire request.",
+                sorted(blocked),
+            )
+            return
+
+        self._event_queue.put(ConfigUpdateEvent(changes=changes, persist=persist))
+        logger.debug(
+            "EventBridge: posted ConfigUpdateEvent(persist=%s) to queue.", persist
+        )
 
     # ------------------------------------------------------------------
     # Wire encoding / decoding

@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import queue
 import threading
@@ -24,7 +25,11 @@ from src.audio.mouth import KokoroTTS
 from src.audio.scribe import Scribe
 from src.audio.speaker import SpeakerThread
 from src.core.config import LumiConfig
+from src.core.config_runtime import ConfigManager, ConfigUpdateResult
+from src.core.config_schema import FIELD_META
 from src.core.events import (
+    ConfigSchemaRequestEvent,
+    ConfigUpdateEvent,
     EarsErrorEvent,
     InterruptEvent,
     LLMResponseReadyEvent,
@@ -53,6 +58,48 @@ from src.llm.reflex_router import ReflexRouter
 logger = logging.getLogger(__name__)
 
 
+def _flatten_config(config: LumiConfig) -> dict[str, Any]:
+    """Flatten LumiConfig into a dotted-path key → value dict.
+
+    Produces a dict whose keys match those in ``FIELD_META`` (from
+    ``src.core.config_schema``).  Sub-config section fields are prefixed with
+    ``"<section>."``; top-level scalars use their bare field name.
+
+    Tuple-valued fields (e.g. ``tools.allowed_tools``) are converted to
+    ``list`` so the result is JSON-serialisable.
+
+    Args:
+        config: The ``LumiConfig`` instance to flatten.
+
+    Returns:
+        A flat ``dict[str, Any]`` of dotted-path keys to current values.
+    """
+    result: dict[str, Any] = {
+        "edition": config.edition,
+        "log_level": config.log_level,
+        "json_logs": config.json_logs,
+    }
+    sections: dict[str, Any] = {
+        "audio": config.audio,
+        "scribe": config.scribe,
+        "llm": config.llm,
+        "tts": config.tts,
+        "ipc": config.ipc,
+        "tools": config.tools,
+        "vision": config.vision,
+        "rag": config.rag,
+        "persona": config.persona,
+    }
+    for section_name, section_obj in sections.items():
+        for f in dataclasses.fields(section_obj):
+            val = getattr(section_obj, f.name)
+            # Convert tuple → list for JSON serialisability.
+            if isinstance(val, tuple):
+                val = list(val)
+            result[f"{section_name}.{f.name}"] = val
+    return result
+
+
 class Orchestrator:
     """Central coordinator that consumes events and dispatches to handlers.
 
@@ -71,6 +118,7 @@ class Orchestrator:
         scribe: Scribe | None = None,
     ) -> None:
         self._config: LumiConfig = config
+        self._config_manager: ConfigManager = ConfigManager(config)
         self._event_queue: queue.Queue[Any] = queue.Queue()
         self._state_machine: StateMachine = StateMachine()
         self._shutdown: bool = False
@@ -175,6 +223,8 @@ class Orchestrator:
         self.register_handler(SpeechCompletedEvent, self._handle_speech_completed)
         self.register_handler(UserTextEvent, self._handle_user_text)
         self.register_handler(RAGSetEnabledEvent, self._handle_rag_set_enabled)
+        self.register_handler(ConfigSchemaRequestEvent, self._handle_config_schema_request)
+        self.register_handler(ConfigUpdateEvent, self._handle_config_update)
 
         # EventBridge wiring — optional; injected for testing or when IPC is
         # enabled.  If not injected but config.ipc.enabled is True, create it
@@ -295,7 +345,10 @@ class Orchestrator:
         Args:
             event: The transcript event containing the user's spoken text.
         """
-        self._state_machine.transition_to(LumiState.PROCESSING)
+        # _handle_recording_complete already transitioned to PROCESSING when it
+        # started the Scribe thread; only advance if we somehow arrive from LISTENING.
+        if self._state_machine.current_state != LumiState.PROCESSING:
+            self._state_machine.transition_to(LumiState.PROCESSING)
         self._dispatch_user_turn(event.text, source="transcript")
 
     def _handle_user_text(self, event: UserTextEvent) -> None:
@@ -373,6 +426,10 @@ class Orchestrator:
         # remains responsive to InterruptEvents during long inference.
         def _run_inference() -> None:
             try:
+                # Lazy-load the model on first inference call.
+                if not self._model_loader.is_loaded:
+                    logger.info("Loading LLM model on first inference request...")
+                    self._model_loader.load(self._config.llm)
                 response = self._reasoning_router.generate(
                     text, self._llm_cancel_flag,
                     utterance_id=utterance_id, use_rag=use_rag,
@@ -526,6 +583,45 @@ class Orchestrator:
             return
         self._rag_runtime_enabled = event.enabled
         logger.info("RAG runtime enabled set to %s", event.enabled)
+
+    def _handle_config_schema_request(self, event: ConfigSchemaRequestEvent) -> None:
+        """Handle ConfigSchemaRequestEvent: send the full config schema + current values.
+
+        Builds a flat dotted-path dict from the current ``LumiConfig`` and
+        forwards it — along with ``FIELD_META`` — to the Godot frontend via
+        ``EventBridge.send_config_schema()``.  If no ZMQ server is connected
+        the handler returns silently.
+
+        Args:
+            event: The schema-request event (carries no payload).
+        """
+        if self._zmq_server is None:
+            return
+        current = self._config_manager.current
+        current_values = _flatten_config(current)
+        self._zmq_server.send_config_schema(FIELD_META, current_values)
+
+    def _handle_config_update(self, event: ConfigUpdateEvent) -> None:
+        """Handle ConfigUpdateEvent: apply config changes and report results.
+
+        Delegates to ``ConfigManager.apply()`` for validation, live-apply, and
+        optional persistence.  The resulting ``ConfigUpdateResult`` is forwarded
+        to the Godot frontend via ``EventBridge.send_config_update_result()``.
+        If no ZMQ server is connected the config is still applied but the
+        result is not forwarded (silent success).
+
+        Args:
+            event: The config-update event carrying ``changes`` and ``persist``.
+        """
+        result: ConfigUpdateResult = self._config_manager.apply(
+            event.changes, persist=event.persist
+        )
+        if self._zmq_server is not None:
+            self._zmq_server.send_config_update_result(
+                applied_live=result.applied_live,
+                pending_restart=result.pending_restart,
+                errors=result.errors,
+            )
 
     def _handle_wake_detected(self, event: WakeDetectedEvent) -> None:
         """Handle WakeDetectedEvent: transition to LISTENING.

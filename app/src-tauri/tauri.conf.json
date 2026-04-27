@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lumi",
+  "version": "0.1.0",
+  "identifier": "com.lumi.assistant",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "overlay",
+        "title": "Lumi",
+        "url": "index.html",
+        "width": 160,
+        "height": 260,
+        "minWidth": 160,
+        "minHeight": 260,
+        "maxWidth": 160,
+        "maxHeight": 260,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "center": false,
+        "x": 40,
+        "y": 40,
+        "visible": true,
+        "focus": true,
+        "shadow": false
+      },
+      {
+        "label": "chat",
+        "title": "Lumi — Chat",
+        "url": "index.html?window=chat",
+        "width": 380,
+        "height": 540,
+        "minWidth": 320,
+        "minHeight": 400,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
+      },
+      {
+        "label": "settings",
+        "title": "Lumi — Settings",
+        "url": "index.html?window=settings",
+        "width": 680,
+        "height": 540,
+        "minWidth": 600,
+        "minHeight": 480,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}
