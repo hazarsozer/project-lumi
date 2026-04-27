@@ -18,21 +18,44 @@ from __future__ import annotations
 
 PHONEME_TO_VISEME: dict[str, str] = {
     # open
-    "AH": "open", "AA": "open", "AE": "open",
+    "AH": "open",
+    "AA": "open",
+    "AE": "open",
     # narrow
-    "IH": "narrow", "IY": "narrow", "EH": "narrow", "EY": "narrow",
+    "IH": "narrow",
+    "IY": "narrow",
+    "EH": "narrow",
+    "EY": "narrow",
     # round
-    "OW": "round", "UH": "round", "UW": "round", "AO": "round",
+    "OW": "round",
+    "UH": "round",
+    "UW": "round",
+    "AO": "round",
     # wide (diphthongs)
-    "AW": "wide", "AY": "wide", "OY": "wide",
+    "AW": "wide",
+    "AY": "wide",
+    "OY": "wide",
     # teeth (sibilants)
-    "S": "teeth", "Z": "teeth", "SH": "teeth", "ZH": "teeth",
-    "CH": "teeth", "JH": "teeth",
+    "S": "teeth",
+    "Z": "teeth",
+    "SH": "teeth",
+    "ZH": "teeth",
+    "CH": "teeth",
+    "JH": "teeth",
     # tongue
-    "T": "tongue", "D": "tongue", "N": "tongue", "L": "tongue",
-    "R": "tongue", "ER": "tongue",
+    "T": "tongue",
+    "D": "tongue",
+    "N": "tongue",
+    "L": "tongue",
+    "R": "tongue",
+    "ER": "tongue",
     # lips
-    "P": "lips", "B": "lips", "M": "lips", "F": "lips", "V": "lips", "W": "lips",
+    "P": "lips",
+    "B": "lips",
+    "M": "lips",
+    "F": "lips",
+    "V": "lips",
+    "W": "lips",
 }
 
 _VALID_VISEMES: frozenset[str] = frozenset(

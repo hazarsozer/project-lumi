@@ -23,43 +23,44 @@ Usage:
 """
 
 import logging
-import sounddevice as sd
-import numpy as np
-import openwakeword
-from openwakeword.model import Model
-from openwakeword.vad import VAD
-import threading
 import queue
+import threading
 import time as _time
 
-from src.core.events import EarsErrorEvent, WakeDetectedEvent, RecordingCompleteEvent
+import numpy as np
+import sounddevice as sd
+from openwakeword.model import Model
+from openwakeword.vad import VAD
+
+from src.core.events import EarsErrorEvent, WakeDetectedEvent
 
 logger = logging.getLogger(__name__)
 
-#Constants
+# Constants
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280
 
-_MAX_RETRIES = 3       # InputStream open/run failures before giving up
+_MAX_RETRIES = 3  # InputStream open/run failures before giving up
 _RETRY_DELAY_S = 0.25  # seconds to wait between retries
+
 
 class Ears:
     def __init__(self, sensitivity: float = 0.5, model_paths: list[str] = None):
-        '''
+        """
         Implementation of the threaded microphone listener.
         Args:
             sensitivity: The sensitivity of the wake word detector.
             model_paths: Optional list of paths to wake word models.
-        '''
+        """
 
         self.sensitivity = sensitivity
         self.listening = False
         self._event_queue: queue.Queue | None = None
 
-        #The buffer
+        # The buffer
         self.audio_queue = queue.Queue()
 
-        #The model
+        # The model
         logger.info("Loading the model...")
 
         # Work around the installed openwakeword version where AudioFeatures.__init__
@@ -71,7 +72,10 @@ class Ears:
             original_init = AudioFeatures.__init__
 
             # Only patch if the current signature doesn't already accept the kwarg
-            if hasattr(original_init, "__code__") and "inference_framework" not in original_init.__code__.co_varnames:
+            if (
+                hasattr(original_init, "__code__")
+                and "inference_framework" not in original_init.__code__.co_varnames
+            ):
 
                 def _patched_audiofeatures_init(self, *args, **kwargs):
                     # Drop unsupported kwarg and delegate to original initializer
@@ -80,11 +84,14 @@ class Ears:
 
                 AudioFeatures.__init__ = _patched_audiofeatures_init  # type: ignore[assignment]
         except Exception as e:
-            logger.warning("Could not apply openwakeword AudioFeatures compatibility patch: %s", e)
+            logger.warning(
+                "Could not apply openwakeword AudioFeatures compatibility patch: %s", e
+            )
 
         # If no model paths are provided, try to use the custom hey_lumi model if it exists
         if model_paths is None:
             import os
+
             custom_model = "models/hey_lumi.onnx"
             if os.path.exists(custom_model):
                 model_paths = [custom_model]
@@ -93,7 +100,10 @@ class Ears:
 
         # Instantiate the wake word model (will lazily download resources if needed)
         self.model = Model(wakeword_model_paths=model_paths, inference_framework="onnx")
-        logger.info("Model loaded successfully. Active models: %s", list(self.model.models.keys()))
+        logger.info(
+            "Model loaded successfully. Active models: %s",
+            list(self.model.models.keys()),
+        )
 
         # Initialize VAD
         self.vad = VAD()
@@ -102,9 +112,9 @@ class Ears:
         self._cooldown_until = 0.0
 
     def _mic_callback(self, indata, frames, time, status):
-        '''
+        """
         Callback function for the microphone.
-        '''
+        """
 
         if status:
             logger.warning("Microphone status: %s", status)
@@ -112,14 +122,14 @@ class Ears:
         self.audio_queue.put(indata.copy())
 
     def record_command_with_vad(self, timeout=10.0, silence_limit=1.5):
-        '''
+        """
         Records audio from the queue until VAD detects silence or timeout is reached.
         Args:
             timeout: Maximum recording time in seconds.
             silence_limit: How many seconds of silence to wait before stopping.
         Returns:
             The recorded audio as a numpy array.
-        '''
+        """
         recorded_chunks = []
 
         start_time = _time.monotonic()
@@ -161,20 +171,20 @@ class Ears:
 
         if not recorded_chunks:
             return np.array([], dtype=np.int16)
-        
+
         return np.concatenate(recorded_chunks)
 
     def _consumer_loop(self):
-        '''
+        """
         This runs in the background thread and processes the audio data.
         Posts WakeDetectedEvent to the event queue on wake word detection.
 
         Transient InputStream failures (PortAudioError, USB hiccups) are
         retried up to _MAX_RETRIES times with a short delay between attempts.
         On exhaustion, EarsErrorEvent is posted and the thread exits cleanly.
-        '''
+        """
 
-        logger.info('Ears: starting listening...')
+        logger.info("Ears: starting listening...")
         _time.sleep(0)  # yield GIL so caller's post-start assertions run first
 
         retries = 0
@@ -211,12 +221,19 @@ class Ears:
                         try:
                             predictions = self.model.predict(chunk)
                         except Exception:
-                            logger.warning("Ears: model.predict() failed on chunk; skipping", exc_info=True)
+                            logger.warning(
+                                "Ears: model.predict() failed on chunk; skipping",
+                                exc_info=True,
+                            )
                             continue
 
                         for model_name, score in predictions.items():
                             if score > self.sensitivity:
-                                logger.info("Wake word detected: %s with score %s", model_name, score)
+                                logger.info(
+                                    "Wake word detected: %s with score %s",
+                                    model_name,
+                                    score,
+                                )
 
                                 if self._event_queue is not None:
                                     self._event_queue.put(
@@ -237,19 +254,26 @@ class Ears:
                 retries += 1
                 logger.warning(
                     "Ears: PortAudioError (attempt %d/%d); retrying in %.2fs",
-                    retries, _MAX_RETRIES, _RETRY_DELAY_S,
+                    retries,
+                    _MAX_RETRIES,
+                    _RETRY_DELAY_S,
                 )
                 _time.sleep(_RETRY_DELAY_S)
             except Exception:
                 retries += 1
                 logger.exception(
                     "Ears: unexpected error in capture loop (attempt %d/%d); retrying in %.2fs",
-                    retries, _MAX_RETRIES, _RETRY_DELAY_S,
+                    retries,
+                    _MAX_RETRIES,
+                    _RETRY_DELAY_S,
                 )
                 _time.sleep(_RETRY_DELAY_S)
 
         if self.listening and retries > _MAX_RETRIES:
-            logger.error("Ears: audio capture failed after %d retries; posting EarsErrorEvent", _MAX_RETRIES)
+            logger.error(
+                "Ears: audio capture failed after %d retries; posting EarsErrorEvent",
+                _MAX_RETRIES,
+            )
             if self._event_queue is not None:
                 self._event_queue.put(
                     EarsErrorEvent(
@@ -259,35 +283,37 @@ class Ears:
                 )
 
     def start(self, event_queue: queue.Queue) -> None:
-        '''
+        """
         Start the listener in a separate thread.
         Args:
             event_queue: The central event queue for posting wake/recording events.
-        '''
+        """
         self._event_queue = event_queue
         self.listening = True
 
-        #Creating a new thread for the consumer loop
+        # Creating a new thread for the consumer loop
         self.thread = threading.Thread(
             target=self._consumer_loop,
             daemon=True,
         )
 
-        #Starting the thread
+        # Starting the thread
         self.thread.start()
 
     def stop(self):
-        '''
+        """
         Stop the listener.
-        '''
+        """
         self.listening = False
-        if hasattr(self, 'thread'):
+        if hasattr(self, "thread"):
             self.thread.join()
 
-#Testing
+
+# Testing
 if __name__ == "__main__":
-    import time as _time_main
     import logging as _logging_main
+    import time as _time_main
+
     _logging_main.basicConfig(level=_logging_main.DEBUG)
     _main_logger = _logging_main.getLogger(__name__)
 
@@ -304,4 +330,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         _main_logger.info("Stopping ears...")
         ears.stop()
-

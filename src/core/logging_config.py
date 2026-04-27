@@ -15,7 +15,6 @@ import json
 import logging
 import traceback
 
-
 # Module-level guard: prevents duplicate handler registration on repeated calls.
 _LOGGING_CONFIGURED: bool = False
 

@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 HELLO_VERSION: str = "1.0"
 HELLO_CAPABILITIES: list[str] = ["tts", "rag", "tools"]
-HANDSHAKE_TIMEOUT_S: float = 3.0   # Seconds to wait for hello_ack before warning
+HANDSHAKE_TIMEOUT_S: float = 3.0  # Seconds to wait for hello_ack before warning
 
 
 # ---------------------------------------------------------------------------

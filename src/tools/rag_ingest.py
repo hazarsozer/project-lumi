@@ -43,8 +43,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from src.core.config import RAGConfig
 from src.core.events import ToolResultEvent
@@ -135,9 +136,7 @@ class RagIngestTool:
         # --- Security: reject path traversal ---
         path = Path(raw_path)
         if ".." in path.parts:
-            logger.warning(
-                "RagIngestTool: path traversal rejected for '%s'.", raw_path
-            )
+            logger.warning("RagIngestTool: path traversal rejected for '%s'.", raw_path)
             return ToolResult(
                 success=False,
                 output=f"Invalid path (traversal not allowed): {raw_path}",
@@ -146,9 +145,7 @@ class RagIngestTool:
 
         # --- Existence check ---
         if not path.exists():
-            logger.warning(
-                "RagIngestTool: path does not exist: '%s'.", raw_path
-            )
+            logger.warning("RagIngestTool: path does not exist: '%s'.", raw_path)
             return ToolResult(
                 success=False,
                 output=f"Path does not exist: {raw_path}",
@@ -180,7 +177,9 @@ class RagIngestTool:
         try:
             stats = self._run_ingest(path)
         except Exception as exc:  # noqa: BLE001
-            logger.error("RagIngestTool: ingest failed with %s: %s.", type(exc).__name__, exc)
+            logger.error(
+                "RagIngestTool: ingest failed with %s: %s.", type(exc).__name__, exc
+            )
             return ToolResult(
                 success=False,
                 output=str(exc),
@@ -294,7 +293,11 @@ class RagIngestTool:
         store.set_last_indexed(time.time())
         store.close()
 
-        return {"docs_indexed": docs_indexed, "chunks_total": chunks_total, "errors": errors}
+        return {
+            "docs_indexed": docs_indexed,
+            "chunks_total": chunks_total,
+            "errors": errors,
+        }
 
     @staticmethod
     def _sha256(path: Path) -> str:
@@ -347,7 +350,7 @@ class RagIngestTool:
         doc_record = store.upsert_document(str(path), sha256)
         store.delete_document_chunks(doc_record.id)
 
-        for chunk, embedding in zip(chunks, embeddings):
+        for chunk, embedding in zip(chunks, embeddings, strict=False):
             chunk_record = store.insert_chunk(
                 document_id=doc_record.id,
                 chunk_idx=chunk.chunk_idx,

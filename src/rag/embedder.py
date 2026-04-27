@@ -15,12 +15,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
 # Module-level cache: model_name → Embedder instance.
-_instances: dict[str, "Embedder"] = {}
+_instances: dict[str, Embedder] = {}
 _instances_lock = threading.Lock()
 
 
@@ -40,7 +39,9 @@ class Embedder:
         if self._model is not None:
             return
         logger.info("Loading embedding model '%s' (CPU) ...", self._model_name)
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
+        from sentence_transformers import (
+            SentenceTransformer,  # type: ignore[import-untyped]
+        )
 
         self._model = SentenceTransformer(self._model_name, device="cpu")
         logger.info("Embedding model loaded.")

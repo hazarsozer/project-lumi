@@ -18,7 +18,8 @@ import logging
 import queue
 import threading
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from src.audio.ears import Ears
 from src.audio.mouth import KokoroTTS
@@ -27,6 +28,7 @@ from src.audio.speaker import SpeakerThread
 from src.core.config import LumiConfig
 from src.core.config_runtime import ConfigManager, ConfigUpdateResult
 from src.core.config_schema import FIELD_META
+from src.core.event_bridge import EventBridge
 from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
@@ -44,16 +46,20 @@ from src.core.events import (
     VisemeEvent,
     WakeDetectedEvent,
 )
-from src.llm.tool_call_parser import parse_tool_calls
-from src.tools import ToolExecutor, ToolRegistry
-from src.tools.os_actions import AppLaunchTool, ClipboardTool, FileInfoTool, WindowListTool
 from src.core.state_machine import LumiState, StateMachine
-from src.core.event_bridge import EventBridge
 from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
 from src.llm.reasoning_router import ReasoningRouter
 from src.llm.reflex_router import ReflexRouter
+from src.llm.tool_call_parser import parse_tool_calls
+from src.tools import ToolExecutor, ToolRegistry
+from src.tools.os_actions import (
+    AppLaunchTool,
+    ClipboardTool,
+    FileInfoTool,
+    WindowListTool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,17 +145,16 @@ class Orchestrator:
         self._reflex_router: ReflexRouter = ReflexRouter()
         self._model_loader: ModelLoader = ModelLoader()
         self._prompt_engine: PromptEngine = PromptEngine()
-        self._memory: ConversationMemory = ConversationMemory(
-            config.llm.memory_dir
-        )
+        self._memory: ConversationMemory = ConversationMemory(config.llm.memory_dir)
         self._memory.load()
         # RAG subsystem — built only when enabled in config.
         self._rag_runtime_enabled: bool = config.rag.enabled
         self._rag_retriever = None
         if config.rag.enabled:
             try:
-                from src.rag.store import DocumentStore  # noqa: PLC0415
                 from src.rag.retriever import RAGRetriever  # noqa: PLC0415
+                from src.rag.store import DocumentStore  # noqa: PLC0415
+
                 _rag_store = DocumentStore(config.rag)
                 self._rag_retriever = RAGRetriever(_rag_store, config.rag)
                 logger.info("RAG subsystem initialised (db=%s)", config.rag.db_path)
@@ -177,6 +182,7 @@ class Orchestrator:
         # Register ScreenshotTool if vision is enabled.
         if config.vision.enabled:
             from src.tools.vision import ScreenshotTool  # noqa: PLC0415
+
             self._tool_registry.register(
                 ScreenshotTool(
                     config=config.vision,
@@ -223,7 +229,9 @@ class Orchestrator:
         self.register_handler(SpeechCompletedEvent, self._handle_speech_completed)
         self.register_handler(UserTextEvent, self._handle_user_text)
         self.register_handler(RAGSetEnabledEvent, self._handle_rag_set_enabled)
-        self.register_handler(ConfigSchemaRequestEvent, self._handle_config_schema_request)
+        self.register_handler(
+            ConfigSchemaRequestEvent, self._handle_config_schema_request
+        )
         self.register_handler(ConfigUpdateEvent, self._handle_config_update)
 
         # EventBridge wiring — optional; injected for testing or when IPC is
@@ -248,9 +256,7 @@ class Orchestrator:
             # instances EventBridge.__init__ already registered, so we avoid
             # double registration by only registering for the injected path.
             if zmq_server is not None:
-                self._state_machine.register_observer(
-                    self._zmq_server.on_state_change
-                )
+                self._state_machine.register_observer(self._zmq_server.on_state_change)
             self.register_handler(VisemeEvent, self._zmq_server.on_tts_viseme)
             self.register_handler(SpeechCompletedEvent, self._zmq_server.on_tts_stop)
             self.register_handler(TranscriptReadyEvent, self._zmq_server.on_transcript)
@@ -276,9 +282,7 @@ class Orchestrator:
         """
         self._event_queue.put(event)
 
-    def register_handler(
-        self, event_type: type, handler: Callable[..., None]
-    ) -> None:
+    def register_handler(self, event_type: type, handler: Callable[..., None]) -> None:
         """Register a handler for a specific event type.
 
         Multiple handlers may be registered for the same event type;
@@ -320,9 +324,7 @@ class Orchestrator:
         handlers = self._handlers.get(event_type, [])
 
         if not handlers:
-            logger.debug(
-                "No handler registered for %s", event_type.__name__
-            )
+            logger.debug("No handler registered for %s", event_type.__name__)
             return
 
         for handler in handlers:
@@ -369,9 +371,7 @@ class Orchestrator:
         """
         current = self._state_machine.current_state
         if current not in (LumiState.IDLE, LumiState.LISTENING):
-            logger.debug(
-                "UserTextEvent received in state %s; dropping.", current.value
-            )
+            logger.debug("UserTextEvent received in state %s; dropping.", current.value)
             return
 
         # Text input bypasses the wake-word pipeline.  If we are IDLE, step
@@ -417,9 +417,8 @@ class Orchestrator:
         utterance_id = str(uuid.uuid4())
 
         # RAG intent check — only when RAG is runtime-enabled.
-        use_rag = (
-            self._rag_runtime_enabled
-            and self._reflex_router.route_rag_intent(text)
+        use_rag = self._rag_runtime_enabled and self._reflex_router.route_rag_intent(
+            text
         )
 
         # Reasoning slow-path — run in a daemon thread so the event loop
@@ -431,14 +430,18 @@ class Orchestrator:
                     logger.info("Loading LLM model on first inference request...")
                     self._model_loader.load(self._config.llm)
                 response = self._reasoning_router.generate(
-                    text, self._llm_cancel_flag,
-                    utterance_id=utterance_id, use_rag=use_rag,
+                    text,
+                    self._llm_cancel_flag,
+                    utterance_id=utterance_id,
+                    use_rag=use_rag,
                 )
             except InterruptedError:
                 logger.info("LLM generation cancelled for %r (source=%s)", text, source)
                 return
             except Exception:
-                logger.exception("LLM inference failed for %r (source=%s)", text, source)
+                logger.exception(
+                    "LLM inference failed for %r (source=%s)", text, source
+                )
                 with self._llm_state_lock:
                     if self._state_machine.current_state == LumiState.PROCESSING:
                         self._state_machine.transition_to(LumiState.IDLE)
@@ -450,7 +453,7 @@ class Orchestrator:
             if tool_calls:
                 results = self._tool_executor.execute(tool_calls, self._llm_cancel_flag)
                 result_lines = []
-                for tc, tr in zip(tool_calls, results):
+                for tc, tr in zip(tool_calls, results, strict=False):
                     result_lines.append(
                         f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
                     )
@@ -458,13 +461,19 @@ class Orchestrator:
                 followup_prompt = f"{text}\n\n[Tool results]\n{tool_context}"
                 try:
                     response = self._reasoning_router.generate(
-                        followup_prompt, self._llm_cancel_flag, utterance_id=utterance_id
+                        followup_prompt,
+                        self._llm_cancel_flag,
+                        utterance_id=utterance_id,
                     )
                 except InterruptedError:
-                    logger.info("LLM tool-followup cancelled for %r (source=%s)", text, source)
+                    logger.info(
+                        "LLM tool-followup cancelled for %r (source=%s)", text, source
+                    )
                     return
                 except Exception:
-                    logger.exception("LLM tool-followup failed for %r (source=%s)", text, source)
+                    logger.exception(
+                        "LLM tool-followup failed for %r (source=%s)", text, source
+                    )
                     with self._llm_state_lock:
                         if self._state_machine.current_state == LumiState.PROCESSING:
                             self._state_machine.transition_to(LumiState.IDLE)
@@ -660,9 +669,7 @@ class Orchestrator:
             self._state_machine.transition_to(LumiState.LISTENING)
             return
 
-        logger.debug(
-            "WakeDetectedEvent received in state %s; ignoring.", current.value
-        )
+        logger.debug("WakeDetectedEvent received in state %s; ignoring.", current.value)
 
     def _handle_recording_complete(self, event: RecordingCompleteEvent) -> None:
         """Handle RecordingCompleteEvent: invoke Scribe in a daemon thread.
@@ -688,7 +695,9 @@ class Orchestrator:
         self._state_machine.transition_to(LumiState.PROCESSING)
 
         if self._scribe is None:
-            logger.warning("RecordingCompleteEvent received but no Scribe configured; returning to IDLE")
+            logger.warning(
+                "RecordingCompleteEvent received but no Scribe configured; returning to IDLE"
+            )
             self._state_machine.transition_to(LumiState.IDLE)
             return
 

@@ -37,12 +37,11 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from typing import Union
 
 logger = logging.getLogger(__name__)
 
 # Type alias for snapshot values: either a histogram dict or an integer counter.
-_SnapshotValue = Union[dict, int]
+_SnapshotValue = dict | int
 
 
 def _percentile(sorted_values: list[float], pct: float) -> float:

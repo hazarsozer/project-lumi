@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-
 # Sentence boundary: end of .  !  ?  (optionally followed by closing
 # punctuation) then whitespace or end-of-string.
 _SENTENCE_END = re.compile(r'(?<=[.!?])["\')]?\s+|(?<=[.!?])["\')]?$')
@@ -27,9 +26,9 @@ class Chunk:
     """A contiguous slice of a source document."""
 
     text: str
-    char_start: int   # byte offset of first character in the source text
-    char_end: int     # byte offset past the last character (exclusive)
-    chunk_idx: int    # 0-based position within the document
+    char_start: int  # byte offset of first character in the source text
+    char_end: int  # byte offset past the last character (exclusive)
+    chunk_idx: int  # 0-based position within the document
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -94,7 +93,9 @@ def chunk_text(text: str, size: int, overlap: int) -> list[Chunk]:
         # Advance search cursor past the start of this chunk so the next
         # chunk's first sentence is found after the current one.
         search_start = start + len(first)
-        return Chunk(text=joined, char_start=start, char_end=min(end, len(text)), chunk_idx=idx)
+        return Chunk(
+            text=joined, char_start=start, char_end=min(end, len(text)), chunk_idx=idx
+        )
 
     for sentence in sentences:
         sent_words = _word_count(sentence)

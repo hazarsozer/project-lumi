@@ -23,10 +23,10 @@ _SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".md", ".txt", ".pdf"})
 class LoadedDocument:
     """Normalised content of one source file."""
 
-    path: str          # absolute path on disk
-    text: str          # plain UTF-8 text extracted from the file
-    char_count: int    # len(text)
-    extension: str     # lower-case file extension including the dot
+    path: str  # absolute path on disk
+    text: str  # plain UTF-8 text extracted from the file
+    char_count: int  # len(text)
+    extension: str  # lower-case file extension including the dot
 
 
 def is_supported(path: Path) -> bool:
@@ -92,8 +92,7 @@ def _load_pdf(path: Path) -> str:
         from pypdf import PdfReader  # type: ignore[import-untyped]
     except ImportError as exc:
         raise IngestError(
-            "pypdf is required to load PDF files. "
-            "Install it with: uv add pypdf"
+            "pypdf is required to load PDF files. " "Install it with: uv add pypdf"
         ) from exc
 
     reader = PdfReader(str(path))
@@ -111,6 +110,7 @@ def _load_pdf(path: Path) -> str:
 def _normalise(text: str) -> str:
     """Collapse excessive blank lines and strip leading/trailing whitespace."""
     import re
+
     # Collapse 3+ consecutive newlines to 2.
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()

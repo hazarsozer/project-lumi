@@ -297,7 +297,7 @@ class LumiConfig:
 # ---------------------------------------------------------------------------
 
 # VRAM thresholds (in MiB) used to select the performance edition.
-_LIGHT_THRESHOLD_MIB: int = 2048   # < 2 GiB  → light
+_LIGHT_THRESHOLD_MIB: int = 2048  # < 2 GiB  → light
 _STANDARD_THRESHOLD_MIB: int = 4096  # < 4 GiB  → standard
 # ≥ 4 GiB (and the Pro band starts at 8 GiB) → pro
 
@@ -349,9 +349,7 @@ def detect_edition() -> str:
     else:
         edition = "pro"
 
-    logger.debug(
-        "Detected %d MiB VRAM → edition '%s'.", vram_mib, edition
-    )
+    logger.debug("Detected %d MiB VRAM → edition '%s'.", vram_mib, edition)
     return edition
 
 
@@ -376,16 +374,13 @@ def _merge_section(defaults: Any, overrides: dict[str, Any]) -> dict[str, Any]:
         A dict containing only valid field names with merged values.
     """
     merged: dict[str, Any] = {
-        f.name: getattr(defaults, f.name)
-        for f in fields(defaults)
+        f.name: getattr(defaults, f.name) for f in fields(defaults)
     }
     for key, value in overrides.items():
         if key in merged:
             merged[key] = value
         else:
-            logger.warning(
-                "config.yaml: unknown key '%s' in section — ignored.", key
-            )
+            logger.warning("config.yaml: unknown key '%s' in section — ignored.", key)
     return merged
 
 
@@ -419,43 +414,25 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
                     type(loaded).__name__,
                 )
         except yaml.YAMLError as exc:
-            logger.error(
-                "Failed to parse config.yaml: %s — using all defaults.", exc
-            )
+            logger.error("Failed to parse config.yaml: %s — using all defaults.", exc)
     else:
-        logger.debug(
-            "No config file found at '%s'; using built-in defaults.", path
-        )
+        logger.debug("No config file found at '%s'; using built-in defaults.", path)
 
     # Build nested section configs from sub-dicts in the YAML.
-    audio_cfg = AudioConfig(
-        **_merge_section(AudioConfig(), raw.get("audio", {}))
-    )
-    scribe_cfg = ScribeConfig(
-        **_merge_section(ScribeConfig(), raw.get("scribe", {}))
-    )
-    llm_cfg = LLMConfig(
-        **_merge_section(LLMConfig(), raw.get("llm", {}))
-    )
-    tts_cfg = TTSConfig(
-        **_merge_section(TTSConfig(), raw.get("tts", {}))
-    )
-    ipc_cfg = IPCConfig(
-        **_merge_section(IPCConfig(), raw.get("ipc", {}))
-    )
+    audio_cfg = AudioConfig(**_merge_section(AudioConfig(), raw.get("audio", {})))
+    scribe_cfg = ScribeConfig(**_merge_section(ScribeConfig(), raw.get("scribe", {})))
+    llm_cfg = LLMConfig(**_merge_section(LLMConfig(), raw.get("llm", {})))
+    tts_cfg = TTSConfig(**_merge_section(TTSConfig(), raw.get("tts", {})))
+    ipc_cfg = IPCConfig(**_merge_section(IPCConfig(), raw.get("ipc", {})))
 
     # ToolsConfig: YAML lists parse as Python list; convert allowed_tools to tuple.
     tools_raw = _merge_section(ToolsConfig(), raw.get("tools", {}))
     tools_raw["allowed_tools"] = tuple(tools_raw["allowed_tools"])
     tools_cfg = ToolsConfig(**tools_raw)
 
-    vision_cfg = VisionConfig(
-        **_merge_section(VisionConfig(), raw.get("vision", {}))
-    )
+    vision_cfg = VisionConfig(**_merge_section(VisionConfig(), raw.get("vision", {})))
 
-    rag_cfg = RAGConfig(
-        **_merge_section(RAGConfig(), raw.get("rag", {}))
-    )
+    rag_cfg = RAGConfig(**_merge_section(RAGConfig(), raw.get("rag", {})))
 
     persona_cfg = PersonaConfig(
         **_merge_section(PersonaConfig(), raw.get("persona", {}))

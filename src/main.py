@@ -59,7 +59,8 @@ def main() -> None:
     # Scribe wraps faster-whisper for speech-to-text.
     scribe = Scribe(
         model_size=config.scribe.model_size,
-        initial_prompt=config.scribe.initial_prompt or "Lumi, Firefox, browser, desktop assistant.",
+        initial_prompt=config.scribe.initial_prompt
+        or "Lumi, Firefox, browser, desktop assistant.",
     )
 
     orchestrator = Orchestrator(config, ears=ears, scribe=scribe)

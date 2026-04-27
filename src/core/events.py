@@ -73,11 +73,11 @@ class TTSChunkReadyEvent:
     RecordingCompleteEvent.
     """
 
-    audio: object        # np.ndarray float32 mono
-    sample_rate: int     # Hz — e.g. 24000 for Kokoro
-    chunk_id: int        # monotonically increasing within one utterance
-    is_final: bool       # True on the last chunk of an utterance
-    utterance_id: str    # identifies the utterance; used for interrupt-triggered drains
+    audio: object  # np.ndarray float32 mono
+    sample_rate: int  # Hz — e.g. 24000 for Kokoro
+    chunk_id: int  # monotonically increasing within one utterance
+    is_final: bool  # True on the last chunk of an utterance
+    utterance_id: str  # identifies the utterance; used for interrupt-triggered drains
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, TTSChunkReadyEvent):
@@ -109,9 +109,9 @@ class VisemeEvent:
     """
 
     utterance_id: str  # binds this viseme to its utterance
-    phoneme: str       # IPA or ARPAbet phoneme string
-    start_ms: int      # offset from utterance start, milliseconds
-    duration_ms: int   # phoneme duration, milliseconds
+    phoneme: str  # IPA or ARPAbet phoneme string
+    start_ms: int  # offset from utterance start, milliseconds
+    duration_ms: int  # phoneme duration, milliseconds
 
 
 @dataclass(frozen=True)
@@ -202,7 +202,7 @@ class EarsErrorEvent:
       - ``ears.unrecoverable`` — InputStream failed after all retries
     """
 
-    code: str    # e.g. "ears.unrecoverable"
+    code: str  # e.g. "ears.unrecoverable"
     detail: str  # human-readable description for logs / UI toast
 
 

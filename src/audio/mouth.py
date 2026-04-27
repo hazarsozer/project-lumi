@@ -197,7 +197,9 @@ class KokoroTTS:
                 # and transitions to IDLE directly; a redundant SpeechCompletedEvent
                 # arriving later is harmless (guarded by _handle_speech_completed).
                 if self._event_queue is not None:
-                    self._event_queue.put(SpeechCompletedEvent(utterance_id=utterance_id))
+                    self._event_queue.put(
+                        SpeechCompletedEvent(utterance_id=utterance_id)
+                    )
                 logger.debug(
                     "KokoroTTS: synthesis incomplete — posted SpeechCompletedEvent "
                     "for utterance_id=%s",
@@ -333,9 +335,7 @@ class KokoroTTS:
         """
         if self._event_queue is not None:
             self._event_queue.put(SpeechCompletedEvent(utterance_id=utterance_id))
-        logger.debug(
-            "KokoroTTS: silence emitted for utterance_id=%s", utterance_id
-        )
+        logger.debug("KokoroTTS: silence emitted for utterance_id=%s", utterance_id)
 
     def _post_visemes(self, phonemes: Any, utterance_id: str) -> None:
         """Post VisemeEvent instances for each phoneme in *phonemes*.
@@ -359,8 +359,6 @@ class KokoroTTS:
                 type(phonemes).__name__,
             )
             return
-
-        from src.audio.viseme_map import map_phoneme  # noqa: F811 — deferred import
 
         for item in phonemes:
             try:

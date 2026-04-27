@@ -23,7 +23,7 @@ import selectors
 import socket
 import struct
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 # Named constants
 # ---------------------------------------------------------------------------
 
-_HEADER_SIZE: int = 4          # Bytes in the length prefix (big-endian uint32)
-_SELECT_TIMEOUT: float = 0.2   # Seconds; keeps _accept_loop responsive to stop()
+_HEADER_SIZE: int = 4  # Bytes in the length prefix (big-endian uint32)
+_SELECT_TIMEOUT: float = 0.2  # Seconds; keeps _accept_loop responsive to stop()
 _THREAD_JOIN_TIMEOUT: float = 2.0  # Seconds to wait when joining threads in stop()
-_HEADER_FORMAT: str = "!I"     # struct format: network byte order, unsigned int
+_HEADER_FORMAT: str = "!I"  # struct format: network byte order, unsigned int
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,7 @@ class IPCTransport:
         self._server_sock = server_sock
         self._bound_port = server_sock.getsockname()[1]
 
-        logger.info(
-            "IPCTransport listening on %s:%d", self._host, self._bound_port
-        )
+        logger.info("IPCTransport listening on %s:%d", self._host, self._bound_port)
 
         self._accept_thread = threading.Thread(
             target=self._accept_loop,
@@ -253,9 +251,7 @@ class IPCTransport:
                 with self._client_lock:
                     old_sock = self._client_sock
                     if old_sock is not None:
-                        logger.info(
-                            "New client arrived; closing previous connection."
-                        )
+                        logger.info("New client arrived; closing previous connection.")
                         try:
                             old_sock.close()
                         except OSError:
@@ -331,9 +327,7 @@ class IPCTransport:
                     try:
                         callback(payload)
                     except Exception as exc:
-                        logger.error(
-                            "on_message callback raised an exception: %s", exc
-                        )
+                        logger.error("on_message callback raised an exception: %s", exc)
         finally:
             # Clear the stored socket reference only if it still points at
             # the socket we were handling (a new connection may have replaced

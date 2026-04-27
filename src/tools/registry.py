@@ -9,7 +9,6 @@ looked up by name during execution. Thread-safe for read-heavy workloads
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from src.tools.base import Tool
 
@@ -38,9 +37,7 @@ class ToolRegistry:
             tool: Any object satisfying the Tool Protocol.
         """
         if tool.name in self._tools:
-            logger.warning(
-                "ToolRegistry: overwriting existing tool '%s'.", tool.name
-            )
+            logger.warning("ToolRegistry: overwriting existing tool '%s'.", tool.name)
         self._tools[tool.name] = tool
         logger.debug("ToolRegistry: registered tool '%s'.", tool.name)
 

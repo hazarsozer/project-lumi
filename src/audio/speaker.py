@@ -218,9 +218,7 @@ class SpeakerThread:
                 )
 
             if is_final:
-                self._event_queue.put(
-                    SpeechCompletedEvent(utterance_id=utterance_id)
-                )
+                self._event_queue.put(SpeechCompletedEvent(utterance_id=utterance_id))
                 logger.debug(
                     "SpeakerThread: utterance complete (utterance_id=%s)",
                     utterance_id,

@@ -31,7 +31,7 @@ class ToolExecutor:
         config:   ToolsConfig controlling the allowlist and timeout.
     """
 
-    def __init__(self, registry: ToolRegistry, config: "ToolsConfig") -> None:
+    def __init__(self, registry: ToolRegistry, config: ToolsConfig) -> None:
         self._registry = registry
         self._config = config
 

@@ -20,13 +20,12 @@ Security decisions:
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from src.tools.base import Tool, ToolResult
+from src.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +92,13 @@ class AppLaunchTool:
             logger.warning(
                 "AppLaunchTool: app '%s' is not in allowlist; rejected.", app
             )
-            return ToolResult(
-                success=False, output=f"App not allowed: {app}", data={}
-            )
+            return ToolResult(success=False, output=f"App not allowed: {app}", data={})
 
         # Resolve binary — never pass user string directly to Popen.
         binary = shutil.which(app)
         if binary is None:
-            logger.warning(
-                "AppLaunchTool: app '%s' not found on PATH.", app
-            )
-            return ToolResult(
-                success=False, output=f"App not found: {app}", data={}
-            )
+            logger.warning("AppLaunchTool: app '%s' not found on PATH.", app)
+            return ToolResult(success=False, output=f"App not found: {app}", data={})
 
         try:
             subprocess.Popen(  # noqa: S603 — explicit list, no shell
@@ -115,12 +108,8 @@ class AppLaunchTool:
                 stderr=subprocess.DEVNULL,
             )
         except FileNotFoundError:
-            logger.warning(
-                "AppLaunchTool: FileNotFoundError launching '%s'.", app
-            )
-            return ToolResult(
-                success=False, output=f"App not found: {app}", data={}
-            )
+            logger.warning("AppLaunchTool: FileNotFoundError launching '%s'.", app)
+            return ToolResult(success=False, output=f"App not found: {app}", data={})
         except OSError as exc:
             logger.error("AppLaunchTool: OSError launching '%s': %s.", app, exc)
             return ToolResult(
@@ -207,7 +196,9 @@ class ClipboardTool:
             )
         except subprocess.TimeoutExpired:
             logger.warning("ClipboardTool: xclip read timed out.")
-            return ToolResult(success=False, output="Clipboard read timed out.", data={})
+            return ToolResult(
+                success=False, output="Clipboard read timed out.", data={}
+            )
 
     def _write(self, text: Any) -> ToolResult:
         """Write text to clipboard via xclip."""
@@ -267,7 +258,9 @@ class ClipboardTool:
             )
         except subprocess.TimeoutExpired:
             logger.warning("ClipboardTool: xclip write timed out.")
-            return ToolResult(success=False, output="Clipboard write timed out.", data={})
+            return ToolResult(
+                success=False, output="Clipboard write timed out.", data={}
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +302,7 @@ class FileInfoTool:
 
         # Security: reject path traversal attempts before touching the filesystem.
         if ".." in Path(raw_path).parts:
-            logger.warning(
-                "FileInfoTool: path traversal rejected for '%s'.", raw_path
-            )
+            logger.warning("FileInfoTool: path traversal rejected for '%s'.", raw_path)
             return ToolResult(success=False, output="Invalid path", data={})
 
         resolved = Path(raw_path).resolve()
@@ -326,7 +317,9 @@ class FileInfoTool:
                 data={"size": 0, "is_dir": False, "exists": False},
             )
         except PermissionError as exc:
-            logger.warning("FileInfoTool: permission denied for '%s': %s.", resolved, exc)
+            logger.warning(
+                "FileInfoTool: permission denied for '%s': %s.", resolved, exc
+            )
             return ToolResult(
                 success=False,
                 output=f"Permission denied: {resolved}",
@@ -408,9 +401,7 @@ class WindowListTool:
             )
         except subprocess.TimeoutExpired:
             logger.warning("WindowListTool: wmctrl timed out.")
-            return ToolResult(
-                success=False, output="wmctrl timed out.", data={}
-            )
+            return ToolResult(success=False, output="wmctrl timed out.", data={})
 
         windows = self._parse_wmctrl(proc.stdout)
         count = len(windows)
