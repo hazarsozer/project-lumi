@@ -1,6 +1,6 @@
 """
 EventBridge: event translation bridge between Lumi's Python Brain and the
-Godot 4 Body.
+Tauri/React frontend.
 
 This module is NOT a ZeroMQ server — it sits on top of ``IPCTransport``
 (a raw TCP length-prefixed server) and provides the event-semantic layer:
@@ -68,7 +68,7 @@ __all__ = ["EventBridge"]
 
 
 class EventBridge:
-    """Bridges internal Lumi events to/from the Godot frontend over IPC.
+    """Bridges internal Lumi events to/from the Tauri/React frontend over IPC.
 
     Translates outbound internal events → JSON frames sent via IPCTransport.
     Translates inbound JSON frames → internal events posted to the event queue.
@@ -83,7 +83,7 @@ class EventBridge:
                        processes them on the main thread.
         state_machine: The shared state machine; EventBridge registers itself
                        as an observer so every state transition is forwarded
-                       to the Godot frontend automatically.
+                       to the frontend automatically.
     """
 
     def __init__(
@@ -148,7 +148,7 @@ class EventBridge:
     # ------------------------------------------------------------------
 
     def on_state_change(self, old_state: LumiState, new_state: LumiState) -> None:
-        """Forward a state transition to the Godot frontend.
+        """Forward a state transition to the frontend.
 
         Called by StateMachine after every successful transition.
         Runs on whichever thread called ``transition_to()``.
@@ -257,7 +257,7 @@ class EventBridge:
         fields: dict[str, Any],
         current_values: dict[str, Any],
     ) -> None:
-        """Send the full config schema and current values to Godot.
+        """Send the full config schema and current values to the frontend.
 
         Called by the orchestrator (or a dedicated handler) after it receives
         a ``ConfigSchemaRequestEvent``.  The ``fields`` dict mirrors the
@@ -280,7 +280,7 @@ class EventBridge:
         pending_restart: list[str],
         errors: dict[str, str],
     ) -> None:
-        """Send the result of a ``config_update`` back to Godot.
+        """Send the result of a ``config_update`` back to the frontend.
 
         Called by the orchestrator after it processes a ``ConfigUpdateEvent``
         through ``ConfigManager.apply()``.
@@ -392,7 +392,7 @@ class EventBridge:
         logger.debug("EventBridge: posted ConfigSchemaRequestEvent to queue.")
 
     # Fields that must never be changed over the IPC wire.  Allowing a
-    # compromised Godot client to mutate these could redirect the IPC socket
+    # compromised frontend client to mutate these could redirect the IPC socket
     # to listen on 0.0.0.0 (network-exposed) or change the port in ways that
     # break the local-only security boundary.  These fields require a deliberate
     # edit of config.yaml by the user, not a remote wire command.

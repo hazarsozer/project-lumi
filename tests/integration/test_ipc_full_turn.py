@@ -1,18 +1,18 @@
 """
-Full-turn IPC integration tests — Godot ↔ Brain TCP handshake.
+Full-turn IPC integration tests — UI ↔ Brain TCP round-trip.
 
-These tests validate that the complete Godot → Brain → Godot round-trip works
+These tests validate that the complete UI → Brain → UI round-trip works
 correctly over a real TCP connection, going beyond the unit-level protocol
 conformance tests in ``tests/test_ipc_protocol_conformance.py``.
 
 Stack under test (no mocking of the transport layer):
-    FakeGodotClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
+    FakeTCPClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
                                                                |
                                                         StateMachine / queue.Queue
 
 Each test:
 - Spins up a real ``IPCTransport`` + ``EventBridge`` on OS-assigned port 0.
-- Connects a ``FakeGodotClient`` that mimics what ``lumi_client.gd`` does.
+- Connects a ``FakeTCPClient`` that mimics what the Tauri/React frontend does.
 - Performs a single meaningful turn (send inbound event OR receive outbound event).
 - Tears down cleanly via fixture ``finally`` blocks.
 
@@ -51,7 +51,7 @@ from src.core.events import (
 )
 from src.core.state_machine import LumiState, StateMachine
 from src.core.event_bridge import EventBridge
-from tests.integration.fake_godot_client import FakeGodotClient
+from tests.integration.fake_tcp_client import FakeTCPClient
 
 # ---------------------------------------------------------------------------
 # Timing constants
@@ -148,7 +148,7 @@ def test_client_receives_state_change_on_connect(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         # Let the accept loop register the new connection.
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
@@ -187,7 +187,7 @@ def test_client_send_interrupt_posts_to_queue(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_frame("interrupt", {})
@@ -221,7 +221,7 @@ def test_client_send_user_text_posts_to_queue(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_frame("user_text", {"text": "hello"})
@@ -254,7 +254,7 @@ def test_client_send_rag_set_enabled_posts_to_queue(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_frame("rag_set_enabled", {"enabled": True})
@@ -292,7 +292,7 @@ def test_malformed_frame_does_not_crash_server(
     """
     zmq_server, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
 
@@ -334,7 +334,7 @@ def test_server_sends_tts_start(
     """
     zmq_server, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
 

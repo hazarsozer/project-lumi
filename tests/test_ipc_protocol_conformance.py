@@ -2,10 +2,10 @@
 IPC protocol conformance test suite — Phase 5 Wave 4.
 
 These are end-to-end integration tests that verify the full Python IPC stack
-using a fake TCP client acting as the Godot frontend.
+using a fake TCP client acting as the Tauri/React frontend.
 
 Stack under test (no mocking of the transport layer):
-    FakeGodotClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
+    FakeTCPClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
                                                                |
                                                         StateMachine / queue.Queue
 
@@ -18,8 +18,8 @@ JSON envelope (outbound):
 Fixture strategy:
 - ``free_port``   — OS-assigned port via bind-to-0 trick.
 - ``ipc_stack``   — starts IPCTransport + EventBridge; tears down in finally.
-- ``FakeGodotClient`` — context manager that connects, sends, and receives
-                        length-prefixed JSON frames.
+- ``FakeTCPClient`` — context manager that connects, sends, and receives
+                      length-prefixed JSON frames.
 
 All recv_message() calls have an explicit timeout to prevent infinite hangs.
 """
@@ -57,11 +57,11 @@ _DEFAULT_RECV_TIMEOUT: float = 2.0
 
 
 # ---------------------------------------------------------------------------
-# FakeGodotClient
+# FakeTCPClient
 # ---------------------------------------------------------------------------
 
 
-class FakeGodotClient:
+class FakeTCPClient:
     """Minimal TCP client that speaks the Lumi IPC wire protocol.
 
     Wire format: 4-byte big-endian uint32 length prefix + UTF-8 JSON body.
@@ -75,14 +75,14 @@ class FakeGodotClient:
         }
 
     Usage:
-        client = FakeGodotClient(port)
+        client = FakeTCPClient(port)
         client.connect()
         client.send_message("interrupt", {})
         msg = client.recv_message(timeout=2.0)
         client.close()
 
     Or as a context manager (auto-closes):
-        with FakeGodotClient(port) as client:
+        with FakeTCPClient(port) as client:
             ...
     """
 
@@ -108,7 +108,7 @@ class FakeGodotClient:
             payload: Arbitrary JSON-serialisable dict.
         """
         if self._sock is None:
-            raise RuntimeError("FakeGodotClient: not connected")
+            raise RuntimeError("FakeTCPClient: not connected")
 
         envelope = {
             "event": event,
@@ -129,7 +129,7 @@ class FakeGodotClient:
             raw_body: The bytes to send as the frame body (may be invalid JSON).
         """
         if self._sock is None:
-            raise RuntimeError("FakeGodotClient: not connected")
+            raise RuntimeError("FakeTCPClient: not connected")
 
         header = struct.pack(_HEADER_FORMAT, len(raw_body))
         self._sock.sendall(header + raw_body)
@@ -162,7 +162,7 @@ class FakeGodotClient:
             json.JSONDecodeError: If the frame body is not valid JSON.
         """
         if self._sock is None:
-            raise RuntimeError("FakeGodotClient: not connected")
+            raise RuntimeError("FakeTCPClient: not connected")
 
         self._sock.settimeout(timeout)
         try:
@@ -171,7 +171,7 @@ class FakeGodotClient:
             body = self._recv_exactly(payload_len)
         except socket.timeout as exc:
             raise TimeoutError(
-                f"FakeGodotClient: no frame received within {timeout}s"
+                f"FakeTCPClient: no frame received within {timeout}s"
             ) from exc
         finally:
             self._sock.settimeout(None)  # restore blocking mode
@@ -191,7 +191,7 @@ class FakeGodotClient:
     # Context manager support
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "FakeGodotClient":
+    def __enter__(self) -> "FakeTCPClient":
         self.connect()
         return self
 
@@ -210,7 +210,7 @@ class FakeGodotClient:
             chunk = self._sock.recv(n - len(buf))
             if not chunk:
                 raise ConnectionError(
-                    f"FakeGodotClient: socket closed after {len(buf)}/{n} bytes"
+                    f"FakeTCPClient: socket closed after {len(buf)}/{n} bytes"
                 )
             buf.extend(chunk)
         return bytes(buf)
@@ -281,7 +281,7 @@ def test_full_state_lifecycle(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         # Wait for the accept loop to register the new connection.
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
@@ -313,7 +313,7 @@ def test_interrupt_returns_to_idle(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_message("interrupt", {})
@@ -340,7 +340,7 @@ def test_user_text_triggers_event(
     """
     _, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_message("user_text", {"text": "hello"})
@@ -367,7 +367,7 @@ def test_viseme_forwarding(
     """
     zmq_server, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
 
@@ -403,7 +403,7 @@ def test_malformed_client_message_no_crash(
     """
     zmq_server, port = ipc_stack
 
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
 
@@ -442,7 +442,7 @@ def test_client_reconnect(
     _, port = ipc_stack
 
     # First client connects then disconnects (no handshake needed — closes immediately).
-    first = FakeGodotClient(port)
+    first = FakeTCPClient(port)
     first.connect()
     time.sleep(_CONNECT_SETTLE_S)
     first.close()
@@ -452,7 +452,7 @@ def test_client_reconnect(
     time.sleep(_STOP_SETTLE_S)
 
     # Second client connects.
-    with FakeGodotClient(port) as second:
+    with FakeTCPClient(port) as second:
         time.sleep(_CONNECT_SETTLE_S)
         second.do_handshake()
 

@@ -1,5 +1,5 @@
 """
-Minimal Python TCP client that mimics the Godot ``lumi_client.gd`` script.
+Minimal Python TCP client that mimics the Tauri/React frontend IPC client.
 
 Wire format: 4-byte big-endian uint32 length prefix + UTF-8 JSON body.
 
@@ -13,7 +13,7 @@ JSON envelope (inbound to EventBridge / outbound from EventBridge):
 
 Usage
 -----
-    client = FakeGodotClient(port=54321)
+    client = FakeTCPClient(port=54321)
     client.connect()
     client.send_frame("interrupt", {})
     msg = client.recv_frame(timeout=2.0)
@@ -21,7 +21,7 @@ Usage
     client.close()
 
     # Or as a context manager:
-    with FakeGodotClient(port) as client:
+    with FakeTCPClient(port) as client:
         client.send_frame("user_text", {"text": "hello"})
         frame = client.recv_frame()
 
@@ -48,7 +48,7 @@ _HEADER_FORMAT: str = "!I"   # network byte order, unsigned 32-bit int
 _HEADER_SIZE: int = 4
 
 
-class FakeGodotClient:
+class FakeTCPClient:
     """Minimal synchronous TCP client speaking the Lumi IPC wire protocol.
 
     Args:
@@ -84,7 +84,7 @@ class FakeGodotClient:
     # Context manager support
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "FakeGodotClient":
+    def __enter__(self) -> "FakeTCPClient":
         self.connect()
         return self
 
@@ -109,7 +109,7 @@ class FakeGodotClient:
             RuntimeError: If ``connect()`` has not been called yet.
         """
         if self._sock is None:
-            raise RuntimeError("FakeGodotClient: not connected — call connect() first")
+            raise RuntimeError("FakeTCPClient: not connected — call connect() first")
 
         envelope: dict[str, Any] = {
             "event": event,
@@ -133,7 +133,7 @@ class FakeGodotClient:
             RuntimeError: If ``connect()`` has not been called yet.
         """
         if self._sock is None:
-            raise RuntimeError("FakeGodotClient: not connected — call connect() first")
+            raise RuntimeError("FakeTCPClient: not connected — call connect() first")
 
         header: bytes = struct.pack(_HEADER_FORMAT, len(raw_body))
         self._sock.sendall(header + raw_body)
@@ -176,7 +176,7 @@ class FakeGodotClient:
             json.JSONDecodeError: If the frame body is not valid JSON.
         """
         if self._sock is None:
-            raise RuntimeError("FakeGodotClient: not connected — call connect() first")
+            raise RuntimeError("FakeTCPClient: not connected — call connect() first")
 
         self._sock.settimeout(timeout)
         try:
@@ -185,7 +185,7 @@ class FakeGodotClient:
             body: bytes = self._recv_exactly(payload_len)
         except socket.timeout as exc:
             raise TimeoutError(
-                f"FakeGodotClient: no frame received within {timeout}s"
+                f"FakeTCPClient: no frame received within {timeout}s"
             ) from exc
         finally:
             self._sock.settimeout(None)  # restore blocking mode
@@ -214,7 +214,7 @@ class FakeGodotClient:
             chunk = self._sock.recv(n - len(buf))
             if not chunk:
                 raise ConnectionError(
-                    f"FakeGodotClient: socket closed after {len(buf)}/{n} bytes"
+                    f"FakeTCPClient: socket closed after {len(buf)}/{n} bytes"
                 )
             buf.extend(chunk)
         return bytes(buf)
