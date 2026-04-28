@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriEmit, tauriListen, tauriGetWindowByLabel } from "./lib/tauriCompat";
 import { useBrainSocket } from "./state/useBrainSocket";
 import { useLumiState } from "./state/useLumiState";
@@ -113,6 +113,9 @@ function ChatRoot() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
   const [brainState, setBrainState] = useState<AvatarStateKey>("idle");
+  // Pending citations from the most recent rag_retrieval event — attached to
+  // the next tts_start message and then cleared.
+  const pendingCitations = useRef<string[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,13 +133,21 @@ function ChatRoot() {
         case "llm_token":
           setStreaming((prev) => prev + evt.payload.token);
           break;
-        case "tts_start":
+        case "rag_retrieval":
+          pendingCitations.current = evt.payload.top_doc_paths;
+          break;
+        case "tts_start": {
+          const citations = pendingCitations.current.length > 0
+            ? [...pendingCitations.current]
+            : undefined;
+          pendingCitations.current = [];
           setMessages((prev) => [
             ...prev,
-            { id: crypto.randomUUID(), role: "lumi", text: evt.payload.text },
+            { id: crypto.randomUUID(), role: "lumi", text: evt.payload.text, citations },
           ]);
           setStreaming("");
           break;
+        }
       }
     });
     return () => {

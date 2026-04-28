@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import struct
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -18,6 +19,7 @@ _HEADER_FORMAT = "!I"
 _HEADER_SIZE = 4
 _BACKOFF_INITIAL = 0.5
 _BACKOFF_MAX = 8.0
+_RING_BUFFER_SIZE = 32  # frames to replay to a reconnecting client
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +92,8 @@ class WsBridge:
         self._tcp_writer: asyncio.StreamWriter | None = None
         self._tcp_write_lock = asyncio.Lock()
         self._ws_task: asyncio.Task[None] | None = None
+        # Ring buffer of the last N Brain→WS frames for reconnect catch-up.
+        self._ring: deque[bytes] = deque(maxlen=_RING_BUFFER_SIZE)
 
     async def _handle_ws(self, ws: ServerConnection) -> None:
         async with self._ws_lock:
@@ -99,6 +103,18 @@ class WsBridge:
                 return
             self._ws_client = ws
         logger.info("React client connected: %s", ws.remote_address)
+
+        # Replay buffered frames so a reconnecting client catches up on any
+        # Brain→WS frames it missed while disconnected.
+        buffered = list(self._ring)
+        if buffered:
+            logger.debug("Replaying %d buffered frame(s) to new client.", len(buffered))
+            for cached in buffered:
+                try:
+                    await ws.send(cached if isinstance(cached, bytes) else cached.decode())
+                except Exception as exc:
+                    logger.warning("Failed to replay buffered frame: %s", exc)
+                    break
 
         try:
             async for raw in ws:
@@ -132,6 +148,7 @@ class WsBridge:
                 logger.info("Brain TCP stream ended: %s", exc)
                 break
             logger.debug("TCP→WS: %d bytes", len(frame))
+            self._ring.append(frame)
             ws = self._ws_client
             if ws is None:
                 logger.debug("No WS client connected; dropping Brain message.")
