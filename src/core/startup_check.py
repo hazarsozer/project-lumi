@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import importlib.metadata as _meta
 import logging
+import sys
 from pathlib import Path
 
 from src.core.config import LumiConfig
@@ -38,6 +39,8 @@ logger = logging.getLogger(__name__)
 # Exact openwakeword version required by the monkey-patch in ears.py.
 # 0.6.0 has no Python 3.12 wheels; any other version breaks the patch.
 _REQUIRED_OWW_VERSION: str = "0.4.0"
+
+_SETUP_WIZARD_PATH: str = "scripts/setup_wizard.py"
 
 
 def _check_openwakeword_version() -> None:
@@ -111,56 +114,73 @@ def _check_stt_model(model_path: str) -> None:
 
 
 def _check_llm_model(model_path: str) -> None:
-    """Raise RuntimeError if the LLM GGUF file is missing.
+    """Exit with a user-friendly message if the LLM GGUF file is missing.
 
     llama-cpp-python is installed but the model file is not present —
     inference would crash at the first user query rather than at startup.
-    Surfacing this here gives the user a clear remediation message.
+    Surfacing this here gives the user a clear remediation message before
+    any subsystem is initialised.
     """
     path = Path(model_path)
     if not path.is_file():
-        raise RuntimeError(
-            f"LLM model file not found: '{model_path}'\n"
+        sys.stderr.write(
+            f"\nERROR: LLM model file not found: '{model_path}'\n\n"
             "Download the Phi-3.5-mini Q4_K_M GGUF and place it at the configured path,\n"
-            "or update config.yaml → llm.model_path.\n"
-            "Example download:\n"
+            "or update config.yaml → llm.model_path.\n\n"
+            "Example:\n"
             "  huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF "
-            "Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir models/llm/"
+            "Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir models/llm/\n\n"
         )
+        if Path(_SETUP_WIZARD_PATH).is_file():
+            sys.stderr.write(
+                f"Run the setup wizard for guided installation:\n"
+                f"  uv run python {_SETUP_WIZARD_PATH}\n\n"
+            )
+        sys.exit(1)
     logger.info("LLM model file found: %s", model_path)
 
 
 def _check_tts_model(model_path: str, voices_path: str) -> None:
-    """Raise RuntimeError if TTS model or voices files are missing.
+    """Exit with a user-friendly message if TTS model or voices files are missing.
 
     When TTS is enabled, both files are required for Kokoro to produce any
-    audio.  Hard-failing prevents a demo where the assistant appears to
+    audio.  Exiting early prevents a run where the assistant appears to
     respond but produces no sound.
     """
     model = Path(model_path)
     voices = Path(voices_path)
-    missing: list[str] = []
+    messages: list[str] = []
 
     if not model.is_file():
-        missing.append(
-            f"TTS model file not found: '{model_path}'\n"
-            "  Download kokoro-v1_0.onnx from the kokoro-onnx releases page\n"
-            "  and place it at the configured path, or update config.yaml → tts.model_path."
+        messages.append(
+            f"  - TTS model file not found: '{model_path}'\n"
+            "    Download kokoro-v1_0.onnx from the kokoro-onnx releases page\n"
+            "    and place it at the configured path, or update config.yaml → tts.model_path.\n"
         )
     else:
         logger.info("TTS model file found: %s", model_path)
 
     if not voices.is_file():
-        missing.append(
-            f"TTS voices file not found: '{voices_path}'\n"
-            "  Download voices.bin from the kokoro-onnx releases page\n"
-            "  and place it at the configured path, or update config.yaml → tts.voices_path."
+        messages.append(
+            f"  - TTS voices file not found: '{voices_path}'\n"
+            "    Download voices.bin from the kokoro-onnx releases page\n"
+            "    and place it at the configured path, or update config.yaml → tts.voices_path.\n"
         )
     else:
         logger.info("TTS voices file found: %s", voices_path)
 
-    if missing:
-        raise RuntimeError("\n".join(missing))
+    if messages:
+        sys.stderr.write(
+            "\nERROR: Required TTS file(s) not found. Lumi cannot produce audio.\n\n"
+            + "".join(messages)
+            + "\n"
+        )
+        if Path(_SETUP_WIZARD_PATH).is_file():
+            sys.stderr.write(
+                f"Run the setup wizard for guided installation:\n"
+                f"  uv run python {_SETUP_WIZARD_PATH}\n\n"
+            )
+        sys.exit(1)
 
 
 def _check_llm_package() -> None:

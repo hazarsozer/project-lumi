@@ -82,10 +82,12 @@ def test_ears_start_sets_listening_flag(
     ears = _make_ears(mock_oww_model)
 
     call_count = [0]
+    assertion_done = threading.Event()
 
     def _limited_get(**kwargs):
         call_count[0] += 1
         if call_count[0] >= 2:
+            assertion_done.wait(timeout=2.0)  # wait for main thread to assert first
             ears.listening = False
             raise queue.Empty
         return np.zeros(1280, dtype=np.int16)
@@ -95,6 +97,7 @@ def test_ears_start_sets_listening_flag(
     event_queue: queue.Queue = queue.Queue()
     ears.start(event_queue)
     assert ears.listening is True  # flag set synchronously before thread starts
+    assertion_done.set()  # release thread to exit
     ears.thread.join(timeout=3.0)
 
 

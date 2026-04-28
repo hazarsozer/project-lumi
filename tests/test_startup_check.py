@@ -47,7 +47,7 @@ def test_check_llm_model_raises_when_file_missing(tmp_path):
     from src.core.startup_check import _check_llm_model
 
     missing = str(tmp_path / "model.gguf")
-    with pytest.raises(RuntimeError, match="not found"):
+    with pytest.raises(SystemExit):
         _check_llm_model(missing)
 
 
@@ -109,7 +109,7 @@ def test_check_tts_model_raises_when_model_missing(tmp_path):
     voices.write_bytes(b"\x00" * 8)
     missing_model = str(tmp_path / "kokoro.onnx")
 
-    with pytest.raises(RuntimeError, match="TTS model file not found"):
+    with pytest.raises(SystemExit):
         _check_tts_model(missing_model, str(voices))
 
 
@@ -122,7 +122,7 @@ def test_check_tts_model_raises_when_voices_missing(tmp_path):
     model.write_bytes(b"\x00" * 8)
     missing_voices = str(tmp_path / "voices.bin")
 
-    with pytest.raises(RuntimeError, match="TTS voices file not found"):
+    with pytest.raises(SystemExit):
         _check_tts_model(str(model), missing_voices)
 
 

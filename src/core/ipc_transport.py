@@ -77,6 +77,7 @@ class IPCTransport:
         self._recv_thread: threading.Thread | None = None
 
         self._on_message: Callable[[bytes], None] | None = None
+        self._on_connect: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -190,6 +191,15 @@ class IPCTransport:
         """
         self._on_message = callback
 
+    def set_on_connect(self, callback: Callable[[], None]) -> None:
+        """Register the callback invoked when a new client connects.
+
+        Args:
+            callback: Called (no arguments) from the accept daemon thread
+                      immediately after the client socket is stored.
+        """
+        self._on_connect = callback
+
     def is_connected(self) -> bool:
         """Return True if a client socket is currently active."""
         with self._client_lock:
@@ -257,6 +267,14 @@ class IPCTransport:
                         except OSError:
                             pass
                     self._client_sock = conn
+
+                # Fire the on_connect hook (e.g. HandshakeHandler.on_client_connected).
+                on_connect = self._on_connect
+                if on_connect is not None:
+                    try:
+                        on_connect()
+                    except Exception as exc:
+                        logger.warning("on_connect callback raised: %s", exc)
 
                 # Join any lingering recv thread before starting a new one.
                 if self._recv_thread is not None and self._recv_thread.is_alive():

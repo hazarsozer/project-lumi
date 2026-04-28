@@ -134,6 +134,19 @@ class FakeGodotClient:
         header = struct.pack(_HEADER_FORMAT, len(raw_body))
         self._sock.sendall(header + raw_body)
 
+    def do_handshake(self, timeout: float = 1.0) -> None:
+        """Complete the hello/hello_ack handshake after connecting.
+
+        Reads the server's hello frame and sends back hello_ack so that
+        normal messages are forwarded downstream by HandshakeHandler.
+        """
+        hello = self.recv_message(timeout=timeout)
+        assert hello.get("type") == "hello", f"expected hello frame, got {hello!r}"
+        ack: bytes = json.dumps(
+            {"type": "hello_ack", "version": "1.0", "status": "ok"}
+        ).encode("utf-8")
+        self.send_raw(ack)
+
     def recv_message(self, timeout: float = _DEFAULT_RECV_TIMEOUT) -> dict[str, Any]:
         """Read one length-prefixed frame and return the decoded JSON dict.
 
@@ -271,6 +284,7 @@ def test_full_state_lifecycle(
     with FakeGodotClient(port) as client:
         # Wait for the accept loop to register the new connection.
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
 
         state_machine.transition_to(LumiState.LISTENING)
 
@@ -301,6 +315,7 @@ def test_interrupt_returns_to_idle(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
         client.send_message("interrupt", {})
 
         event = event_queue.get(timeout=2.0)
@@ -327,6 +342,7 @@ def test_user_text_triggers_event(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
         client.send_message("user_text", {"text": "hello"})
 
         event = event_queue.get(timeout=2.0)
@@ -353,6 +369,7 @@ def test_viseme_forwarding(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
 
         viseme = VisemeEvent(
             utterance_id="utt-test",
@@ -388,6 +405,7 @@ def test_malformed_client_message_no_crash(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
 
         # Send a frame whose body is not valid JSON.
         client.send_raw(b"not json }{{}}")
@@ -423,7 +441,7 @@ def test_client_reconnect(
     """
     _, port = ipc_stack
 
-    # First client connects then disconnects.
+    # First client connects then disconnects (no handshake needed — closes immediately).
     first = FakeGodotClient(port)
     first.connect()
     time.sleep(_CONNECT_SETTLE_S)
@@ -436,6 +454,7 @@ def test_client_reconnect(
     # Second client connects.
     with FakeGodotClient(port) as second:
         time.sleep(_CONNECT_SETTLE_S)
+        second.do_handshake()
 
         state_machine.transition_to(LumiState.LISTENING)
 

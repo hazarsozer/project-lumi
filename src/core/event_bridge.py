@@ -54,6 +54,7 @@ from src.core.events import (
     VisemeEvent,
     ZMQMessage,
 )
+from src.core.handshake import HandshakeHandler
 from src.core.ipc_transport import IPCTransport
 from src.core.state_machine import LumiState, StateMachine
 
@@ -101,7 +102,13 @@ class EventBridge:
             host = host[len(_TCP_SCHEME) :]
 
         self._transport: IPCTransport = IPCTransport(host=host, port=config.port)
-        self._transport.set_on_message(self._on_raw_message)
+
+        # Wire capability handshake: on client connect, send hello and wait for
+        # hello_ack before forwarding normal messages downstream.
+        self._handshake: HandshakeHandler = HandshakeHandler(self._transport)
+        self._handshake.set_downstream_callback(self._on_raw_message)
+        self._transport.set_on_connect(self._handshake.on_client_connected)
+        self._transport.set_on_message(self._handshake.on_message_received)
 
         # Register as a state observer so every transition is forwarded to Body.
         state_machine.register_observer(self.on_state_change)

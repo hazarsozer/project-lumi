@@ -138,6 +138,25 @@ class FakeGodotClient:
         header: bytes = struct.pack(_HEADER_FORMAT, len(raw_body))
         self._sock.sendall(header + raw_body)
 
+    def do_handshake(self, timeout: float = 1.0) -> None:
+        """Complete the hello/hello_ack handshake after connecting.
+
+        HandshakeHandler sends a ``hello`` frame immediately on connect.
+        This reads it and replies with ``hello_ack`` so normal messages
+        are forwarded downstream.
+
+        Args:
+            timeout: Seconds to wait for the hello frame.
+        """
+        hello = self.recv_frame(timeout=timeout)
+        assert hello.get("type") == "hello", f"expected hello frame, got {hello!r}"
+        ack: bytes = json.dumps(
+            {"type": "hello_ack", "version": "1.0", "status": "ok"}
+        ).encode("utf-8")
+        header: bytes = struct.pack(_HEADER_FORMAT, len(ack))
+        assert self._sock is not None
+        self._sock.sendall(header + ack)
+
     def recv_frame(self, timeout: float = 2.0) -> dict[str, Any]:
         """Read one length-prefixed frame and return the decoded JSON dict.
 

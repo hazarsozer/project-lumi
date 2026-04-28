@@ -151,6 +151,7 @@ def test_client_receives_state_change_on_connect(
     with FakeGodotClient(port) as client:
         # Let the accept loop register the new connection.
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
 
         state_machine.transition_to(LumiState.LISTENING)
 
@@ -188,6 +189,7 @@ def test_client_send_interrupt_posts_to_queue(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
         client.send_frame("interrupt", {})
 
         event = event_queue.get(timeout=_RECV_TIMEOUT_S)
@@ -221,6 +223,7 @@ def test_client_send_user_text_posts_to_queue(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
         client.send_frame("user_text", {"text": "hello"})
 
         event = event_queue.get(timeout=_RECV_TIMEOUT_S)
@@ -253,6 +256,7 @@ def test_client_send_rag_set_enabled_posts_to_queue(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
         client.send_frame("rag_set_enabled", {"enabled": True})
 
         event = event_queue.get(timeout=_RECV_TIMEOUT_S)
@@ -290,6 +294,7 @@ def test_malformed_frame_does_not_crash_server(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
 
         # Send a frame whose body is not valid JSON (raw ASCII, no braces).
         client.send_raw_frame(b"NOTJSON")
@@ -331,6 +336,7 @@ def test_server_sends_tts_start(
 
     with FakeGodotClient(port) as client:
         time.sleep(_CONNECT_SETTLE_S)
+        client.do_handshake()
 
         zmq_server.on_tts_start(LLMResponseReadyEvent(text="hello"))
 
