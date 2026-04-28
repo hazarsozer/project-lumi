@@ -129,6 +129,9 @@ llm:
   # Set to 0.0 to disable the watchdog.
   inference_timeout_s: 30.0
 
+  lora_path: null          # path to .gguf LoRA adapter, or null for base model
+  lora_scale: 1.0          # adapter strength (0.0–1.0+)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # tts — Kokoro ONNX text-to-speech settings (Phase 4)
 # ─────────────────────────────────────────────────────────────────────────────

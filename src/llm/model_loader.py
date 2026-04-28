@@ -61,6 +61,10 @@ class ModelLoader:
             kwargs["cache_type_k"] = config.kv_cache_quant
             kwargs["cache_type_v"] = config.kv_cache_quant
 
+        if config.lora_path is not None:
+            kwargs["lora_path"] = config.lora_path
+            kwargs["lora_scale"] = config.lora_scale
+
         with self._vram_lock:
             try:
                 self._model = llama_cpp.Llama(**kwargs)
@@ -84,10 +88,11 @@ class ModelLoader:
                 raise
 
         logger.info(
-            "Model loaded from %s (n_gpu_layers=%d, n_ctx=%d)",
+            "Model loaded from %s (n_gpu_layers=%d, n_ctx=%d%s)",
             model_path,
             config.n_gpu_layers,
             config.context_length,
+            f", lora={config.lora_path}" if config.lora_path else "",
         )
 
     def unload(self) -> None:

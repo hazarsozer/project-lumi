@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from src.core.config import LLMConfig
-from src.llm.model_registry import ModelRegistry
+from src.llm.model_registry import AdapterSpec, ModelRegistry
 
 
 def _cfg(path: str = "models/llm/fake.gguf") -> LLMConfig:
@@ -82,6 +82,90 @@ def test_model_returns_instance_when_loaded(mock_llama_cpp: MagicMock) -> None:
     registry.register("base", _cfg())
     registry.load("base")
     assert registry.model is not None
+
+
+# ---------------------------------------------------------------------------
+# AdapterSpec tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_adapter_spec_fields() -> None:
+    """AdapterSpec stores persona, task, lora_path, and lora_scale correctly."""
+    spec = AdapterSpec(persona="assistant", task="coding", lora_path="lora/code.gguf", lora_scale=0.9)
+    assert spec.persona == "assistant"
+    assert spec.task == "coding"
+    assert spec.lora_path == "lora/code.gguf"
+    assert spec.lora_scale == 0.9
+
+
+@pytest.mark.unit
+def test_adapter_spec_default_scale() -> None:
+    """AdapterSpec.lora_scale defaults to 1.0 when omitted."""
+    spec = AdapterSpec(persona="assistant", task=None, lora_path="lora/base.gguf")
+    assert spec.lora_scale == 1.0
+
+
+@pytest.mark.unit
+def test_adapter_spec_is_frozen() -> None:
+    """AdapterSpec is a frozen dataclass — mutation must raise FrozenInstanceError."""
+    spec = AdapterSpec(persona="assistant", task=None, lora_path="lora/base.gguf")
+    with pytest.raises(Exception):
+        spec.lora_scale = 0.5  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# register_adapter / resolve tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_register_and_resolve_exact(mock_llama_cpp: MagicMock) -> None:
+    """register_adapter + resolve roundtrip returns the same spec."""
+    registry = ModelRegistry()
+    spec = AdapterSpec(persona="assistant", task="coding", lora_path="lora/code.gguf")
+    registry.register_adapter(spec)
+    result = registry.resolve("assistant", "coding")
+    assert result == spec
+
+
+@pytest.mark.unit
+def test_resolve_falls_back_to_persona_none(mock_llama_cpp: MagicMock) -> None:
+    """resolve falls back to (persona, None) when exact (persona, task) is absent."""
+    registry = ModelRegistry()
+    fallback = AdapterSpec(persona="assistant", task=None, lora_path="lora/base.gguf")
+    registry.register_adapter(fallback)
+    # Ask for a specific task that was never registered.
+    result = registry.resolve("assistant", "summarise")
+    assert result == fallback
+
+
+@pytest.mark.unit
+def test_resolve_exact_preferred_over_fallback(mock_llama_cpp: MagicMock) -> None:
+    """When both an exact match and a (persona, None) fallback exist,
+    the exact match is returned."""
+    registry = ModelRegistry()
+    fallback = AdapterSpec(persona="assistant", task=None, lora_path="lora/base.gguf")
+    exact = AdapterSpec(persona="assistant", task="coding", lora_path="lora/code.gguf")
+    registry.register_adapter(fallback)
+    registry.register_adapter(exact)
+    result = registry.resolve("assistant", "coding")
+    assert result == exact
+
+
+@pytest.mark.unit
+def test_resolve_returns_none_when_no_match(mock_llama_cpp: MagicMock) -> None:
+    """resolve returns None when no entry exists for the persona."""
+    registry = ModelRegistry()
+    assert registry.resolve("unknown_persona") is None
+
+
+@pytest.mark.unit
+def test_resolve_returns_none_when_persona_missing_task_fallback(mock_llama_cpp: MagicMock) -> None:
+    """resolve returns None when only a different persona is registered."""
+    registry = ModelRegistry()
+    registry.register_adapter(AdapterSpec(persona="other", task=None, lora_path="x.gguf"))
+    assert registry.resolve("assistant") is None
 
 
 @pytest.mark.unit

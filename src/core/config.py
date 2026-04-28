@@ -135,6 +135,15 @@ class LLMConfig:
     # 0.0 disables the watchdog entirely.
     inference_timeout_s: float = 30.0
 
+    # Optional path to a .gguf LoRA adapter file.  When set, the adapter is
+    # loaded at model init time via the llama-cpp-python constructor.  Requires
+    # lora_scale to be set; use_mmap is forced off by llama-cpp-python when any
+    # lora_path is provided.
+    lora_path: str | None = None
+
+    # LoRA adapter strength (0.0–1.0+). Only used when lora_path is set.
+    lora_scale: float = 1.0
+
 
 @dataclass(frozen=True)
 class TTSConfig:

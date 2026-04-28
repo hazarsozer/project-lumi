@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from src.core.config import LLMConfig
 from src.llm.model_loader import ModelLoader
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AdapterSpec:
+    """Maps a (persona, task) pair to a LoRA adapter path and scale."""
+
+    persona: str
+    task: str | None
+    lora_path: str
+    lora_scale: float = 1.0
 
 
 class ModelRegistry:
@@ -24,6 +35,7 @@ class ModelRegistry:
         self._configs: dict[str, LLMConfig] = {}
         self._loader: ModelLoader = ModelLoader()
         self._current_name: str | None = None
+        self._adapters: dict[tuple[str, str | None], AdapterSpec] = {}
 
     def register(self, name: str, config: LLMConfig) -> None:
         """Register a named model config. Silently overwrites if name exists."""
@@ -74,3 +86,31 @@ class ModelRegistry:
     def list_registered(self) -> list[str]:
         """Return names of all registered model configs."""
         return list(self._configs)
+
+    def register_adapter(self, spec: AdapterSpec) -> None:
+        """Register a LoRA adapter spec keyed by (persona, task).
+
+        Silently overwrites any existing entry for the same (persona, task) pair.
+        """
+        self._adapters[(spec.persona, spec.task)] = spec
+        logger.debug(
+            "Registered adapter for persona=%r task=%r at %s",
+            spec.persona,
+            spec.task,
+            spec.lora_path,
+        )
+
+    def resolve(self, persona: str, task: str | None = None) -> AdapterSpec | None:
+        """Look up a LoRA adapter for a (persona, task) pair.
+
+        Resolution order:
+        1. Exact match on (persona, task).
+        2. Fallback to (persona, None) when the exact match is missing.
+        3. Returns None when neither entry exists.
+        """
+        exact = self._adapters.get((persona, task))
+        if exact is not None:
+            return exact
+        if task is not None:
+            return self._adapters.get((persona, None))
+        return None

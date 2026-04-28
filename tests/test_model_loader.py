@@ -166,6 +166,35 @@ def test_kv_cache_quant_none_not_forwarded(mock_llama_cpp: MagicMock) -> None:
 
 
 @pytest.mark.unit
+def test_lora_path_none_not_forwarded(mock_llama_cpp: MagicMock) -> None:
+    """When config.lora_path is None (default), lora_path and lora_scale must
+    not be present in the Llama() kwargs."""
+    config = LLMConfig()  # lora_path defaults to None
+    assert config.lora_path is None
+    loader = ModelLoader()
+    loader.load(config)
+
+    assert mock_llama_cpp.call_count == 1
+    kwargs = mock_llama_cpp.call_args.kwargs
+    assert "lora_path" not in kwargs
+    assert "lora_scale" not in kwargs
+
+
+@pytest.mark.unit
+def test_lora_path_forwarded_with_scale(mock_llama_cpp: MagicMock) -> None:
+    """When config.lora_path is set, lora_path and lora_scale must be forwarded
+    to llama_cpp.Llama()."""
+    config = LLMConfig(lora_path="adapter.gguf", lora_scale=0.8)
+    loader = ModelLoader()
+    loader.load(config)
+
+    assert mock_llama_cpp.call_count == 1
+    kwargs = mock_llama_cpp.call_args.kwargs
+    assert kwargs.get("lora_path") == "adapter.gguf"
+    assert kwargs.get("lora_scale") == 0.8
+
+
+@pytest.mark.unit
 def test_kv_cache_quant_graceful_fallback(
     mock_llama_cpp: MagicMock, caplog: pytest.LogCaptureFixture
 ) -> None:
