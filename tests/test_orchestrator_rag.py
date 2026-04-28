@@ -25,6 +25,7 @@ def _make_config(*, rag_enabled=False, tools_enabled=False, vision_enabled=False
     cfg.llm.max_tokens = 5
     cfg.llm.temperature = 0.7
     cfg.llm.context_length = 512
+    cfg.llm.inference_timeout_s = 30.0
     return cfg
 
 

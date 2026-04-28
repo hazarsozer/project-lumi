@@ -508,6 +508,45 @@ class Orchestrator:
                     self._state_machine.transition_to(LumiState.IDLE)
 
         thread = threading.Thread(target=_run_inference, daemon=True)
+
+        # --- per-turn watchdog -----------------------------------------------
+        # A Timer fires if the inference thread does not complete within the
+        # configured budget.  On expiry the cancel flag is set so that the LLM
+        # worker aborts on its next cooperative check, and the state machine is
+        # forced back to IDLE so the assistant stays responsive.
+        _timeout_s = self._config.llm.inference_timeout_s
+        _watchdog_timer: threading.Timer | None = None
+
+        if _timeout_s > 0.0:
+            def _watchdog_fn() -> None:
+                logger.warning(
+                    "LLM inference watchdog fired after %.1f s for %r (source=%s) — "
+                    "setting cancel flag and returning to IDLE",
+                    _timeout_s,
+                    text,
+                    source,
+                )
+                self._llm_cancel_flag.set()
+                with self._llm_state_lock:
+                    if self._state_machine.current_state == LumiState.PROCESSING:
+                        self._state_machine.transition_to(LumiState.IDLE)
+
+            _watchdog_timer = threading.Timer(_timeout_s, _watchdog_fn)
+            _watchdog_timer.daemon = True
+            _watchdog_timer.start()
+
+        def _run_inference_with_watchdog() -> None:
+            try:
+                _run_inference()
+            finally:
+                if _watchdog_timer is not None:
+                    _watchdog_timer.cancel()
+
+        thread = threading.Thread(
+            target=_run_inference_with_watchdog, daemon=True, name="LLMInferenceThread"
+        )
+        # ---------------------------------------------------------------------
+
         thread.start()
 
     def _handle_llm_response(self, event: LLMResponseReadyEvent) -> None:

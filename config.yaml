@@ -123,6 +123,12 @@ llm:
   # Tilde (~) is expanded at use time.
   memory_dir: ~/.lumi/memory
 
+  # Watchdog timeout in seconds for a single inference call.
+  # If the LLM thread does not finish within this budget the watchdog sets the
+  # cancel flag, logs a WARNING, and posts an error event so Lumi returns to IDLE.
+  # Set to 0.0 to disable the watchdog.
+  inference_timeout_s: 30.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 # tts — Kokoro ONNX text-to-speech settings (Phase 4)
 # ─────────────────────────────────────────────────────────────────────────────

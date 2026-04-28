@@ -128,6 +128,13 @@ class LLMConfig:
     # Directory for persistent conversation memory (expanded at use time).
     memory_dir: str = "~/.lumi/memory"
 
+    # Maximum wall-clock seconds allowed for a single LLM inference call.
+    # A watchdog timer set to this value will fire if the inference thread
+    # does not complete within the budget, setting _llm_cancel_flag and
+    # posting an error event so the orchestrator returns to IDLE.
+    # 0.0 disables the watchdog entirely.
+    inference_timeout_s: float = 30.0
+
 
 @dataclass(frozen=True)
 class TTSConfig:
