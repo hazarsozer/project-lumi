@@ -29,14 +29,25 @@ const EV_BRAIN = "lumi://brain-event";
 const EV_SEND = "lumi://send-text";
 const EV_CONFIG_UPDATE = "lumi://config-update";
 
+interface SystemStatus {
+  tts_available: boolean;
+  rag_available: boolean;
+  mic_available: boolean;
+  llm_available: boolean;
+}
+
 // ── Overlay root — owns the WS client ─────────────────────────────────────────
 function OverlayRoot() {
   const { client } = useBrainSocket();
   const state = useLumiState(client);
+  const [sysStatus, setSysStatus] = useState<SystemStatus | null>(null);
 
   // Re-broadcast every brain event to Chat/Settings windows via Tauri event bus
   useEffect(() => {
     const unsub = client.onEvent((evt: LumiBrainEvent) => {
+      if (evt.event === "system_status") {
+        setSysStatus(evt.payload);
+      }
       void tauriEmit(EV_BRAIN, evt);
     });
     return unsub;
@@ -87,6 +98,7 @@ function OverlayRoot() {
   return (
     <CompactOverlay
       brainState={avatarState}
+      micAvailable={sysStatus === null || sysStatus.mic_available}
       onSettingsClick={() => { void toggleWindow("settings"); }}
       onChatClick={() => { void toggleWindow("chat"); }}
       onMicClick={() => {

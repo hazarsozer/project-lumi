@@ -257,3 +257,22 @@ class ConfigUpdateEvent:
         return self.changes == other.changes and self.persist == other.persist
 
     __hash__ = None  # type: ignore[assignment]
+
+
+@dataclass(frozen=True)
+class SystemStatusEvent:
+    """Broadcast on startup and on subsystem degradation.
+
+    Carries boolean capability flags so the frontend can show which features
+    are active.  ``source`` distinguishes startup announcements from runtime
+    degradation events (e.g. mic failure after startup).
+
+    source: "startup"     — posted once after all subsystems have initialised.
+            "degradation" — posted when a previously-available subsystem fails.
+    """
+
+    tts_available: bool
+    rag_available: bool
+    mic_available: bool
+    llm_available: bool
+    source: str = "startup"  # "startup" | "degradation"

@@ -41,6 +41,7 @@ from src.core.events import (
     RecordingCompleteEvent,
     ShutdownEvent,
     SpeechCompletedEvent,
+    SystemStatusEvent,
     TranscriptReadyEvent,
     UserTextEvent,
     VisemeEvent,
@@ -265,6 +266,7 @@ class Orchestrator:
             self.register_handler(LLMResponseReadyEvent, self._zmq_server.on_tts_start)
             self.register_handler(LLMTokenEvent, self._zmq_server.on_llm_token)
             self.register_handler(RAGRetrievalEvent, self._zmq_server.on_rag_retrieval)
+            self.register_handler(SystemStatusEvent, self._zmq_server.on_system_status)
 
     @property
     def state_machine(self) -> StateMachine:
@@ -306,6 +308,17 @@ class Orchestrator:
         logger.info("Orchestrator starting event loop")
         if self._ears is not None:
             self._ears.start(self._event_queue)
+
+        self._event_queue.put(
+            SystemStatusEvent(
+                tts_available=self._tts is not None,
+                rag_available=self._rag_runtime_enabled
+                and self._rag_retriever is not None,
+                mic_available=self._ears is not None,
+                llm_available=True,
+                source="startup",
+            )
+        )
 
         while not self._shutdown:
             try:
@@ -767,7 +780,7 @@ class Orchestrator:
             self._state_machine.transition_to(LumiState.IDLE)
 
     def _handle_ears_error(self, event: EarsErrorEvent) -> None:
-        """Handle EarsErrorEvent: log, surface to Godot, and return to IDLE.
+        """Handle EarsErrorEvent: log, notify frontend of mic degradation, return to IDLE.
 
         Args:
             event: The error event posted by the Ears thread on exhausting retries.
@@ -780,6 +793,16 @@ class Orchestrator:
         current = self._state_machine.current_state
         if current != LumiState.IDLE:
             self._state_machine.transition_to(LumiState.IDLE)
+        self._event_queue.put(
+            SystemStatusEvent(
+                tts_available=self._tts is not None,
+                rag_available=self._rag_runtime_enabled
+                and self._rag_retriever is not None,
+                mic_available=False,
+                llm_available=True,
+                source="degradation",
+            )
+        )
 
     def _handle_shutdown(self, event: ShutdownEvent) -> None:
         """Handle ShutdownEvent: stop the event loop.

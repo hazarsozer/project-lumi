@@ -34,6 +34,16 @@ export type LumiBrainEvent =
         last_indexed: string;
       };
     }
+  | {
+      event: "system_status";
+      payload: {
+        tts_available: boolean;
+        rag_available: boolean;
+        mic_available: boolean;
+        llm_available: boolean;
+        source: "startup" | "degradation";
+      };
+    }
   | { event: "error"; payload: { code: string; message: string } }
   | {
       event: "config_schema";

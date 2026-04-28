@@ -6,12 +6,13 @@ import { LumiAvatar } from './LumiAvatar';
 
 export interface CompactOverlayProps {
   brainState: AvatarStateKey;
+  micAvailable?: boolean;
   onSettingsClick: () => void;
   onChatClick: () => void;
   onMicClick: () => void;
 }
 
-export function CompactOverlay({ brainState, onSettingsClick, onChatClick, onMicClick }: CompactOverlayProps) {
+export function CompactOverlay({ brainState, micAvailable = true, onSettingsClick, onChatClick, onMicClick }: CompactOverlayProps) {
   const st = AVATAR_STATES[brainState];
   const [hoverSettings, setHoverSettings] = useState(false);
   const [hoverChat, setHoverChat] = useState(false);
@@ -50,14 +51,17 @@ export function CompactOverlay({ brainState, onSettingsClick, onChatClick, onMic
         boxShadow: `${T.shadow.md}, inset 0 1px 0 oklch(100% 0 0 / 0.05)`,
         backdropFilter: 'blur(18px)',
       }}>
-        {/* Status dot */}
-        <div style={{
-          width: 6, height: 6, borderRadius: '50%',
-          background: st.color,
-          boxShadow: st.glow,
-          opacity: 0.9,
-          flexShrink: 0,
-        }} />
+        {/* Status dot — amber when mic unavailable */}
+        <div
+          title={micAvailable ? undefined : "Microphone unavailable"}
+          style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: micAvailable ? st.color : 'oklch(75% 0.18 70)',
+            boxShadow: micAvailable ? st.glow : '0 0 6px oklch(75% 0.18 70 / 0.6)',
+            opacity: 0.9,
+            flexShrink: 0,
+          }}
+        />
 
         <span
           key={brainState}

@@ -49,6 +49,7 @@ from src.core.events import (
     RAGSetEnabledEvent,
     RAGStatusEvent,
     SpeechCompletedEvent,
+    SystemStatusEvent,
     TranscriptReadyEvent,
     UserTextEvent,
     VisemeEvent,
@@ -241,6 +242,21 @@ class EventBridge:
             "last_indexed": event.last_indexed,
         }
         self._send("rag_status", payload)
+
+    def on_system_status(self, event: SystemStatusEvent) -> None:
+        """Forward system capability flags to the frontend.
+
+        Args:
+            event: The status event describing which subsystems are available.
+        """
+        payload: dict[str, Any] = {
+            "tts_available": event.tts_available,
+            "rag_available": event.rag_available,
+            "mic_available": event.mic_available,
+            "llm_available": event.llm_available,
+            "source": event.source,
+        }
+        self._send("system_status", payload)
 
     def on_error(self, code: str, message: str) -> None:
         """Forward an error notification to the Body.
