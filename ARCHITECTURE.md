@@ -4,16 +4,16 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 8.5 complete (Settings UI; 2026-04-26).
+> Last updated to reflect actual state as of Phase 9.5 + Ring 1 complete (2026-05-02).
 
 ---
 
 ## 1. System Architecture: "The Split-Brain"
 
-Lumi is decoupled into two independent processes that communicate via raw TCP with 4-byte length-prefix framing. This ensures the desktop (especially games and renderers) remains fully responsive regardless of what Lumi's brain is doing.
+Lumi is decoupled into two independent processes that communicate via WebSocket with 4-byte length-prefix framing. This ensures the desktop (especially games and renderers) remains fully responsive regardless of what Lumi's brain is doing.
 
 ```
-┌──────────────────────────────┐        Raw TCP (length-prefix)  ┌──────────────────────┐
+┌──────────────────────────────┐     WebSocket (length-prefix)   ┌──────────────────────┐
 │         THE BRAIN            │ ◄──────────────────────────────► │       THE BODY       │
 │      (Python Backend)        │  JSON: {event, payload,         │  (Tauri/React UI)    │
 │                              │         timestamp, version}     │                      │
@@ -31,16 +31,17 @@ Lumi is decoupled into two independent processes that communicate via raw TCP wi
 
 ### The Body (Frontend)
 - **Role:** Visual avatar, animated overlay, user-facing UI
-- **Tech:** Tauri/React (WebSocket-to-TCP bridge); Godot 4 (legacy, X11/Wayland)
+- **Tech:** Tauri 2 + React 18
 - **Target:** < 200MB RAM, negligible GPU at all times
 
 ### The Nerves (IPC)
-- **Protocol:** Raw TCP, 4-byte big-endian uint32 length prefix + UTF-8 JSON body
-- **Transport class:** `IPCTransport` (`src/core/ipc_transport.py`) — single-client, two daemon threads (`ipc-accept`, `ipc-recv`), stdlib `socket` only (no pyzmq)
-- **Event bridge:** `EventBridge` (`src/core/event_bridge.py`) — sits on top of `IPCTransport`, translates outbound internal events to JSON wire frames, translates inbound JSON frames to internal events posted to the orchestrator queue. `src/core/zmq_server.py` is a backwards-compatibility shim that re-exports `EventBridge` as `ZMQServer`.
-- **Enabled by:** `config.ipc.enabled: true` in `config.yaml` (default `false`; keep `false` for headless / CI runs)
-- **Default endpoint:** `tcp://127.0.0.1:5555`
+- **Protocol:** WebSocket, 4-byte big-endian uint32 length prefix + UTF-8 JSON body
+- **Transport class:** `WSTransport` (`src/core/ws_transport.py`) — asyncio WebSocket server; the Brain runs the WS server directly (no separate bridge process required)
+- **Event bridge:** `EventBridge` (`src/core/event_bridge.py`) — sits on top of `WSTransport`, translates outbound internal events to JSON wire frames, translates inbound JSON frames to internal events posted to the orchestrator queue.
+- **Enabled by:** `config.ipc.enabled: true` in `config.yaml` (default `true`; set `false` for headless / CI runs)
+- **Default endpoint:** `ws://127.0.0.1:5556`
 - **Format:** `{ "event": string, "payload": object, "timestamp": float, "version": string }`
+- **Handshake:** Brain sends `hello` on connect; client responds with `hello_ack`. Version negotiation in `src/core/handshake.py`.
 - **Wire-format schema:** `ZMQMessage` dataclass in `src/core/events.py`. **IPC event types:**
 
 | Event | Direction | Payload |
@@ -58,6 +59,7 @@ Lumi is decoupled into two independent processes that communicate via raw TCP wi
 | `config_schema` | Brain → Body | `{ "fields": [...], "current": {...} }` |
 | `config_update` | Body → Brain | `{ "changes": { "dotted.key": value, ... }, "persist": bool }` |
 | `config_update_result` | Brain → Body | `{ "success": bool, "errors": [...], "restart_required": bool }` |
+| `system_status` | Brain → Body | `{ "tts_available": bool, "rag_available": bool, "mic_available": bool, "llm_available": bool, "setup_required": bool, "missing_items": [] }` |
 
 ---
 
@@ -75,18 +77,19 @@ The pipeline is event-driven. All components post typed, frozen dataclass events
 | `CommandResultEvent` | Orchestrator (command parser) | Orchestrator |
 | `LLMResponseReadyEvent` | LLM engine | Orchestrator |
 | `TTSChunkReadyEvent` | TTS engine | Speaker thread |
-| `VisemeEvent` | TTS engine (mouth.py) | Orchestrator / ZMQ server (lip-sync) |
+| `VisemeEvent` | TTS engine (mouth.py) | Orchestrator / EventBridge (lip-sync) |
 | `SpeechCompletedEvent` | SpeakerThread / KokoroTTS | Orchestrator |
 | `LLMTokenEvent` | LLM reasoning router | Orchestrator (streaming tokens) |
-| `InterruptEvent` | Any source (Body via ZMQ, new wake word) | Orchestrator |
+| `InterruptEvent` | Any source (Body via WebSocket, new wake word) | Orchestrator |
 | `ShutdownEvent` | main.py / signal handler | Orchestrator |
-| `UserTextEvent` | ZMQ server (Body → Brain) | Orchestrator |
+| `UserTextEvent` | EventBridge (Body → Brain via WebSocket) | Orchestrator |
 | `EarsErrorEvent` | Ears thread (after all retries exhausted) | Orchestrator |
 | `ToolResultEvent` | Async tool callback (e.g. rag_ingest) | Orchestrator |
-| `ConfigSchemaRequestEvent` | EventBridge (Body → Brain) | Orchestrator |
-| `ConfigUpdateEvent` | EventBridge (Body → Brain) | Orchestrator / ConfigManager |
+| `ConfigSchemaRequestEvent` | EventBridge (Body → Brain via WebSocket) | Orchestrator |
+| `ConfigUpdateEvent` | EventBridge (Body → Brain via WebSocket) | Orchestrator / ConfigManager |
+| `SystemStatusEvent` | Orchestrator (on startup and subsystem degradation) | EventBridge → Body |
 
-`ZMQMessage` is also defined in `src/core/events.py` as the wire-format dataclass for ZMQ IPC communication (`event`, `payload`, `timestamp`, `version`).
+`ZMQMessage` is also defined in `src/core/events.py` as the wire-format dataclass for IPC communication (`event`, `payload`, `timestamp`, `version`).
 
 ### Pipeline Flow
 
@@ -144,7 +147,7 @@ When the Orchestrator receives `InterruptEvent` while in `PROCESSING` or `SPEAKI
 
 The `LumiState` enum defines exactly four states: `IDLE`, `LISTENING`, `PROCESSING`, `SPEAKING`. The `StateMachine` class enforces all valid transitions and notifies registered observers. `InvalidTransitionError` is raised for any illegal transition attempt.
 
-State transitions are published to the Body via `state_change` IPC events. `EventBridge` registers itself as a `StateMachine` observer so every transition is forwarded automatically when the IPC server is enabled.
+State transitions are published to the Body via `state_change` IPC events. `EventBridge` registers itself as a `StateMachine` observer so every transition is forwarded automatically when the WebSocket server is enabled.
 
 ---
 
@@ -189,24 +192,25 @@ Hardware is auto-detected at startup to select the appropriate edition.
 ### Frontend — The Body (Phase 9.5)
 | Component | Technology |
 |---|---|
-| Renderer | Tauri v2 + React 18 (WebSocket bridge to TCP backend) |
-| IPC Client | React hook connecting to `ws_bridge.py` (WebSocket relay at :8765) |
-| Frame protocol | 4-byte length-prefix encode/decode (ws_bridge bridges to TCP :5555) |
-| Avatar | React component driving animated avatar from Brain state events; placeholder SVG/images in `app/src/assets/` |
-| Avatar (Phase 9) | Real artwork replacing placeholder sprites; Live2D (Standard) / 3D VRM (Pro) |
+| Renderer | Tauri 2 + React 18 |
+| IPC Client | `IBrainClient` interface + `useLumiState` hook (`app/src/state/useLumiState.ts`) — connects directly to Brain WebSocket on `ws://127.0.0.1:5556` |
+| Frame protocol | 4-byte length-prefix encode/decode over WebSocket (no bridge process required) |
+| Windows | Three Tauri windows: `OverlayRoot` (transparent avatar overlay), `ChatRoot` (chat panel), `SettingsRoot` (settings panel) |
+| Avatar | `LumiAvatar` React component driving animated avatar from Brain state events; placeholder images in `app/src/assets/` |
 | Settings Panel | `app/src/components/SettingsPanel.tsx` — gear icon / Ctrl+, entry; 7-tab configuration UI; component-based controls (toggle, slider, select, text, number, path, multiselect); requests schema from Brain via `config_schema_request`, applies changes live or marks restart-required |
+| First-run setup | `app/src/components/SetupPanel.tsx` — displayed when `system_status.setup_required` is true; lists missing models and guides initial configuration |
+| Push-to-talk | `src/audio/hotkey.py` (`PTTListener`) — global hotkey listener (default Ctrl+Space); optional `pynput` dependency; toggle via `audio.ptt_enabled` in `config.yaml` |
 
 ### Infrastructure
 | Component | Technology |
 |---|---|
 | Language | Python 3.12 |
 | Package Manager | `uv` |
-| IPC | Raw TCP with 4-byte length-prefix framing (`IPCTransport` + `EventBridge`; stdlib `socket`, no pyzmq). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). **Settings wiring (Phase 8.5):** `config_schema_request` / `config_schema`, `config_update` / `config_update_result` wire events for runtime settings panel. |
-| Observability | `src/core/metrics.py` — stdlib histogram (p50/p95/p99) for latency tracking without external deps |
+| IPC | WebSocket with 4-byte length-prefix framing (`WSTransport` + `EventBridge`; `websockets` library). Version negotiation via `src/core/handshake.py` (`hello` → `hello_ack`). **Settings wiring (Phase 8.5):** `config_schema_request` / `config_schema`, `config_update` / `config_update_result` wire events for runtime settings panel. |
 | Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`). **Runtime config (Phase 8.5):** `src/core/config_runtime.py` — `ConfigManager` + `ConfigObserver` + `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock. `src/core/config_schema.py` — `FIELD_META` dict for 47 user-facing fields. `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover. |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
-| Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — hard/soft checks; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, 932 collected, 925 passed, 4 skipped at last run) |
+| Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — all checks return soft `list[str]` missing-item lists; `main.py` gates `Ears` on wake-word absence; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, ~900 passed, 7 skipped at last run) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)
@@ -221,7 +225,8 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | WindowListTool | `src/tools/os_actions.py` | `wmctrl -l` parse; graceful fail if absent |
 | ScreenshotTool | `src/tools/vision.py` | grim → scrot → Pillow fallback; moondream2 GGUF description; 30s idle unload; VRAM mutex with LLM |
 | Viseme extraction | `src/audio/viseme_map.py` + `src/audio/mouth.py` | 8 viseme groups; `map_phoneme()` strips stress digits; `VisemeEvent` posted per phoneme |
-| Token streaming | `src/llm/reasoning_router.py` + `src/core/event_bridge.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Frontend |
+| Token streaming | `src/llm/reasoning_router.py` + `src/core/event_bridge.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Body |
+| Push-to-talk | `src/audio/hotkey.py` (`PTTListener`, optional `pynput` dep) | Global hotkey wake fallback; `audio.ptt_enabled` / `audio.ptt_hotkey` config keys |
 | Config | `ToolsConfig` + `VisionConfig` in `src/core/config.py`; `tools:` + `vision:` keys in `config.yaml` | |
 
 **Tool-call flow (two-pass):** `_run_inference` → LLM generates `<tool_call>` block → `ToolExecutor.execute()` → result injected into conversation → second LLM pass → `LLMResponseReadyEvent`.
@@ -457,7 +462,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 |---|---|
 | Phase 3 | LLM pipeline |
 | Phase 4 | TTS + VRAM/latency benchmarking |
-| Phase 5 | Godot frontend + IPC transport (complete; LightRAG deferred) |
+| Phase 5 | IPC transport + frontend (complete; LightRAG deferred) |
 | Phase 6 | OS tools + LightRAG Option A (explicit skill) + Option B/C (automatic, if classifier proven) |
 
 **Must complete before LightRAG work:**
@@ -479,7 +484,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 
 ## 7. Actual Directory Structure
 
-Current state as of 2026-04-26 (Phase 8.5 complete):
+Current state as of 2026-05-02 (Phase 9.5 + Ring 1 complete):
 
 ```
 Lumi/
@@ -489,14 +494,33 @@ Lumi/
 ├── .venv/                      # Managed by uv (not committed)
 ├── models/                     # ONNX/GGUF model binaries (not committed)
 │   └── hey_lumi.onnx           # Custom wake word model
+├── app/                        # Tauri 2 + React 18 frontend
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── LumiAvatar.tsx      # Animated avatar component (placeholder images)
+│   │   │   ├── SettingsPanel.tsx   # 7-tab runtime settings; gear icon / Ctrl+, entry
+│   │   │   └── SetupPanel.tsx      # First-run guidance screen (shown when setup_required)
+│   │   ├── ipc/
+│   │   │   ├── client.ts           # IBrainClient interface + WS implementation
+│   │   │   ├── events.ts           # Wire event type definitions
+│   │   │   └── mockClient.ts       # In-process mock client for tests
+│   │   ├── roots/
+│   │   │   ├── OverlayRoot.tsx     # Transparent avatar overlay window
+│   │   │   ├── ChatRoot.tsx        # Chat panel window
+│   │   │   └── SettingsRoot.tsx    # Settings panel window
+│   │   ├── state/
+│   │   │   └── useLumiState.ts     # React hook: manages Brain state from WS events
+│   │   └── styles/
+│   │       └── tokens.ts           # Design tokens (colors, typography, spacing)
+│   └── src-tauri/                  # Tauri Rust shell + config
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py             # Shared fixtures: synthetic audio arrays, sounddevice mock,
 │   │                           #   faster-whisper mock, openwakeword mock, mock_llama_cpp
 │   ├── test_ears.py            # Ears: wake word detection, VAD recording paths
 │   ├── test_events.py          # All event types + ZMQMessage construction
-│   ├── test_ipc_protocol_conformance.py  # Integration: wire protocol round-trips (6 tests, @pytest.mark.integration)
-│   ├── test_ipc_transport.py   # IPCTransport: bind, send, recv, stop (7 tests)
+│   ├── test_ipc_protocol_conformance.py  # Integration: wire protocol round-trips (@pytest.mark.integration)
+│   ├── test_ipc_transport.py   # IPCTransport: bind, send, recv, stop
 │   ├── test_memory.py          # ConversationMemory: add_turn, prune, JSON persistence
 │   ├── test_model_loader.py    # ModelLoader: load/unload lifecycle, path validation
 │   ├── test_mouth.py           # KokoroTTS: synthesize, cancel, is_busy
@@ -509,43 +533,42 @@ Lumi/
 │   ├── test_state_machine.py   # All valid/invalid transition branches
 │   ├── test_tool_call_parser.py # parse_tool_calls: extraction, validation, recovery
 │   ├── test_utils.py           # play_ready_sound() unit tests
-│   ├── test_zmq_server.py      # EventBridge (via ZMQServer shim): outbound events, inbound parsing, lifecycle (16 tests)
-│   ├── test_zmq_server_rag.py  # EventBridge RAG event forwarding (9 tests)
-│   ├── test_zmq_server_token.py # EventBridge on_llm_token() wire frame (3 tests)
+│   ├── test_zmq_server.py      # EventBridge outbound events, inbound parsing, lifecycle
+│   ├── test_zmq_server_rag.py  # EventBridge RAG event forwarding
+│   ├── test_zmq_server_token.py # EventBridge on_llm_token() wire frame
 │   ├── test_rag_config.py      # RAGConfig loading and validation
 │   ├── test_rag_store.py       # DocumentStore: upsert, FTS5, kNN, WAL
 │   ├── test_rag_chunker.py     # chunk_text: overlap, edge cases
 │   ├── test_rag_embedder.py    # Embedder: dim, batch, slow model test
 │   ├── test_rag_loader.py      # load(): txt, md, unsupported formats
 │   ├── test_rag_ingest_script.py # ingest_docs.py CLI integration
-│   ├── test_rag_fusion.py      # reciprocal_rank_fusion (8 tests)
-│   ├── test_rag_retriever.py   # RAGRetriever: timeout, cancel, char-budget (12 tests)
-│   ├── test_rag_intent.py      # route_rag_intent: patterns, edge cases (13 tests)
-│   ├── test_prompt_engine_rag.py  # rag_context injection (7 tests)
-│   ├── test_eval_persona.py        # scripts/eval_persona.py harness (72 tests)
-│   ├── test_ipc_handshake.py       # Version handshake protocol (15 tests); 100% coverage
-│   ├── test_metrics.py             # Histogram module (13 TDD tests); 95% coverage
-│   ├── test_orchestrator_audio_wiring.py # Wake-while-speaking interrupt (3 tests)
-│   ├── test_orchestrator_recovery.py # Orchestrator: memory.save() crash → IDLE recovery (5 tests)
-│   ├── test_reasoning_router_rag.py # use_rag flag, _maybe_retrieve (7 tests)
+│   ├── test_rag_fusion.py      # reciprocal_rank_fusion
+│   ├── test_rag_retriever.py   # RAGRetriever: timeout, cancel, char-budget
+│   ├── test_rag_intent.py      # route_rag_intent: patterns, edge cases
+│   ├── test_prompt_engine_rag.py  # rag_context injection
+│   ├── test_eval_persona.py        # scripts/eval_persona.py harness
+│   ├── test_ipc_handshake.py       # Version handshake protocol; 100% coverage
+│   ├── test_orchestrator_audio_wiring.py # Wake-while-speaking interrupt
+│   ├── test_orchestrator_recovery.py # Orchestrator: memory.save() crash → IDLE recovery
+│   ├── test_reasoning_router_rag.py # use_rag flag, _maybe_retrieve
 │   ├── test_reasoning_router_streaming.py # Token streaming path
-│   ├── test_regression.py          # 6 behavioral contract regressions (persona + state invariants)
-│   ├── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring (8 tests)
+│   ├── test_regression.py          # Behavioral contract regressions (persona + state invariants)
+│   ├── test_orchestrator_rag.py    # RAGSetEnabledEvent, use_rag wiring
 │   ├── test_orchestrator_tools.py  # Orchestrator tool registry wiring
-│   ├── test_tool_rag_ingest.py     # rag_ingest tool (15 tests)
+│   ├── test_tool_rag_ingest.py     # rag_ingest tool
 │   ├── test_tool_executor.py       # ToolExecutor: allowlist gate, timeout, cancel
 │   ├── test_tool_registry.py       # ToolRegistry: register, get, list_tools
 │   ├── test_os_actions.py          # AppLaunchTool, ClipboardTool, FileInfoTool, WindowListTool
 │   ├── test_viseme_map.py          # map_phoneme(): 8 viseme groups, stress digit stripping
 │   ├── test_mouth_visemes.py       # KokoroTTS _post_visemes() integration
 │   ├── test_vision.py              # ScreenshotTool: fallback chain, moondream2 stub
-│   ├── test_vram_mutex_concurrent.py # _VRAM_LOCK mutual exclusion under concurrency (3 tests)
+│   ├── test_vram_mutex_concurrent.py # _VRAM_LOCK mutual exclusion under concurrency
 │   ├── test_logging_config.py      # setup_logging(): human-readable and JSON modes
 │   ├── test_startup_check.py       # run_startup_checks(): hard/soft checks
 │   ├── test_model_quality.py       # Automated model quality assertions (identity, tool calls, brevity)
-│   ├── test_domain_router.py       # DomainRouter.classify(): all 6 domains + general fallback (39 tests)
-│   ├── test_model_registry.py      # ModelRegistry: register, load, unload, properties (11 tests)
-│   ├── test_ears_recovery.py       # EarsErrorEvent, retry loop, orchestrator handler (6 tests)
+│   ├── test_domain_router.py       # DomainRouter.classify(): all 6 domains + general fallback
+│   ├── test_model_registry.py      # ModelRegistry: register, load, unload, properties
+│   ├── test_ears_recovery.py       # EarsErrorEvent, retry loop, orchestrator handler
 │   ├── test_e2e_smoke.py           # End-to-end smoke tests
 │   ├── test_kokoro_phoneme_discovery.py # Kokoro phoneme tuple format discovery
 │   ├── core/
@@ -554,13 +577,9 @@ Lumi/
 │   │   ├── test_config_writer.py   # Atomic YAML write, .bak rollover
 │   │   ├── test_event_bridge_config.py # config_schema_request/config_update wire events
 │   │   └── test_orchestrator_reconfigure.py # Live config apply via Orchestrator
-│   ├── ipc/
-│   │   ├── __init__.py
-│   │   └── test_ws_bridge.py       # WebSocket-to-TCP bridge (ws_bridge.py)
 │   └── integration/
 │       ├── __init__.py
-│       ├── fake_godot_client.py    # Test helper: real TCP client simulating Godot Body
-│       └── test_ipc_full_turn.py  # Full-turn IPC integration tests over real TCP (6 tests)
+│       └── test_ipc_full_turn.py  # Full-turn IPC integration tests over real WebSocket
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                 # Thin bootstrap: logging → config → checks → orchestrator
@@ -569,6 +588,8 @@ Lumi/
 │   │   ├── __init__.py
 │   │   ├── ears.py             # Microphone capture, wake word detection (openWakeWord),
 │   │   │                       #   VAD recording; posts WakeDetectedEvent + RecordingCompleteEvent
+│   │   ├── hotkey.py           # PTTListener: global hotkey daemon (pynput, optional);
+│   │   │                       #   toggle via audio.ptt_enabled / audio.ptt_hotkey in config.yaml
 │   │   ├── mouth.py            # KokoroTTS: sentence-level streaming, prepare()/synthesize()/cancel()/is_busy;
 │   │   │                       #   posts TTSChunkReadyEvent, VisemeEvent
 │   │   ├── scribe.py           # faster-whisper STT transcription; posts TranscriptReadyEvent
@@ -581,29 +602,31 @@ Lumi/
 │   │   │                       #   load_config(), detect_edition()
 │   │   ├── config_runtime.py   # ConfigManager, ConfigObserver, ConfigUpdateResult;
 │   │   │                       #   live apply via dataclasses.replace(); thread-safe RLock
-│   │   ├── config_schema.py    # FIELD_META dict; UI metadata for 47 user-facing config fields
+│   │   ├── config_schema.py    # FIELD_META dict; UI metadata for 47+ user-facing config fields
 │   │   ├── config_writer.py    # Atomic YAML write (tmp + fsync + rename), .bak rollover
-│   │   ├── event_bridge.py     # EventBridge: event translation bridge over IPCTransport;
+│   │   ├── event_bridge.py     # EventBridge: event translation bridge over WSTransport;
 │   │   │                       #   Brain → Body (state_change, transcript, tts_start, tts_viseme,
-│   │   │                       #   tts_stop, llm_token, rag_retrieval, rag_status, error,
-│   │   │                       #   config_schema, config_update_result);
+│   │   │                       #   tts_stop, llm_token, rag_retrieval, rag_status, system_status,
+│   │   │                       #   error, config_schema, config_update_result);
 │   │   │                       #   Body → Brain (interrupt, user_text, rag_set_enabled,
 │   │   │                       #   config_schema_request, config_update)
-│   │   ├── events.py           # Frozen event dataclasses + ZMQMessage wire-format type
+│   │   ├── events.py           # Frozen event dataclasses + ZMQMessage wire-format type +
+│   │   │                       #   SystemStatusEvent, SystemStatusSource
 │   │   ├── handshake.py        # IPC version handshake (hello / hello_ack); 100% coverage
-│   │   ├── ipc_transport.py    # IPCTransport: single-client TCP server, 4-byte length-prefix framing,
-│   │   │                       #   two daemon threads (ipc-accept, ipc-recv), stdlib socket only
+│   │   ├── ipc_transport.py    # IPCTransport: legacy raw TCP server (stdlib socket, no pyzmq);
+│   │   │                       #   retained but not used in the main path; WSTransport is canonical
 │   │   ├── logging_config.py   # setup_logging() — human-readable or JSON structured output
-│   │   ├── metrics.py          # Stdlib histogram module (p50/p95/p99, thread-safe); 95% coverage
 │   │   ├── orchestrator.py     # Orchestrator: event queue, handler dispatch, interrupt handling,
 │   │   │                       #   TranscriptReadyEvent → ReflexRouter / ReasoningRouter wiring,
 │   │   │                       #   EventBridge injection, _handle_user_text handler,
-│   │   │                       #   _handle_config_schema_request, _handle_config_update
-│   │   ├── startup_check.py    # run_startup_checks(): hard/soft pre-flight validation;
+│   │   │                       #   _handle_config_schema_request, _handle_config_update,
+│   │   │                       #   _handle_system_status
+│   │   ├── startup_check.py    # run_startup_checks(): soft returns list[str] for missing items;
 │   │   │                       #   _check_llm_package(), _check_tts_package(), _check_rag_packages()
 │   │   ├── state_machine.py    # LumiState enum (IDLE/LISTENING/PROCESSING/SPEAKING),
 │   │   │                       #   StateMachine, InvalidTransitionError, unregister_observer()
-│   │   └── zmq_server.py       # Backwards-compatibility shim: re-exports EventBridge as ZMQServer
+│   │   └── ws_transport.py     # WSTransport: asyncio WebSocket server on ws://127.0.0.1:5556;
+│   │                           #   single-client, length-prefix framing, replaces IPCTransport
 │   └── llm/
 │       ├── __init__.py         # Public exports: ReflexRouter, ReasoningRouter, parse_tool_calls,
 │       │                       #   ConversationMemory, ModelLoader, PromptEngine
@@ -611,6 +634,7 @@ Lumi/
 │       │                       #   6 domains (refusal_no_apology, tool_call, out_of_scope,
 │       │                       #   knowledge_limit, concise_factual, plain_prose) + "general" fallback;
 │       │                       #   safety-first priority order (refusal checked before tool_call)
+│       ├── inference_dispatcher.py # LLMInferenceDispatcher: extracted inference subsystem
 │       ├── memory.py           # JSON-persisted conversation history (ConversationMemory)
 │       ├── model_loader.py     # VRAM hibernate/wake lifecycle (wraps llama_cpp.Llama); module-level _VRAM_LOCK shared with ScreenshotTool
 │       ├── model_registry.py   # ModelRegistry: named GGUF hot-swap registry; register(name, config),
@@ -621,9 +645,6 @@ Lumi/
 │       │                       #   posts RAGRetrievalEvent after retrieval
 │       ├── reflex_router.py    # Regex fast-path: greetings, time queries, RAG intent
 │       └── tool_call_parser.py # <tool_call> extractor + JSON recovery (parse_tool_calls)
-│   ├── ipc/
-│   │   ├── __init__.py
-│   │   └── ws_bridge.py        # WebSocket-to-TCP relay: bridges Tauri/React (WS :8765) to Brain (TCP :5555)
 │   └── rag/
 │       ├── __init__.py         # Public exports: DocumentStore, RAGRetriever, Embedder, chunk_text
 │       ├── chunker.py          # chunk_text() — sliding-window text splitting
@@ -634,29 +655,6 @@ Lumi/
 │       ├── retriever.py        # RAGRetriever: BM25+kNN hybrid; Citation, RAGResult; cancel-safe
 │       ├── schema.sql          # SQLite schema: documents, chunks, chunks_fts, vec_chunks
 │       └── store.py            # DocumentStore: FTS5 BM25 + sqlite-vec kNN; WAL; thread-local conn
-├── ui/                         # Godot 4 frontend project
-│   ├── project.godot           # Godot project descriptor
-│   ├── assets/
-│   │   └── sprites/            # Placeholder colored-circle sprites (Phase 5); real art pending
-│   ├── scenes/
-│   │   ├── avatar.tscn         # AnimatedSprite2D scene
-│   │   ├── chat_panel.tscn     # Chat panel overlay scene
-│   │   ├── main.tscn           # Root scene (wires client signals)
-│   │   ├── setting_row.tscn    # Reusable settings row widget scene
-│   │   └── settings_panel.tscn # Settings panel scene (7 tabs, gear / Ctrl+, entry)
-│   ├── scripts/
-│   │   ├── avatar_controller.gd # Drives AnimatedSprite2D from Brain state events
-│   │   ├── chat_panel.gd       # Chat panel: displays streamed LLM tokens and transcripts
-│   │   ├── ipc_protocol.gd     # 4-byte length-prefix frame encode/decode
-│   │   ├── lumi_client.gd      # StreamPeerTCP client with auto-reconnect (2 s retry); sends hello_ack
-│   │   ├── main.gd             # Root scene logic: wires signals, Escape → interrupt
-│   │   ├── setting_row.gd      # SettingRow widget: 7 control types (toggle, slider, select, text, number, path, multiselect)
-│   │   └── settings_panel.gd   # Settings panel: requests config schema, applies changes, marks [↻] restart-required
-│   ├── themes/
-│   │   ├── design_tokens.json  # Design token definitions (colors, typography, spacing)
-│   │   └── lumi_dark.tres      # Godot theme resource (dark mode)
-│   ├── README.md               # Godot setup and running instructions
-│   └── TESTING.md              # Manual test checklist for Godot frontend
 ├── scripts/
 │   ├── check_config_schema.py  # CLI: print config schema fields and current values
 │   ├── doctor.py               # Pre-flight diagnostics: check deps, model files, hardware
@@ -746,31 +744,24 @@ scripts/
 ### Phase 5: The Body (Visuals) — COMPLETE
 *Goal: Transparent, interactive desktop overlay + IPC transport to Python Brain.*
 
-- [x] `src/core/ipc_transport.py` — raw TCP server, 4-byte big-endian length prefix, single-client, two daemon threads
+- [x] `src/core/ipc_transport.py` — raw TCP server, 4-byte big-endian length prefix, single-client, two daemon threads (retained; `WSTransport` is now canonical)
 - [x] `src/core/event_bridge.py` (`EventBridge`) — event translation bridge: internal events ↔ JSON wire protocol
 - [x] `src/core/state_machine.py` — `unregister_observer()` added
-- [x] `src/core/config.py` — `IPCConfig.enabled` field added (default `false`)
+- [x] `src/core/config.py` — `IPCConfig.enabled` field added
 - [x] `src/core/orchestrator.py` — EventBridge injection, `_handle_user_text` handler, shutdown cleanup
 - [x] `src/main.py` — EventBridge auto-created when `config.ipc.enabled = true`
-- [x] Godot 4 frontend scaffold (`ui/`) — transparent 200×200 borderless overlay, `StreamPeerTCP` client, avatar controller, IPC protocol GDScript
-- [x] `tests/test_ipc_transport.py` — 7 tests
-- [x] `tests/test_zmq_server.py` — 16 tests
-- [x] `tests/test_ipc_protocol_conformance.py` — 6 integration tests
+- [x] `tests/test_ipc_transport.py`, `tests/test_zmq_server.py`, `tests/test_ipc_protocol_conformance.py`
 - [ ] LightRAG Option A (explicit skill trigger, UI toggle, off by default — deferred to Phase 6)
-- [ ] Real avatar artwork (placeholder colored-circle sprites used — deferred to Phase 6)
 
 ### Phase 6: The Hands (OS Control) — COMPLETE
 *Goal: Lumi can act on the desktop. Token streaming. Viseme lip-sync. Advanced RAG routing.*
 
 - [x] `src/tools/` package — `Tool` Protocol, `ToolRegistry`, `ToolExecutor` (allowlist + timeout)
-- [x] OS tools: `AppLaunchTool`, `ClipboardTool`, `FileInfoTool`, `WindowListTool` (`src/tools/os_actions.py`)
+- [x] OS tools: `AppLaunchTool`, `ClipboardTool`, `FileInfoTool`, `WindowListTool` (`src/tools/os_actions.py`); cross-platform adapters (macOS bundle dispatch, Windows adapters)
 - [x] Vision tool — `ScreenshotTool` with grim→scrot→Pillow fallback + moondream2 GGUF description (`src/tools/vision.py`)
-- [x] LLM token streaming — `LLMTokenEvent` per token; `llm_token` wire frame to Godot
+- [x] LLM token streaming — `LLMTokenEvent` per token; `llm_token` wire frame to Body
 - [x] Viseme extraction — `src/audio/viseme_map.py` (8 groups); `VisemeEvent` posted from `mouth.py`
 - [x] Orchestrator two-pass tool-call loop + `utterance_id` threading
-- [x] Godot: `chat_panel.gd`/`chat_panel.tscn` for streaming display; per-viseme-group mouth animations
-- [x] 534 tests passing, 4 skipped; `vision.py` at 86% coverage
-- [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
 - [ ] LightRAG Option A (deferred to Phase 7)
 - [ ] v1.0 release
 
@@ -808,7 +799,21 @@ scripts/
 - [x] `src/core/event_bridge.py` — `config_schema_request` / `config_schema` / `config_update` / `config_update_result` wire events wired
 - [x] `src/core/events.py` — `ConfigSchemaRequestEvent`, `ConfigUpdateEvent` added
 - [x] `src/core/orchestrator.py` — `_handle_config_schema_request()`, `_handle_config_update()` handlers
-- [x] `ui/scenes/settings_panel.tscn` + `ui/scripts/settings_panel.gd` — gear icon / Ctrl+, entry; 7 tabs
-- [x] `ui/scenes/setting_row.tscn` + `ui/scripts/setting_row.gd` — `SettingRow` widget, 7 control types
+- [x] `app/src/components/SettingsPanel.tsx` — gear icon / Ctrl+, entry; 7 tabs; 7 control types
 - [x] `scripts/setup_wizard.py` — guided first-run configuration wizard
 - [x] `tests/core/` — `test_config_runtime.py`, `test_config_writer.py`, `test_event_bridge_config.py`, `test_orchestrator_reconfigure.py`
+
+### Phase 9.5: Tauri UI Overlay + Ring 1 — COMPLETE
+*Goal: Tauri 2 + React 18 frontend replaces Godot. Direct WebSocket IPC. First-run UX. Cross-platform tools.*
+
+- [x] `src/core/ws_transport.py` (`WSTransport`) — asyncio WebSocket server replaces `IPCTransport`; Brain exposes WS directly on `ws://127.0.0.1:5556`; no bridge subprocess required
+- [x] `app/` — Tauri 2 + React 18 frontend: `OverlayRoot`, `ChatRoot`, `SettingsRoot` windows; `useLumiState` hook; `IBrainClient` WebSocket client
+- [x] `app/src/components/SetupPanel.tsx` — first-run guidance screen driven by `system_status.setup_required`
+- [x] `src/core/events.py` — `SystemStatusEvent`, `SystemStatusSource` added
+- [x] `src/core/event_bridge.py` — `on_system_status()` outbound; `system_status` wire frame to Body
+- [x] `src/core/startup_check.py` — all checks converted to soft returns (`list[str]`); `main.py` gates Ears on missing wake-word items
+- [x] `src/audio/hotkey.py` (`PTTListener`) — global push-to-talk hotkey daemon; optional `pynput` dependency
+- [x] `src/tools/os_actions.py` — macOS bundle dispatch (`_launch_macos_bundle()`), `pyperclip`/`pygetwindow` Windows adapters
+- [x] `config.yaml` — `ipc.enabled: true` default; `audio.ptt_enabled`, `audio.ptt_hotkey` keys added
+- [x] `src/core/config_schema.py` — `audio.wake_word_enabled`, `audio.ptt_enabled`, `audio.ptt_hotkey` added to `FIELD_META`
+- [x] 900 tests passing, 7 skipped; >80% coverage

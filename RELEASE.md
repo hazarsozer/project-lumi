@@ -20,7 +20,7 @@ every pass criterion before pushing the release tag.
 - [ ] TTS playback via Kokoro-82M ONNX, non-blocking SpeakerThread
 - [ ] Viseme events posted per phoneme for avatar lip-sync
 - [ ] LLM token streaming via `llm_token` IPC wire frame
-- [ ] IPC server active and connected to Tauri/React frontend (`ipc.enabled: true`)
+- [ ] IPC server active and connected to Tauri/React frontend (WebSocket on `ws://127.0.0.1:5556`; `ipc.enabled: true` default)
 - [ ] Tauri/React overlay renders avatar in four states: IDLE, LISTENING, PROCESSING, SPEAKING
 - [ ] Settings panel (gear icon / Ctrl+,) applies live config changes and marks restart-required fields
 - [ ] RAG retriever available as an opt-in toggle (disabled by default)
@@ -44,9 +44,8 @@ every pass criterion before pushing the release tag.
 
 - [ ] `ARCHITECTURE.md` reflects actual file tree and phase status
 - [ ] `config.yaml` documents every key with inline comments
-- [ ] `ui/README.md` covers Tauri/React setup steps
-- [ ] `ui/TESTING.md` manual checklist is up to date
-- [ ] This `RELEASE.md` has been completed and all flows below have been signed off
+- [ ] `app/README.md` (or repo root `README.md`) covers Tauri/React setup steps
+- [ ] `RELEASE.md` manual checklist is completed and all flows below are signed off
 
 ---
 
@@ -141,15 +140,15 @@ Tauri/React frontend), LLM response, streamed tokens displayed in the chat panel
 **Prerequisites:**
 
 - Flow 1 passed.
-- Node.js and Rust toolchain installed; `ui/` dependencies installed (`cd ui && npm install`).
-- `ipc.enabled: true` in `config.yaml`.
+- Node.js and Rust toolchain installed; `app/` dependencies installed (`cd app && npm install`).
+- `ipc.enabled: true` in `config.yaml` (default).
 - `tts.enabled: true` or `false` (either is acceptable for this flow).
 - LLM model loaded.
 
 **Procedure:**
 
-1. Start `uv run python -m src.main` with `ipc.enabled: true`.
-2. In a second terminal: `cd ui && npm run tauri dev`.
+1. Start `uv run python -m src.main` (Brain starts WebSocket server on `ws://127.0.0.1:5556`).
+2. In a second terminal: `cd app && npm run tauri dev`.
 3. Confirm the Brain log shows `Client connected` and the overlay window appears.
 4. In the chat panel, type a short message, e.g. "What is 2 plus 2?" and submit.
 5. Observe the Brain logs:
@@ -285,14 +284,9 @@ injection into the LLM prompt, cited response returned to the user.
 
 ### Frontend / display
 
-- **Avatar artwork is placeholder.** The Tauri/React overlay uses a static
-  placeholder avatar. Commissioned artwork is a v1.1 deliverable.
-- **Citation panel** may not render RAG sources in the current React build;
-  the `rag_retrieval` wire event is forwarded correctly by the Brain but
-  the React component may need wiring to display citations.
-- **Wayland transparency** may not work on all compositors. The transparent
-  overlay is tested on X11. On Wayland (Sway, GNOME Wayland) the window may
-  render with a solid background. Use X11 or XWayland if transparency is required.
+- **Avatar artwork is placeholder.** The Tauri/React overlay (`app/src/components/LumiAvatar.tsx`) uses static placeholder images. Commissioned artwork is a v1.1 deliverable.
+- **Citation panel** — the `rag_retrieval` wire event is forwarded correctly by the Brain but the React component may need wiring to display citations.
+- **Wayland transparency** may not work on all compositors. The transparent overlay is tested on X11. On Wayland (Sway, GNOME Wayland) the window may render with a solid background. Use X11 or XWayland if transparency is required.
 
 ### Audio
 
@@ -308,9 +302,8 @@ injection into the LLM prompt, cited response returned to the user.
 
 ### Tools
 
-- **`xclip` required** for `ClipboardTool`. Not installed by default on all
-  distributions. Install with `sudo apt install xclip` or equivalent.
-- **`wmctrl` required** for `WindowListTool`. Install with `sudo apt install wmctrl`.
+- **`xclip` required** for `ClipboardTool` on Linux. Not installed by default on all distributions. Install with `sudo apt install xclip` or equivalent. On macOS and Windows, `pyperclip` is used instead.
+- **`wmctrl` required** for `WindowListTool` on Linux. Install with `sudo apt install wmctrl`. On macOS, `osascript` is used; on Windows, `pygetwindow`.
 - **`grim` or `scrot` required** for `ScreenshotTool`. `grim` for Wayland, `scrot`
   for X11. The tool falls back to `Pillow` for basic capture if neither is present,
   but description quality degrades.
@@ -322,8 +315,7 @@ injection into the LLM prompt, cited response returned to the user.
 - **`sqlite-vec` native extension** must be installed on the system or available
   as a Python wheel. CI installs it explicitly; local installs may need
   `uv pip install sqlite-vec`.
-- **citation panel** is implemented but requires manual scene wiring (see
-  Frontend above).
+- **Citation panel** is not yet rendered in the React frontend (see Frontend above).
 - Automatic RAG routing (trigger-word-free) is not implemented. Explicit trigger
   phrases ("search my docs", "look up in my notes") are required to activate
   retrieval.

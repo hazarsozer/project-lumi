@@ -1,5 +1,24 @@
 # Project Lumi: Development TODOs
 
+## Ring 1 — Complete (2026-05-02)
+
+The following items were delivered as part of Ring 1 (make it installable):
+
+- **B3 DONE** — `ws_bridge` subprocess dropped; `WSTransport` (`src/core/ws_transport.py`) runs the WebSocket server directly inside the Brain. Architecture is now 2-process (Brain + Tauri app). Default port is `ws://127.0.0.1:5556`.
+- **B1 DONE (partial)** — Cross-platform OS tools: macOS bundle dispatch (`_launch_macos_bundle()` in `os_actions.py`); `pyperclip`/`pygetwindow` Windows adapters added to mypy overrides.
+- **B5 DONE** — `PTTListener` (`src/audio/hotkey.py`): global push-to-talk hotkey (Ctrl+Space default); `audio.ptt_enabled` / `audio.ptt_hotkey` config keys; `FIELD_META` entries added.
+- **C1 DONE** — `SetupPanel.tsx`: first-run guidance screen; `startup_check.py` all-soft-return pattern; `main.py` gates `Ears` on missing wake-word items; `ipc.enabled: true` default.
+- **B2 DONE (partial)** — Tauri AppImage + deb bundle targets configured. Full Brain sidecar bundling (PyInstaller + `externalBin`) promoted to Ring 2 item 6.
+
+**Ring 2 items (see `MVP_REPORT.md`):**
+1. Brain sidecar bundling (PyInstaller + Tauri `externalBin`)
+2. Persona LoRA training (200–300 examples, Q4_K_M)
+3. Streaming TTS on sentence boundaries
+4. Web search + datetime/timer tools
+5. End-to-end integration smoke test
+
+---
+
 ## ~~1. `time` Module Shadow in `_mic_callback`~~ — DONE
 * **Context:** The `time` argument in `sounddevice`'s `_mic_callback` shadows the global `import time`, meaning any use of `time.monotonic()` in that function will crash.
 * **Resolution:** `ears.py` now uses `import time as _time` and all calls use `_time.monotonic()`.
@@ -34,17 +53,18 @@
   - `src/core/orchestrator.py` — `_handle_ears_error` handler registered; transitions non-IDLE states to IDLE on receipt.
   - `tests/test_ears_recovery.py` — 6 tests: PortAudioError retry, predict-skip, exhausted retries post EarsErrorEvent, orchestrator handler IDLE transition, no-op when already IDLE.
 
-## ~~8. No IPC Contract~~ — DONE
+## ~~8. No IPC Contract~~ — DONE (superseded by WSTransport in Phase 9.5)
 * **Context:** The planned ZeroMQ integration with the Godot frontend lacks a formal schema.
-* **What was done:**
+* **What was done (Phase 5):**
   - `ZMQMessage` frozen dataclass added to `src/core/events.py` with fields `event`, `payload`, `timestamp`, `version`. IPC event table documented in `ARCHITECTURE.md`.
   - `src/core/ipc_transport.py` — raw TCP server (stdlib `socket`, 4-byte big-endian length prefix, single-client, two daemon threads). No pyzmq dependency.
-  - `src/core/zmq_server.py` — event translation bridge: translates outbound internal events → JSON wire frames; translates inbound frames → `InterruptEvent` / `UserTextEvent` posted to orchestrator queue.
+  - `src/core/event_bridge.py` (`EventBridge`) — event translation bridge: translates outbound internal events → JSON wire frames; translates inbound frames → `InterruptEvent` / `UserTextEvent` posted to orchestrator queue.
   - `src/core/state_machine.py` — `unregister_observer()` added.
   - `src/core/config.py` — `IPCConfig.enabled: bool = False` added; set to `true` in `config.yaml` to activate.
-  - `src/core/orchestrator.py` — ZMQServer injection, `_handle_user_text` handler wired, shutdown cleanup.
-  - `src/main.py` — ZMQServer auto-created inside Orchestrator when `config.ipc.enabled`.
+  - `src/core/orchestrator.py` — EventBridge injection, `_handle_user_text` handler wired, shutdown cleanup.
+  - `src/main.py` — EventBridge auto-created when `config.ipc.enabled`.
   - `tests/test_ipc_transport.py` (7 tests), `tests/test_zmq_server.py` (16 tests), `tests/test_ipc_protocol_conformance.py` (6 integration tests).
+* **Phase 9.5 update:** `WSTransport` (`src/core/ws_transport.py`) replaced `IPCTransport` as the canonical transport. `src/core/zmq_server.py` was deleted. Default endpoint is now `ws://127.0.0.1:5556`. `ipc.enabled` defaults to `true`.
 
 ## ~~9. No Explicit State Machine~~ — DONE
 * **Context:** Ad-hoc boolean flags tracking whether Lumi is listening or processing are scattered everywhere.
@@ -92,20 +112,20 @@
 * **Wave 3 (config + docs) — DONE:** `TTSConfig` added to `config.py` and `LumiConfig`. `tts:` section added to `config.yaml`. `_check_tts_model()` soft check added to `startup_check.py`.
 * **Note:** Viseme extraction for lip-sync is deferred to Phase 6 (VisemeEvent is posted, but phoneme data not yet extracted from Kokoro output).
 
-## ~~20. Phase 5 IPC Transport + Godot Frontend~~ — DONE
+## ~~20. Phase 5 IPC Transport + Godot Frontend~~ — DONE (Godot superseded by Tauri/React in Phase 9.5)
 
-* **Context:** Transparent Godot 4 overlay connected to the Python Brain via raw TCP.
-* **What was done:**
+* **Context:** Transparent overlay connected to the Python Brain via IPC.
+* **What was done (Phase 5):**
   - `src/core/ipc_transport.py` — `IPCTransport`: raw TCP server, 4-byte big-endian uint32 length prefix, single-client model, two daemon threads (`ipc-accept`, `ipc-recv`), two-lock design (`_send_lock` + `_client_lock`), stdlib `socket` only (no pyzmq).
-  - `src/core/zmq_server.py` — `ZMQServer`: event translation bridge; outbound `on_state_change`, `on_tts_start`, `on_tts_viseme`, `on_tts_stop`, `on_transcript`, `on_error`; inbound `interrupt` → `InterruptEvent`, `user_text` → `UserTextEvent`.
+  - `src/core/event_bridge.py` (`EventBridge`): event translation bridge; outbound `on_state_change`, `on_tts_start`, `on_tts_viseme`, `on_tts_stop`, `on_transcript`, `on_error`; inbound `interrupt` → `InterruptEvent`, `user_text` → `UserTextEvent`.
   - `src/core/state_machine.py` — `unregister_observer()` added.
   - `src/core/config.py` — `IPCConfig.enabled: bool = False`; set `ipc.enabled: true` in `config.yaml` to activate the IPC server.
-  - `src/core/orchestrator.py` — ZMQServer injection, `_handle_user_text` handler, shutdown cleanup.
-  - `src/main.py` — ZMQServer auto-created inside Orchestrator when `config.ipc.enabled`.
-  - `ui/` — Godot 4 project: `project.godot`, `scenes/main.tscn`, `scenes/avatar.tscn`, `scripts/ipc_protocol.gd`, `scripts/lumi_client.gd`, `scripts/avatar_controller.gd`, `scripts/main.gd`.
+  - `src/core/orchestrator.py` — EventBridge injection, `_handle_user_text` handler, shutdown cleanup.
+  - `src/main.py` — EventBridge auto-created when `config.ipc.enabled`.
   - `tests/test_ipc_transport.py` (7 tests), `tests/test_zmq_server.py` (16 tests), `tests/test_ipc_protocol_conformance.py` (6 integration tests, `@pytest.mark.integration`).
-  - Total test count: **284 passing**.
-* **Deferred to Phase 6:** Real avatar artwork (placeholder colored-circle sprites used), LightRAG Option A, LLM token streaming to Godot, viseme extraction.
+  - Total test count at Phase 5 close: **284 passing**.
+* **Phase 9.5 update:** Godot `ui/` directory deleted. Tauri/React frontend (`app/`) is now canonical. `WSTransport` replaced `IPCTransport`. `zmq_server.py` deleted.
+* **Deferred to Phase 6:** LightRAG Option A, LLM token streaming, viseme extraction.
 
 ## ~~21. Phase 6: The Hands (OS Control)~~ — DONE
 
@@ -116,10 +136,9 @@
   - `src/audio/viseme_map.py` — 8 viseme groups, `map_phoneme()`, stress digit stripping; 100% coverage
   - `src/audio/mouth.py` — `_post_visemes()` posts `VisemeEvent` per phoneme from Kokoro output
   - `src/llm/reasoning_router.py` — `LLMTokenEvent` posted per token; `utterance_id` param
-  - `src/core/zmq_server.py` — `on_llm_token()` sends `llm_token` wire frame to Godot
+  - `src/core/event_bridge.py` — `on_llm_token()` sends `llm_token` wire frame to Body
   - `src/core/orchestrator.py` — tool registry wired; two-pass inference loop; `utterance_id` UUID threaded
   - `src/core/config.py` + `config.yaml` — `ToolsConfig` + `VisionConfig` added
-  - Godot: `text_bubble.gd`/`text_bubble.tscn` for streaming display; `llm_token`/`tts_start` routing in `main.gd`; 8 per-viseme-group mouth animations in `avatar_controller.gd`
 * **Still open:**
   - Real avatar artwork (placeholder colored-circle sprites still in use)
   - Kokoro phoneme tuple format `(phoneme_str, start_ms, duration_ms)` — assumed, needs local verification with real model
@@ -161,7 +180,7 @@
   - Wave H4 — Merge LoRA adapter: blocked on Wave H3
   - Wave H5 — Evaluate delta (Q4_K_M vs FP16 baseline): blocked on Wave H3
   - Wave H6 — Hot-swap wiring into orchestrator: blocked on Wave H3
-  - Wave I3 — Avatar sprite integration (`ui/assets/sprites/`): blocked on external PNG delivery
+  - Wave I3 — Avatar sprite integration (`app/src/assets/`): blocked on external PNG delivery; target is React `LumiAvatar.tsx` component
   - TurboQuant activation — uncomment `kv_cache_quant: "turbo3"` in `config.yaml`: blocked on llama.cpp PR #21089 shipping in `llama-cpp-python`
   - Wave J1+ — pip-installable wheel: not yet scoped
 
@@ -178,7 +197,7 @@
   - `src/llm/reflex_router.py` — `route_rag_intent()` intent detection
   - `src/core/events.py` — `RAGRetrievalEvent`, `RAGStatusEvent`, `RAGSetEnabledEvent`
   - `src/core/orchestrator.py` — RAGRetriever at startup; intent check; `_handle_rag_set_enabled()`
-  - `src/core/zmq_server.py` — `on_rag_retrieval()`, `on_rag_status()` outbound; `rag_set_enabled` inbound
+  - `src/core/event_bridge.py` — `on_rag_retrieval()`, `on_rag_status()` outbound; `rag_set_enabled` inbound
   - `scripts/ingest_docs.py` — CLI to chunk, embed, and store personal documents
   - `scripts/measure_rag_latency.py` — end-to-end benchmark (p95 < 2.0 s gate)
   - Base latency gate PASS: p95 = 0.431 s (threshold 1.7 s)
@@ -213,15 +232,10 @@
 * **Go/No-Go gate:** If end-to-end latency after Phase 4 exceeds 2 seconds, defer LightRAG until base pipeline optimized (adding 150–600ms retrieval would push past 3-second voice UI threshold).
 * **Reference:** See `ARCHITECTURE.md` Section 6 for full analysis: mitigations (latency masking, embedding lifecycle, VRAM budget, context window pressure, prompt injection risk, thread safety), integration point (no new events, inside ReasoningRouter), architectural fit (orthogonal to LoRA with retraining caveat).
 
-## ~~23. Godot Citation Panel UI~~ — DONE
+## ~~23. Citation Panel UI~~ — SUPERSEDED (Godot deleted)
 
-* **Context:** Phase 7 RAG retrieval returns `Citation` objects (document name, chunk ID, score) that are currently not surfaced in the Godot frontend.
-* **Items:**
-  - Design and implement a `citation_panel.gd` / `citation_panel.tscn` in `ui/` — should display source document name and relevance score alongside the LLM response.
-  - Wire `rag_retrieval` wire event (already sent by `ZMQServer.on_rag_retrieval()`) to populate the panel in `main.gd`.
-  - Add a "hide citations" toggle so the panel can be dismissed.
-  - Update `ui/TESTING.md` manual checklist with citation panel test cases.
-* **Blocker:** None — `rag_retrieval` wire event is already defined and sent. Godot scene work only.
+* **Context:** Phase 7 RAG retrieval returns `Citation` objects surfaced via the `rag_retrieval` wire event.
+* **Status:** Godot `ui/` directory deleted in Phase 9.5. `rag_retrieval` wire event is still sent by `EventBridge.on_rag_retrieval()`. Citation display in the Tauri/React frontend is a Ring 2+ item (see `MVP_REPORT.md` C2/C5).
 
 ## ~~25. Phase 8.5 Settings UI~~ — DONE
 
@@ -237,13 +251,13 @@
   - `src/core/config_schema.py` — `FIELD_META` dict; UI metadata (control type, min/max, restart_required) for 47 user-facing fields
   - `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover, ruamel.yaml
   - IPC: `config_schema_request` (Body→Brain), `config_schema` (Brain→Body), `config_update` (Body→Brain), `config_update_result` (Brain→Body)
-  - Godot: settings panel (`ui/scenes/settings_panel.tscn`, `ui/scripts/settings_panel.gd`) — gear icon / Ctrl+, entry; 7 tabs; `SettingRow` widget with 7 control types
+  - `app/src/components/SettingsPanel.tsx` — gear icon / Ctrl+, entry; 7 tabs; 7 control types
 
 ## 24. Real Avatar Artwork — AWAITING ASSETS
 
-* **Context:** The Godot frontend currently uses placeholder colored-circle sprites in `ui/assets/sprites/`. Phase 5 and 6 deferred real artwork.
-* **Decision (2026-04-20):** Option A — static sprite sheets for `AnimatedSprite2D`. Live2D / 3D VRM deferred indefinitely.
+* **Context:** The Tauri/React frontend (`app/src/components/LumiAvatar.tsx`) currently uses placeholder static images. Phase 5 and 6 deferred real artwork.
+* **Decision (2026-04-20):** Option A — static sprite sheets. Live2D / 3D VRM deferred indefinitely. Note: Godot `ui/` was deleted in Phase 9.5; artwork delivery target is now `app/src/assets/` and the React avatar component.
 * **Items:**
-  - Commission or create PNG sprite sheets per `ui/assets/sprites/SPRITE_SPEC.md` (4 state animations mandatory, 8 viseme overlays optional).
-  - Drop PNGs into `ui/assets/sprites/`, import into Godot `SpriteFrames` resource — no code changes needed; `avatar_controller.gd` picks up animations by name.
-* **Blocker:** Artwork — spec written, waiting on art delivery.
+  - Commission or create PNG/SVG assets for 4 states (IDLE, LISTENING, PROCESSING, SPEAKING) and optionally 8 viseme overlays.
+  - Drop assets into `app/src/assets/`, wire into `LumiAvatar.tsx`.
+* **Blocker:** Artwork — waiting on art delivery.
