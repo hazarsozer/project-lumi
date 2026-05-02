@@ -16,7 +16,7 @@ export const BACKOFF_STEPS_MS = [1000, 2000, 4000, 8000];
 const KNOWN_BRAIN_EVENTS = new Set([
   "state_change", "tts_start", "tts_viseme", "tts_stop",
   "transcript", "llm_token", "rag_retrieval", "rag_status",
-  "error", "config_schema", "config_update_result",
+  "system_status", "error", "config_schema", "config_update_result",
 ]);
 
 function isLumiBrainEvent(raw: WireMessage): raw is WireMessage & LumiBrainEvent {

@@ -2,18 +2,29 @@ import { useEffect, useState } from "react";
 import type { IBrainClient } from "../ipc/client";
 import type { BrainState, LumiBrainEvent } from "../ipc/events";
 
+export interface SystemStatus {
+  tts_available: boolean;
+  rag_available: boolean;
+  mic_available: boolean;
+  llm_available: boolean;
+  setup_required: boolean;
+  missing_items: string[];
+}
+
 interface LumiState {
   brainState: BrainState;
   transcript: string;
   streamingTokens: string;
   currentUtterance: string;
+  systemStatus: SystemStatus | null;
 }
 
 const INITIAL_STATE: LumiState = {
-  brainState: "IDLE",
+  brainState: "idle",
   transcript: "",
   streamingTokens: "",
   currentUtterance: "",
+  systemStatus: null,
 };
 
 export function useLumiState(client: IBrainClient): LumiState {
@@ -47,6 +58,20 @@ export function useLumiState(client: IBrainClient): LumiState {
 
         case "tts_stop":
           setLumiState((prev) => ({ ...prev, currentUtterance: "" }));
+          break;
+
+        case "system_status":
+          setLumiState((prev) => ({
+            ...prev,
+            systemStatus: {
+              tts_available: e.payload.tts_available,
+              rag_available: e.payload.rag_available,
+              mic_available: e.payload.mic_available,
+              llm_available: e.payload.llm_available,
+              setup_required: e.payload.setup_required,
+              missing_items: e.payload.missing_items,
+            },
+          }));
           break;
       }
     }

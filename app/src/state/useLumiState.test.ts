@@ -39,7 +39,7 @@ describe("useLumiState — initial state", () => {
     const client = createMockClient();
     const { result } = renderHook(() => useLumiState(client));
 
-    expect(result.current.brainState).toBe("IDLE");
+    expect(result.current.brainState).toBe("idle");
     expect(result.current.transcript).toBe("");
     expect(result.current.streamingTokens).toBe("");
     expect(result.current.currentUtterance).toBe("");
@@ -56,18 +56,18 @@ describe("useLumiState — state_change event", () => {
     act(() => {
       client._pushEvent({
         event: "state_change",
-        payload: { state: "LISTENING" },
+        payload: { state: "listening" },
       });
     });
 
-    expect(result.current.brainState).toBe("LISTENING");
+    expect(result.current.brainState).toBe("listening");
   });
 
   it("updates brainState through all valid states", () => {
     const client = createMockClient();
     const { result } = renderHook(() => useLumiState(client));
 
-    const states = ["LISTENING", "PROCESSING", "SPEAKING", "IDLE"] as const;
+    const states = ["listening", "processing", "speaking", "idle"] as const;
     for (const state of states) {
       act(() => {
         client._pushEvent({ event: "state_change", payload: { state } });
@@ -89,7 +89,7 @@ describe("useLumiState — state_change event", () => {
     act(() => {
       client._pushEvent({
         event: "state_change",
-        payload: { state: "PROCESSING" },
+        payload: { state: "processing" },
       });
     });
 
@@ -212,7 +212,7 @@ describe("useLumiState — llm_token events", () => {
       });
     });
 
-    expect(result.current.brainState).toBe("IDLE");
+    expect(result.current.brainState).toBe("idle");
     expect(result.current.transcript).toBe("");
     expect(result.current.currentUtterance).toBe("");
   });
@@ -286,7 +286,7 @@ describe("useLumiState — tts_start event", () => {
       client._pushEvent({ event: "transcript", payload: { text: "user said hi" } });
     });
     act(() => {
-      client._pushEvent({ event: "state_change", payload: { state: "SPEAKING" } });
+      client._pushEvent({ event: "state_change", payload: { state: "speaking" } });
     });
     act(() => {
       client._pushEvent({
@@ -296,7 +296,7 @@ describe("useLumiState — tts_start event", () => {
     });
 
     expect(result.current.transcript).toBe("user said hi");
-    expect(result.current.brainState).toBe("SPEAKING");
+    expect(result.current.brainState).toBe("speaking");
   });
 });
 
@@ -333,7 +333,7 @@ describe("useLumiState — tts_stop event", () => {
       client._pushEvent({ event: "transcript", payload: { text: "preserved" } });
     });
     act(() => {
-      client._pushEvent({ event: "state_change", payload: { state: "IDLE" } });
+      client._pushEvent({ event: "state_change", payload: { state: "idle" } });
     });
     act(() => {
       client._pushEvent({
@@ -346,7 +346,7 @@ describe("useLumiState — tts_stop event", () => {
     });
 
     expect(result.current.transcript).toBe("preserved");
-    expect(result.current.brainState).toBe("IDLE");
+    expect(result.current.brainState).toBe("idle");
     expect(result.current.streamingTokens).toBe("");
   });
 });
@@ -359,9 +359,9 @@ describe("useLumiState — full conversation flow", () => {
     const { result } = renderHook(() => useLumiState(client));
 
     act(() => {
-      client._pushEvent({ event: "state_change", payload: { state: "LISTENING" } });
+      client._pushEvent({ event: "state_change", payload: { state: "listening" } });
     });
-    expect(result.current.brainState).toBe("LISTENING");
+    expect(result.current.brainState).toBe("listening");
 
     act(() => {
       client._pushEvent({ event: "transcript", payload: { text: "what time is it?" } });
@@ -369,7 +369,7 @@ describe("useLumiState — full conversation flow", () => {
     expect(result.current.transcript).toBe("what time is it?");
 
     act(() => {
-      client._pushEvent({ event: "state_change", payload: { state: "PROCESSING" } });
+      client._pushEvent({ event: "state_change", payload: { state: "processing" } });
     });
 
     act(() => {
@@ -392,7 +392,7 @@ describe("useLumiState — full conversation flow", () => {
     expect(result.current.streamingTokens).toBe("");
 
     act(() => {
-      client._pushEvent({ event: "state_change", payload: { state: "SPEAKING" } });
+      client._pushEvent({ event: "state_change", payload: { state: "speaking" } });
     });
 
     act(() => {
@@ -401,9 +401,9 @@ describe("useLumiState — full conversation flow", () => {
     expect(result.current.currentUtterance).toBe("");
 
     act(() => {
-      client._pushEvent({ event: "state_change", payload: { state: "IDLE" } });
+      client._pushEvent({ event: "state_change", payload: { state: "idle" } });
     });
-    expect(result.current.brainState).toBe("IDLE");
+    expect(result.current.brainState).toBe("idle");
   });
 });
 
@@ -478,5 +478,90 @@ describe("useLumiState — hook stability", () => {
     expect(state).toHaveProperty("transcript");
     expect(state).toHaveProperty("streamingTokens");
     expect(state).toHaveProperty("currentUtterance");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("useLumiState — system_status event", () => {
+  it("populates systemStatus from a full system_status payload", () => {
+    const client = createMockClient();
+    const { result } = renderHook(() => useLumiState(client));
+
+    expect(result.current.systemStatus).toBeNull();
+
+    act(() => {
+      client._pushEvent({
+        event: "system_status",
+        payload: {
+          tts_available: true,
+          rag_available: false,
+          mic_available: true,
+          llm_available: true,
+          setup_required: false,
+          missing_items: [],
+        },
+      });
+    });
+
+    expect(result.current.systemStatus).toEqual({
+      tts_available: true,
+      rag_available: false,
+      mic_available: true,
+      llm_available: true,
+      setup_required: false,
+      missing_items: [],
+    });
+  });
+
+  it("sets setup_required and missing_items when Brain reports missing files", () => {
+    const client = createMockClient();
+    const { result } = renderHook(() => useLumiState(client));
+
+    act(() => {
+      client._pushEvent({
+        event: "system_status",
+        payload: {
+          tts_available: false,
+          rag_available: false,
+          mic_available: true,
+          llm_available: false,
+          setup_required: true,
+          missing_items: ["models/llm/phi.gguf", "models/tts/kokoro.onnx"],
+        },
+      });
+    });
+
+    expect(result.current.systemStatus?.setup_required).toBe(true);
+    expect(result.current.systemStatus?.missing_items).toEqual([
+      "models/llm/phi.gguf",
+      "models/tts/kokoro.onnx",
+    ]);
+  });
+
+  it("does not mutate other state fields when system_status arrives", () => {
+    const client = createMockClient();
+    const { result } = renderHook(() => useLumiState(client));
+
+    act(() => {
+      client._pushEvent({ event: "transcript", payload: { text: "hello" } });
+    });
+
+    act(() => {
+      client._pushEvent({
+        event: "system_status",
+        payload: {
+          tts_available: true,
+          rag_available: true,
+          mic_available: true,
+          llm_available: true,
+          setup_required: false,
+          missing_items: [],
+        },
+      });
+    });
+
+    expect(result.current.transcript).toBe("hello");
+    expect(result.current.brainState).toBe("idle");
   });
 });

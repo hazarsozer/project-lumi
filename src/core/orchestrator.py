@@ -32,16 +32,21 @@ from src.core.event_bridge import EventBridge
 from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
+    EarsErrorCode,
     EarsErrorEvent,
     InterruptEvent,
+    InterruptSource,
     LLMResponseReadyEvent,
     LLMTokenEvent,
     RAGRetrievalEvent,
     RAGSetEnabledEvent,
+    RAGStatusEvent,
+    RAGStatusRequestEvent,
     RecordingCompleteEvent,
     ShutdownEvent,
     SpeechCompletedEvent,
     SystemStatusEvent,
+    SystemStatusSource,
     TranscriptReadyEvent,
     UserTextEvent,
     VisemeEvent,
@@ -49,11 +54,11 @@ from src.core.events import (
 )
 from src.core.state_machine import LumiState, StateMachine
 from src.llm.memory import ConversationMemory
+from src.llm.inference_dispatcher import LLMInferenceDispatcher
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
 from src.llm.reasoning_router import ReasoningRouter
 from src.llm.reflex_router import ReflexRouter
-from src.llm.tool_call_parser import parse_tool_calls
 from src.tools import ToolExecutor, ToolRegistry
 from src.tools.os_actions import (
     AppLaunchTool,
@@ -121,9 +126,10 @@ class Orchestrator:
         *,
         speaker: SpeakerThread | None = None,
         tts: KokoroTTS | None = None,
-        zmq_server: EventBridge | None = None,
+        event_bridge: EventBridge | None = None,
         ears: Ears | None = None,
         scribe: Scribe | None = None,
+        missing_setup_items: list[str] | None = None,
     ) -> None:
         self._config: LumiConfig = config
         self._config_manager: ConfigManager = ConfigManager(config)
@@ -132,33 +138,24 @@ class Orchestrator:
         self._shutdown: bool = False
         self._handlers: dict[type, list[Callable[..., None]]] = {}
 
-        # Cancel flag for in-flight LLM work. LLM workers should
-        # periodically check this and abort when set.
-        self._llm_cancel_flag: threading.Event = threading.Event()
-
-        # Lock that makes the daemon thread's guard-check + transition_to
-        # atomic with _handle_interrupt's set + transition, preventing an
-        # illegal state transition when an interrupt and an inference
-        # completion race each other.
-        self._llm_state_lock: threading.Lock = threading.Lock()
-
         # LLM subsystem — components are created here; the model itself is
         # loaded on first use (ModelLoader.load() is deferred until inference).
         self._reflex_router: ReflexRouter = ReflexRouter()
         self._model_loader: ModelLoader = ModelLoader()
-        self._prompt_engine: PromptEngine = PromptEngine()
+        self._prompt_engine: PromptEngine = PromptEngine(config=config)
         self._memory: ConversationMemory = ConversationMemory(config.llm.memory_dir)
         self._memory.load()
         # RAG subsystem — built only when enabled in config.
         self._rag_runtime_enabled: bool = config.rag.enabled
+        self._rag_store = None
         self._rag_retriever = None
         if config.rag.enabled:
             try:
                 from src.rag.retriever import RAGRetriever  # noqa: PLC0415
                 from src.rag.store import DocumentStore  # noqa: PLC0415
 
-                _rag_store = DocumentStore(config.rag)
-                self._rag_retriever = RAGRetriever(_rag_store, config.rag)
+                self._rag_store = DocumentStore(config.rag)
+                self._rag_retriever = RAGRetriever(self._rag_store, config.rag)
                 logger.info("RAG subsystem initialised (db=%s)", config.rag.db_path)
             except Exception:
                 logger.exception("RAG subsystem failed to initialise; disabling RAG")
@@ -172,6 +169,8 @@ class Orchestrator:
             event_queue=self._event_queue,
             retriever=self._rag_retriever,
         )
+        self._config_manager.register_observer("prompt_engine", self._prompt_engine)
+        self._config_manager.register_observer("reasoning_router", self._reasoning_router)
 
         # Tool registry and executor — wired when tools are enabled.
         self._tool_registry: ToolRegistry = ToolRegistry()
@@ -197,6 +196,21 @@ class Orchestrator:
             self._tool_registry, config.tools
         )
 
+        # Inference dispatcher — owns the inference thread, watchdog, and tool pass.
+        self._inference_dispatcher = LLMInferenceDispatcher(
+            model_loader=self._model_loader,
+            reflex_router=self._reflex_router,
+            reasoning_router=self._reasoning_router,
+            memory=self._memory,
+            tool_executor=self._tool_executor,
+            state_machine=self._state_machine,
+            event_queue=self._event_queue,
+            llm_config=config.llm,
+        )
+        # Aliases kept for _handle_interrupt and _handle_llm_response compatibility.
+        self._llm_cancel_flag: threading.Event = self._inference_dispatcher.cancel_flag
+        self._llm_state_lock: threading.Lock = self._inference_dispatcher.llm_state_lock
+
         # Speaker output thread — injectable for testing; created here otherwise.
         self._speaker: SpeakerThread = (
             speaker if speaker is not None else SpeakerThread(self._event_queue)
@@ -215,6 +229,17 @@ class Orchestrator:
         # Audio-in pipeline — both are optional (None = text-only mode / testing).
         self._ears: Ears | None = ears
         self._scribe: Scribe | None = scribe
+        self._missing_setup_items: list[str] = missing_setup_items or []
+
+        # Push-to-talk listener — optional; created when config.audio.ptt_enabled.
+        self._ptt_listener = None
+        if config.audio.ptt_enabled:
+            from src.audio.hotkey import PTTListener  # noqa: PLC0415
+
+            self._ptt_listener = PTTListener(
+                event_queue=self._event_queue,
+                hotkey=config.audio.ptt_hotkey,
+            )
 
         # Register built-in handlers.
         # NOTE: TranscriptReadyEvent and SpeechCompletedEvent each receive a
@@ -232,6 +257,7 @@ class Orchestrator:
         self.register_handler(SpeechCompletedEvent, self._handle_speech_completed)
         self.register_handler(UserTextEvent, self._handle_user_text)
         self.register_handler(RAGSetEnabledEvent, self._handle_rag_set_enabled)
+        self.register_handler(RAGStatusRequestEvent, self._handle_rag_status_request)
         self.register_handler(
             ConfigSchemaRequestEvent, self._handle_config_schema_request
         )
@@ -246,27 +272,28 @@ class Orchestrator:
         # responsible for ensuring the state machine is shared — the Orchestrator
         # registers on_state_change explicitly so injected instances also receive
         # state transition forwarding.
-        self._zmq_server: EventBridge | None = zmq_server
-        if self._zmq_server is None and config.ipc.enabled:
-            self._zmq_server = EventBridge(
+        self._event_bridge: EventBridge | None = event_bridge
+        if self._event_bridge is None and config.ipc.enabled:
+            self._event_bridge = EventBridge(
                 config.ipc, self._event_queue, self._state_machine
             )
-            self._zmq_server.start()
+            self._event_bridge.start()
 
-        if self._zmq_server is not None:
+        if self._event_bridge is not None:
             # Injected instances have not had on_state_change registered against
             # this orchestrator's state machine; do it here.  For auto-created
             # instances EventBridge.__init__ already registered, so we avoid
             # double registration by only registering for the injected path.
-            if zmq_server is not None:
-                self._state_machine.register_observer(self._zmq_server.on_state_change)
-            self.register_handler(VisemeEvent, self._zmq_server.on_tts_viseme)
-            self.register_handler(SpeechCompletedEvent, self._zmq_server.on_tts_stop)
-            self.register_handler(TranscriptReadyEvent, self._zmq_server.on_transcript)
-            self.register_handler(LLMResponseReadyEvent, self._zmq_server.on_tts_start)
-            self.register_handler(LLMTokenEvent, self._zmq_server.on_llm_token)
-            self.register_handler(RAGRetrievalEvent, self._zmq_server.on_rag_retrieval)
-            self.register_handler(SystemStatusEvent, self._zmq_server.on_system_status)
+            if event_bridge is not None:
+                self._state_machine.register_observer(self._event_bridge.on_state_change)
+            self.register_handler(VisemeEvent, self._event_bridge.on_tts_viseme)
+            self.register_handler(SpeechCompletedEvent, self._event_bridge.on_tts_stop)
+            self.register_handler(TranscriptReadyEvent, self._event_bridge.on_transcript)
+            self.register_handler(LLMResponseReadyEvent, self._event_bridge.on_tts_start)
+            self.register_handler(LLMTokenEvent, self._event_bridge.on_llm_token)
+            self.register_handler(RAGRetrievalEvent, self._event_bridge.on_rag_retrieval)
+            self.register_handler(RAGStatusEvent, self._event_bridge.on_rag_status)
+            self.register_handler(SystemStatusEvent, self._event_bridge.on_system_status)
 
     @property
     def state_machine(self) -> StateMachine:
@@ -308,6 +335,8 @@ class Orchestrator:
         logger.info("Orchestrator starting event loop")
         if self._ears is not None:
             self._ears.start(self._event_queue)
+        if self._ptt_listener is not None:
+            self._ptt_listener.start()
 
         self._event_queue.put(
             SystemStatusEvent(
@@ -316,7 +345,9 @@ class Orchestrator:
                 and self._rag_retriever is not None,
                 mic_available=self._ears is not None,
                 llm_available=True,
-                source="startup",
+                source=SystemStatusSource.STARTUP,
+                setup_required=bool(self._missing_setup_items),
+                missing_items=tuple(self._missing_setup_items),
             )
         )
 
@@ -399,168 +430,13 @@ class Orchestrator:
         self._dispatch_user_turn(event.text, source="user_text")
 
     def _dispatch_user_turn(self, text: str, source: str) -> None:
-        """Core dispatch logic shared by _handle_transcript and _handle_user_text.
-
-        Called after the state machine has already been moved to PROCESSING.
-        Clears the LLM cancel flag, attempts the reflex fast-path, and falls
-        through to the reasoning slow-path in a daemon thread when no reflex
-        matches.
-
-        Fast-path: try ReflexRouter first (regex, no model needed).
-        Slow-path: dispatch ReasoningRouter in a daemon thread so the
-        event loop remains unblocked during inference.
-
-        Args:
-            text: The user's input text (from STT transcript or Godot frontend).
-            source: Label used in log messages to identify the calling path
-                (``"transcript"`` or ``"user_text"``).
-        """
-        self._llm_cancel_flag.clear()
-
-        # Reflex fast-path — no model required.
-        reflex_response = self._reflex_router.route(text)
-        if reflex_response is not None:
-            logger.debug("Reflex hit for %r -> %r", text, reflex_response)
-            self._memory.add_turn("user", text)
-            self._memory.add_turn("assistant", reflex_response)
-            self._memory.save()
-            self.post_event(LLMResponseReadyEvent(text=reflex_response))
-            self._state_machine.transition_to(LumiState.SPEAKING)
-            return
-
-        # Generate utterance_id here so the ZMQ token handler can correlate events.
-        utterance_id = str(uuid.uuid4())
-
-        # RAG intent check — only when RAG is runtime-enabled.
-        use_rag = self._rag_runtime_enabled and self._reflex_router.route_rag_intent(
-            text
+        """Delegate inference dispatch to LLMInferenceDispatcher."""
+        self._inference_dispatcher.dispatch(
+            text=text,
+            source=source,
+            rag_runtime_enabled=self._rag_runtime_enabled,
+            post_event=self.post_event,
         )
-
-        # Reasoning slow-path — run in a daemon thread so the event loop
-        # remains responsive to InterruptEvents during long inference.
-        def _run_inference() -> None:
-            try:
-                # Lazy-load the model on first inference call.
-                if not self._model_loader.is_loaded:
-                    logger.info("Loading LLM model on first inference request...")
-                    self._model_loader.load(self._config.llm)
-                response = self._reasoning_router.generate(
-                    text,
-                    self._llm_cancel_flag,
-                    utterance_id=utterance_id,
-                    use_rag=use_rag,
-                )
-            except InterruptedError:
-                logger.info("LLM generation cancelled for %r (source=%s)", text, source)
-                return
-            except Exception:
-                logger.exception(
-                    "LLM inference failed for %r (source=%s)", text, source
-                )
-                with self._llm_state_lock:
-                    if self._state_machine.current_state == LumiState.PROCESSING:
-                        self._state_machine.transition_to(LumiState.IDLE)
-                return
-
-            # Tool-call pass: if the LLM emitted tool-call blocks, execute them
-            # and feed the results back for a second inference pass (single-shot only).
-            tool_calls = parse_tool_calls(response)
-            if tool_calls:
-                results = self._tool_executor.execute(tool_calls, self._llm_cancel_flag)
-                result_lines = []
-                for tc, tr in zip(tool_calls, results, strict=False):
-                    result_lines.append(
-                        f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
-                    )
-                tool_context = "\n".join(result_lines)
-                followup_prompt = f"{text}\n\n[Tool results]\n{tool_context}"
-                try:
-                    response = self._reasoning_router.generate(
-                        followup_prompt,
-                        self._llm_cancel_flag,
-                        utterance_id=utterance_id,
-                    )
-                except InterruptedError:
-                    logger.info(
-                        "LLM tool-followup cancelled for %r (source=%s)", text, source
-                    )
-                    return
-                except Exception:
-                    logger.exception(
-                        "LLM tool-followup failed for %r (source=%s)", text, source
-                    )
-                    with self._llm_state_lock:
-                        if self._state_machine.current_state == LumiState.PROCESSING:
-                            self._state_machine.transition_to(LumiState.IDLE)
-                    return
-
-            # Hold the state lock so this check+transition is atomic with
-            # _handle_interrupt's own set+transition block.  Without the lock,
-            # the interrupt handler could transition to IDLE between the guard
-            # check here and the transition_to(SPEAKING) call below, resulting
-            # in an illegal IDLE→SPEAKING transition.
-            with self._llm_state_lock:
-                if self._state_machine.current_state != LumiState.PROCESSING:
-                    logger.debug(
-                        "State changed during inference, discarding response for %r (source=%s)",
-                        text,
-                        source,
-                    )
-                    return
-
-                try:
-                    self._memory.save()
-                    self.post_event(LLMResponseReadyEvent(text=response))
-                    self._state_machine.transition_to(LumiState.SPEAKING)
-                except Exception:
-                    logger.exception(
-                        "Post-inference save/dispatch failed for %r (source=%s); returning to IDLE",
-                        text,
-                        source,
-                    )
-                    self._state_machine.transition_to(LumiState.IDLE)
-
-        thread = threading.Thread(target=_run_inference, daemon=True)
-
-        # --- per-turn watchdog -----------------------------------------------
-        # A Timer fires if the inference thread does not complete within the
-        # configured budget.  On expiry the cancel flag is set so that the LLM
-        # worker aborts on its next cooperative check, and the state machine is
-        # forced back to IDLE so the assistant stays responsive.
-        _timeout_s = self._config.llm.inference_timeout_s
-        _watchdog_timer: threading.Timer | None = None
-
-        if _timeout_s > 0.0:
-            def _watchdog_fn() -> None:
-                logger.warning(
-                    "LLM inference watchdog fired after %.1f s for %r (source=%s) — "
-                    "setting cancel flag and returning to IDLE",
-                    _timeout_s,
-                    text,
-                    source,
-                )
-                self._llm_cancel_flag.set()
-                with self._llm_state_lock:
-                    if self._state_machine.current_state == LumiState.PROCESSING:
-                        self._state_machine.transition_to(LumiState.IDLE)
-
-            _watchdog_timer = threading.Timer(_timeout_s, _watchdog_fn)
-            _watchdog_timer.daemon = True
-            _watchdog_timer.start()
-
-        def _run_inference_with_watchdog() -> None:
-            try:
-                _run_inference()
-            finally:
-                if _watchdog_timer is not None:
-                    _watchdog_timer.cancel()
-
-        thread = threading.Thread(
-            target=_run_inference_with_watchdog, daemon=True, name="LLMInferenceThread"
-        )
-        # ---------------------------------------------------------------------
-
-        thread.start()
 
     def _handle_llm_response(self, event: LLMResponseReadyEvent) -> None:
         """Handle LLMResponseReadyEvent: pass text to TTS for synthesis.
@@ -647,6 +523,40 @@ class Orchestrator:
         self._rag_runtime_enabled = event.enabled
         logger.info("RAG runtime enabled set to %s", event.enabled)
 
+    def _handle_rag_status_request(self, event: RAGStatusRequestEvent) -> None:
+        """Handle RAGStatusRequestEvent: build and post current RAG runtime state.
+
+        Queries the store for live doc/chunk counts and posts a RAGStatusEvent,
+        which the EventBridge outbound handler forwards to the frontend.
+        """
+        import datetime
+
+        rag_active = self._rag_runtime_enabled and self._rag_retriever is not None
+        doc_count = 0
+        chunk_count = 0
+        last_indexed = ""
+
+        if rag_active and self._rag_store is not None:
+            try:
+                stats = self._rag_store.stats()
+                doc_count = stats.doc_count
+                chunk_count = stats.chunk_count
+                if stats.last_indexed is not None:
+                    last_indexed = datetime.datetime.fromtimestamp(
+                        stats.last_indexed, tz=datetime.timezone.utc
+                    ).isoformat()
+            except Exception:
+                logger.exception("RAG stats() failed; returning zeroes")
+
+        self._event_queue.put(
+            RAGStatusEvent(
+                enabled=rag_active,
+                doc_count=doc_count,
+                chunk_count=chunk_count,
+                last_indexed=last_indexed,
+            )
+        )
+
     def _handle_config_schema_request(self, event: ConfigSchemaRequestEvent) -> None:
         """Handle ConfigSchemaRequestEvent: send the full config schema + current values.
 
@@ -658,11 +568,11 @@ class Orchestrator:
         Args:
             event: The schema-request event (carries no payload).
         """
-        if self._zmq_server is None:
+        if self._event_bridge is None:
             return
         current = self._config_manager.current
         current_values = _flatten_config(current)
-        self._zmq_server.send_config_schema(FIELD_META, current_values)
+        self._event_bridge.send_config_schema(FIELD_META, current_values)
 
     def _handle_config_update(self, event: ConfigUpdateEvent) -> None:
         """Handle ConfigUpdateEvent: apply config changes and report results.
@@ -679,8 +589,8 @@ class Orchestrator:
         result: ConfigUpdateResult = self._config_manager.apply(
             event.changes, persist=event.persist
         )
-        if self._zmq_server is not None:
-            self._zmq_server.send_config_update_result(
+        if self._event_bridge is not None:
+            self._event_bridge.send_config_update_result(
                 applied_live=result.applied_live,
                 pending_restart=result.pending_restart,
                 errors=result.errors,
@@ -716,7 +626,7 @@ class Orchestrator:
             )
             # Post InterruptEvent so _handle_interrupt can drain TTS queues
             # and cancel in-flight synthesis when it is processed by the loop.
-            self._event_queue.put(InterruptEvent(source="wake_word"))
+            self._event_queue.put(InterruptEvent(source=InterruptSource.WAKE_WORD))
             # Transition synchronously so Ears can start recording without
             # waiting for the event loop to process the InterruptEvent first.
             self._state_machine.transition_to(LumiState.IDLE)
@@ -800,7 +710,7 @@ class Orchestrator:
                 and self._rag_retriever is not None,
                 mic_available=False,
                 llm_available=True,
-                source="degradation",
+                source=SystemStatusSource.DEGRADATION,
             )
         )
 
@@ -814,8 +724,10 @@ class Orchestrator:
         self._speaker.stop()
         if self._ears is not None:
             self._ears.stop()
-        if self._zmq_server is not None:
-            self._zmq_server.stop()
+        if self._ptt_listener is not None:
+            self._ptt_listener.stop()
+        if self._event_bridge is not None:
+            self._event_bridge.stop()
         self._shutdown = True
 
     def _handle_interrupt(self, event: InterruptEvent) -> None:

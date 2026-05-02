@@ -1,37 +1,31 @@
 """
-IPC protocol conformance test suite — Phase 5 Wave 4.
+IPC protocol conformance test suite — Phase 5 Wave 4 (updated B3).
 
-These are end-to-end integration tests that verify the full Python IPC stack
-using a fake TCP client acting as the Tauri/React frontend.
+End-to-end integration tests that verify the full Python IPC stack using
+FakeWSClient acting as the Tauri/React frontend.
 
 Stack under test (no mocking of the transport layer):
-    FakeTCPClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
-                                                               |
-                                                        StateMachine / queue.Queue
+    FakeWSClient  <--WS loopback-->  WSTransport  <-->  EventBridge
+                                                             |
+                                                      StateMachine / queue.Queue
 
-Wire format:
-    4-byte big-endian uint32 length prefix + UTF-8 JSON body.
+Wire format (B3+): one UTF-8 JSON string per WebSocket message.
 
 JSON envelope (outbound):
     {"event": str, "payload": dict, "timestamp": float, "version": "1.0"}
 
 Fixture strategy:
-- ``free_port``   — OS-assigned port via bind-to-0 trick.
-- ``ipc_stack``   — starts IPCTransport + EventBridge; tears down in finally.
-- ``FakeTCPClient`` — context manager that connects, sends, and receives
-                      length-prefixed JSON frames.
+- ``ipc_stack``   — starts WSTransport + EventBridge; tears down in finally.
+- ``FakeTCPClient`` — alias for FakeWSClient; backward-compat method aliases
+                      (send_message, recv_message, send_raw) preserved.
 
 All recv_message() calls have an explicit timeout to prevent infinite hangs.
 """
 
 from __future__ import annotations
 
-import json
 import queue
-import socket
-import struct
 import time
-from contextlib import contextmanager
 from typing import Any, Generator
 
 import pytest
@@ -42,178 +36,18 @@ from src.core.events import (
     UserTextEvent,
     VisemeEvent,
 )
-from src.core.ipc_transport import IPCTransport, _HEADER_FORMAT, _HEADER_SIZE
 from src.core.state_machine import LumiState, StateMachine
 from src.core.event_bridge import EventBridge
+from tests.integration.fake_ws_client import FakeWSClient as FakeTCPClient
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-_CONNECT_SETTLE_S: float = 0.08   # wait for accept loop to notice a new client
-_STOP_SETTLE_S: float = 0.10      # wait for recv loop to detect a close
+_CONNECT_SETTLE_S: float = 0.08   # wait for async handler to register new client
+_STOP_SETTLE_S: float = 0.10      # wait for handler to detect a close
 _DEFAULT_RECV_TIMEOUT: float = 2.0
-
-
-# ---------------------------------------------------------------------------
-# FakeTCPClient
-# ---------------------------------------------------------------------------
-
-
-class FakeTCPClient:
-    """Minimal TCP client that speaks the Lumi IPC wire protocol.
-
-    Wire format: 4-byte big-endian uint32 length prefix + UTF-8 JSON body.
-
-    The JSON envelope expected by EventBridge._decode:
-        {
-            "event":     str,
-            "payload":   dict,
-            "timestamp": float,
-            "version":   "1.0"
-        }
-
-    Usage:
-        client = FakeTCPClient(port)
-        client.connect()
-        client.send_message("interrupt", {})
-        msg = client.recv_message(timeout=2.0)
-        client.close()
-
-    Or as a context manager (auto-closes):
-        with FakeTCPClient(port) as client:
-            ...
-    """
-
-    def __init__(self, port: int, host: str = "127.0.0.1") -> None:
-        self._host = host
-        self._port = port
-        self._sock: socket.socket | None = None
-
-    def connect(self) -> None:
-        """Open a blocking TCP connection to host:port."""
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((self._host, self._port))
-        self._sock = sock
-
-    def send_message(self, event: str, payload: dict[str, Any]) -> None:
-        """Encode and send a length-prefixed JSON frame.
-
-        Wraps the event+payload in the full EventBridge wire envelope so that
-        EventBridge._decode() accepts the message.
-
-        Args:
-            event:   Wire event name (e.g. "interrupt", "user_text").
-            payload: Arbitrary JSON-serialisable dict.
-        """
-        if self._sock is None:
-            raise RuntimeError("FakeTCPClient: not connected")
-
-        envelope = {
-            "event": event,
-            "payload": payload,
-            "timestamp": time.time(),
-            "version": "1.0",
-        }
-        body = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
-        header = struct.pack(_HEADER_FORMAT, len(body))
-        self._sock.sendall(header + body)
-
-    def send_raw(self, raw_body: bytes) -> None:
-        """Send a length-prefixed frame whose body is arbitrary raw bytes.
-
-        Used to exercise malformed-message handling in the server.
-
-        Args:
-            raw_body: The bytes to send as the frame body (may be invalid JSON).
-        """
-        if self._sock is None:
-            raise RuntimeError("FakeTCPClient: not connected")
-
-        header = struct.pack(_HEADER_FORMAT, len(raw_body))
-        self._sock.sendall(header + raw_body)
-
-    def do_handshake(self, timeout: float = 1.0) -> None:
-        """Complete the hello/hello_ack handshake after connecting.
-
-        Reads the server's hello frame and sends back hello_ack so that
-        normal messages are forwarded downstream by HandshakeHandler.
-        """
-        hello = self.recv_message(timeout=timeout)
-        assert hello.get("type") == "hello", f"expected hello frame, got {hello!r}"
-        ack: bytes = json.dumps(
-            {"type": "hello_ack", "version": "1.0", "status": "ok"}
-        ).encode("utf-8")
-        self.send_raw(ack)
-
-    def recv_message(self, timeout: float = _DEFAULT_RECV_TIMEOUT) -> dict[str, Any]:
-        """Read one length-prefixed frame and return the decoded JSON dict.
-
-        Args:
-            timeout: Maximum seconds to wait for a complete frame.
-
-        Returns:
-            The decoded JSON object as a Python dict.
-
-        Raises:
-            TimeoutError:    If no complete frame arrives within ``timeout``.
-            ConnectionError: If the socket is closed mid-read.
-            json.JSONDecodeError: If the frame body is not valid JSON.
-        """
-        if self._sock is None:
-            raise RuntimeError("FakeTCPClient: not connected")
-
-        self._sock.settimeout(timeout)
-        try:
-            raw_len = self._recv_exactly(_HEADER_SIZE)
-            (payload_len,) = struct.unpack(_HEADER_FORMAT, raw_len)
-            body = self._recv_exactly(payload_len)
-        except socket.timeout as exc:
-            raise TimeoutError(
-                f"FakeTCPClient: no frame received within {timeout}s"
-            ) from exc
-        finally:
-            self._sock.settimeout(None)  # restore blocking mode
-
-        return json.loads(body.decode("utf-8"))
-
-    def close(self) -> None:
-        """Close the TCP connection; safe to call multiple times."""
-        if self._sock is not None:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-            self._sock = None
-
-    # ------------------------------------------------------------------
-    # Context manager support
-    # ------------------------------------------------------------------
-
-    def __enter__(self) -> "FakeTCPClient":
-        self.connect()
-        return self
-
-    def __exit__(self, *_: Any) -> None:
-        self.close()
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _recv_exactly(self, n: int) -> bytes:
-        """Read exactly ``n`` bytes, accumulating partial reads."""
-        buf = bytearray()
-        while len(buf) < n:
-            assert self._sock is not None
-            chunk = self._sock.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError(
-                    f"FakeTCPClient: socket closed after {len(buf)}/{n} bytes"
-                )
-            buf.extend(chunk)
-        return bytes(buf)
 
 
 # ---------------------------------------------------------------------------
@@ -238,15 +72,15 @@ def ipc_stack(
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
 ) -> Generator[tuple[EventBridge, int], None, None]:
-    """Start a real IPCTransport + EventBridge on an OS-assigned port.
+    """Start a real WSTransport + EventBridge on an OS-assigned port.
 
-    Uses port=0 so the OS assigns a free port atomically during bind(),
-    eliminating the TOCTOU race of the probe-then-bind pattern.
+    Uses port=0 so the OS assigns a free port atomically.  start() blocks
+    until the WebSocket server is bound.
 
     Yields ``(event_bridge, bound_port)``.  Tears down in a ``finally`` block
-    so sockets are always closed even when the test body raises.
+    so the asyncio loop is always stopped even when the test body raises.
     """
-    config = IPCConfig(address="tcp://127.0.0.1", port=0)
+    config = IPCConfig(address="127.0.0.1", port=0)
     server = EventBridge(
         config=config,
         event_queue=event_queue,

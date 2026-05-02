@@ -9,8 +9,8 @@ Protocol:
   4. No hello_ack within HANDSHAKE_TIMEOUT_S → Brain logs warning, continues.
 
 Design:
-- HandshakeHandler wraps an IPCTransport (via duck typing — any object with
-  .send(bytes) works).
+- HandshakeHandler wraps a transport (via duck typing — any object with
+  .send(bytes) works, e.g. WSTransport).
 - on_client_connected() sends the hello frame and arms a one-shot timeout Timer.
 - on_message_received() inspects each incoming frame:
     * If it is a valid hello_ack → consume it, cancel the timer, mark complete.
@@ -75,7 +75,7 @@ class HandshakeHandler:
         """
         Args:
             transport: Any object that has a ``.send(bytes)`` method.
-                       Typically an IPCTransport instance.
+                       Typically a WSTransport instance.
         """
         self._transport = transport
         self._downstream: Callable[[bytes], None] | None = None

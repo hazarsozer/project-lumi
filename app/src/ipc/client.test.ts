@@ -163,14 +163,14 @@ describe("BrainClient — event dispatch", () => {
 
     const event: LumiBrainEvent = {
       event: "state_change",
-      payload: { state: "LISTENING" },
+      payload: { state: "listening" },
     };
     latestWs().simulateMessage(wireEvent(event));
 
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({
       event: "state_change",
-      payload: { state: "LISTENING" },
+      payload: { state: "listening" },
     });
   });
 

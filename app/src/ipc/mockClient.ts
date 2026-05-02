@@ -77,29 +77,29 @@ export class MockBrainClient implements IBrainClient {
   /**
    * Scripted conversation cycle:
    *
-   *  0 ms  — state_change IDLE
-   *  2 s   — state_change LISTENING
-   *  4 s   — state_change PROCESSING + transcript
+   *  0 ms  — state_change idle
+   *  2 s   — state_change listening
+   *  4 s   — state_change processing + transcript
    *  5 s   — llm_token stream (one token every 120 ms)
-   *  8 s   — state_change SPEAKING + tts_start
-   * 10 s   — tts_stop + state_change IDLE
+   *  8 s   — state_change speaking + tts_start
+   * 10 s   — tts_stop + state_change idle
    * 11 s   — repeat
    */
   private _startCycle(): void {
     const CYCLE_MS = 11_000;
 
     const runCycle = () => {
-      // 0 ms — IDLE
-      this._emit({ event: "state_change", payload: { state: "IDLE" } });
+      // 0 ms — idle
+      this._emit({ event: "state_change", payload: { state: "idle" } });
 
-      // 2 s — LISTENING
+      // 2 s — listening
       this._schedule(() => {
-        this._emit({ event: "state_change", payload: { state: "LISTENING" } });
+        this._emit({ event: "state_change", payload: { state: "listening" } });
       }, 2_000);
 
-      // 4 s — PROCESSING + user transcript
+      // 4 s — processing + user transcript
       this._schedule(() => {
-        this._emit({ event: "state_change", payload: { state: "PROCESSING" } });
+        this._emit({ event: "state_change", payload: { state: "processing" } });
         this._emit({
           event: "transcript",
           payload: { text: "What is the weather today?" },
@@ -116,9 +116,9 @@ export class MockBrainClient implements IBrainClient {
         }, 5_000 + i * 120);
       });
 
-      // 8 s — SPEAKING + tts_start
+      // 8 s — speaking + tts_start
       this._schedule(() => {
-        this._emit({ event: "state_change", payload: { state: "SPEAKING" } });
+        this._emit({ event: "state_change", payload: { state: "speaking" } });
         this._emit({
           event: "tts_start",
           payload: {
@@ -128,10 +128,10 @@ export class MockBrainClient implements IBrainClient {
         });
       }, 8_000);
 
-      // 10 s — tts_stop + IDLE
+      // 10 s — tts_stop + idle
       this._schedule(() => {
         this._emit({ event: "tts_stop", payload: {} });
-        this._emit({ event: "state_change", payload: { state: "IDLE" } });
+        this._emit({ event: "state_change", payload: { state: "idle" } });
       }, 10_000);
     };
 

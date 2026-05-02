@@ -135,6 +135,34 @@ FIELD_META: dict[str, dict[str, Any]] = {
         "control": "path",
         "restart_required": True,
     },
+    "audio.wake_word_enabled": {
+        "label": "Wake-Word Detection",
+        "help": (
+            "Enable always-on microphone wake-word detection (requires "
+            "hey_lumi.onnx and a microphone). Disable to use push-to-talk only."
+        ),
+        "control": "toggle",
+        "restart_required": True,
+    },
+    "audio.ptt_enabled": {
+        "label": "Push-to-Talk",
+        "help": (
+            "Enable keyboard hotkey to activate Lumi without a wake-word model. "
+            "Requires pynput: uv sync --extra ptt. "
+            "Degrades gracefully if pynput is not installed."
+        ),
+        "control": "toggle",
+        "restart_required": True,
+    },
+    "audio.ptt_hotkey": {
+        "label": "PTT Hotkey",
+        "help": (
+            "Key combination for push-to-talk activation. "
+            "Format: modifier+key, e.g. 'ctrl+space', 'alt+shift+l'."
+        ),
+        "control": "text",
+        "restart_required": True,
+    },
     # -------------------------------------------------------------------------
     # scribe section
     # -------------------------------------------------------------------------
@@ -316,15 +344,15 @@ FIELD_META: dict[str, dict[str, Any]] = {
     "ipc.address": {
         "label": "IPC Address",
         "help": (
-            "ZMQ transport and host prefix. The port is appended as ':PORT'. "
-            "For local-only use keep 'tcp://127.0.0.1'."
+            "Host address for the TCP IPC socket. "
+            "For local-only use keep '127.0.0.1'."
         ),
         "control": "text",
         "restart_required": True,
     },
     "ipc.port": {
         "label": "IPC Port",
-        "help": "Port number for the ZMQ socket [1024–65535].",
+        "help": "Port number for the TCP IPC socket [1024–65535].",
         "control": "number",
         "min": 1024,
         "max": 65535,

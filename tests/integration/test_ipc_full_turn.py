@@ -1,18 +1,18 @@
 """
-Full-turn IPC integration tests — UI ↔ Brain TCP round-trip.
+Full-turn IPC integration tests — UI ↔ Brain WebSocket round-trip.
 
 These tests validate that the complete UI → Brain → UI round-trip works
-correctly over a real TCP connection, going beyond the unit-level protocol
-conformance tests in ``tests/test_ipc_protocol_conformance.py``.
+correctly over a real WebSocket connection, going beyond the unit-level
+protocol conformance tests in ``tests/test_ipc_protocol_conformance.py``.
 
 Stack under test (no mocking of the transport layer):
-    FakeTCPClient  <--TCP loopback-->  IPCTransport  <-->  EventBridge
-                                                               |
-                                                        StateMachine / queue.Queue
+    FakeWSClient  <--WS loopback-->  WSTransport  <-->  EventBridge
+                                                             |
+                                                      StateMachine / queue.Queue
 
 Each test:
-- Spins up a real ``IPCTransport`` + ``EventBridge`` on OS-assigned port 0.
-- Connects a ``FakeTCPClient`` that mimics what the Tauri/React frontend does.
+- Spins up a real ``WSTransport`` + ``EventBridge`` on OS-assigned port 0.
+- Connects a ``FakeWSClient`` that mimics what the Tauri/React frontend does.
 - Performs a single meaningful turn (send inbound event OR receive outbound event).
 - Tears down cleanly via fixture ``finally`` blocks.
 
@@ -22,8 +22,7 @@ No mocking is used in this file.  The transport and server layers run for real
 on loopback.  The only concession to test isolation is:
 - ``port=0`` (OS-assigned) — eliminates TOCTOU races between free-port probing
   and binding.
-- Short ``time.sleep()`` calls (≤ 0.08 s) to let daemon threads register new
-  connections before sends/receives begin.
+- Short ``time.sleep()`` calls to let async handlers settle.
 - ``queue.Queue.get(timeout=2.0)`` and ``recv_frame(timeout=2.0)`` prevent
   infinite hangs; any failure within 2 s surfaces as a timeout error, not a
   hung test process.
@@ -51,18 +50,18 @@ from src.core.events import (
 )
 from src.core.state_machine import LumiState, StateMachine
 from src.core.event_bridge import EventBridge
-from tests.integration.fake_tcp_client import FakeTCPClient
+from tests.integration.fake_ws_client import FakeWSClient as FakeTCPClient
 
 # ---------------------------------------------------------------------------
 # Timing constants
 # ---------------------------------------------------------------------------
 
-# Time (seconds) to let the IPCTransport accept loop register a new connection
-# after the TCP handshake completes.  80 ms is sufficient on all CI machines.
+# Time (seconds) to let the WSTransport asyncio handler register a new client
+# after the WebSocket handshake completes.
 _CONNECT_SETTLE_S: float = 0.08
 
-# Time (seconds) to let the recv daemon process a just-sent frame and post an
-# event to the queue before the test reads the queue.
+# Time (seconds) to let the async message handler process a just-sent frame
+# and post an event to the queue before the test reads the queue.
 _RECV_SETTLE_S: float = 0.05
 
 # Maximum seconds any single recv_frame() or queue.get() may block.
@@ -91,20 +90,19 @@ def ipc_stack(
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
 ) -> Generator[tuple[EventBridge, int], None, None]:
-    """Start a real ``IPCTransport`` + ``EventBridge`` on an OS-assigned port.
+    """Start a real ``WSTransport`` + ``EventBridge`` on an OS-assigned port.
 
-    Passes ``port=0`` so the OS assigns a free port atomically during
-    ``bind()``, which eliminates the TOCTOU race of the probe-then-bind
-    pattern.  The bound port is read from ``EventBridge.bound_port`` after
-    ``start()`` returns.
+    Passes ``port=0`` so the OS assigns a free port atomically.
+    ``start()`` blocks until the WebSocket server is bound, so
+    ``EventBridge.bound_port`` is already valid when it returns.
 
     Yields:
         ``(event_bridge, bound_port)``
 
-    Tears down in a ``finally`` block so sockets are always closed even
-    when the test body raises an exception.
+    Tears down in a ``finally`` block so the asyncio loop is always
+    stopped even when the test body raises an exception.
     """
-    config = IPCConfig(address="tcp://127.0.0.1", port=0)
+    config = IPCConfig(address="127.0.0.1", port=0)
     server = EventBridge(
         config=config,
         event_queue=event_queue,

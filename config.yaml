@@ -57,6 +57,18 @@ audio:
   # Relative paths are resolved from the working directory (repo root).
   wake_word_model_path: models/hey_lumi.onnx
 
+  # Set to false to disable the openwakeword pipeline entirely.
+  # Useful for PTT-only mode (no custom model file required).
+  wake_word_enabled: true
+
+  # Push-to-talk: press a keyboard hotkey to activate Lumi.
+  # Requires pynput — install with: uv sync --extra ptt
+  # Degrades gracefully if pynput is not installed.
+  ptt_enabled: false
+
+  # Hotkey combination for PTT.  Format: modifier+key, e.g. "ctrl+space".
+  ptt_hotkey: "ctrl+space"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # scribe — faster-whisper speech-to-text settings
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,19 +165,20 @@ tts:
   voices_path: models/tts/voices.bin
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ipc — ZeroMQ inter-process communication endpoint
+# ipc — WebSocket inter-process communication endpoint
 # ─────────────────────────────────────────────────────────────────────────────
 ipc:
-  # Whether the IPC server is active.  Set to true to enable the TCP server
-  # and connect to the Godot frontend.  Keep false for audio-only / CI runs.
-  enabled: false
+  # Whether the IPC server is active.  Set to true to enable the WebSocket
+  # server and connect to the frontend (Tauri/React).  Keep false for
+  # audio-only / CI runs.
+  enabled: true
 
-  # ZMQ transport and host prefix.  The port is appended as ":PORT".
-  # For local-only use keep "tcp://127.0.0.1".
-  address: tcp://127.0.0.1
+  # WebSocket host address.  For local-only use keep "127.0.0.1".
+  address: 127.0.0.1
 
-  # Port number for the ZMQ socket.
-  port: 5555
+  # Port number for the WebSocket server.  The Tauri/React frontend connects
+  # to ws://127.0.0.1:<port>.
+  port: 5556
 
 # ─────────────────────────────────────────────────────────────────────────────
 # tools — OS action tool framework settings

@@ -33,7 +33,7 @@ import sounddevice as sd
 from openwakeword.model import Model
 from openwakeword.vad import VAD
 
-from src.core.events import EarsErrorEvent, WakeDetectedEvent
+from src.core.events import EarsErrorCode, EarsErrorEvent, WakeDetectedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,7 @@ class Ears:
             if self._event_queue is not None:
                 self._event_queue.put(
                     EarsErrorEvent(
-                        code="ears.unrecoverable",
+                        code=EarsErrorCode.UNRECOVERABLE,
                         detail=f"InputStream failed after {_MAX_RETRIES} retries",
                     )
                 )
@@ -315,23 +315,3 @@ class Ears:
         if hasattr(self, "thread"):
             self.thread.join()
 
-
-# Testing
-if __name__ == "__main__":
-    import logging as _logging_main
-    import time as _time_main
-
-    _logging_main.basicConfig(level=_logging_main.DEBUG)
-    _main_logger = _logging_main.getLogger(__name__)
-
-    _eq: queue.Queue[Any] = queue.Queue()
-    _ears = Ears(sensitivity=0.5)
-
-    try:
-        _ears.start(_eq)
-        while True:
-            _time_main.sleep(1)
-
-    except KeyboardInterrupt:
-        _main_logger.info("Stopping ears...")
-        _ears.stop()

@@ -63,6 +63,19 @@ class AudioConfig:
     # Path to the custom "hey Lumi" ONNX wake-word model.
     wake_word_model_path: str = "models/hey_lumi.onnx"
 
+    # Whether the openwakeword pipeline is active.  Set to false to disable
+    # always-on microphone wake-word detection (useful when using PTT only).
+    wake_word_enabled: bool = True
+
+    # Whether push-to-talk mode is enabled.  When true, pressing ptt_hotkey
+    # triggers Lumi exactly as if the wake word were detected.  Requires
+    # pynput: uv sync --extra ptt  (degrades gracefully if not installed).
+    ptt_enabled: bool = False
+
+    # Key combination for push-to-talk activation.
+    # Format: modifier names joined by "+", e.g. "ctrl+space", "alt+shift+l".
+    ptt_hotkey: str = "ctrl+space"
+
 
 @dataclass(frozen=True)
 class ScribeConfig:
@@ -169,16 +182,16 @@ class TTSConfig:
 
 @dataclass(frozen=True)
 class IPCConfig:
-    """ZeroMQ IPC endpoint configuration (consumed by ipc-engineer)."""
+    """TCP IPC endpoint configuration (consumed by ipc-engineer)."""
 
     # Whether the IPC server is active.  Set to false to disable the
     # TCP server entirely (useful for headless or CI environments).
     enabled: bool = False
 
-    # ZMQ transport + host prefix — port is appended as ":PORT".
-    address: str = "tcp://127.0.0.1"
+    # Host address for the TCP socket — port is appended as ":PORT".
+    address: str = "127.0.0.1"
 
-    # Port number for the ZMQ socket.
+    # Port number for the TCP socket.
     port: int = 5555
 
 

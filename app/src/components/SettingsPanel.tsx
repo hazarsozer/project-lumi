@@ -10,16 +10,24 @@ import {
 const TABS = ['General', 'Voice', 'Model', 'Context', 'Privacy', 'Appearance', 'Advanced'] as const;
 type TabName = typeof TABS[number];
 
+interface ConfigUpdateResult {
+  applied_live: string[];
+  pending_restart: string[];
+  errors: Record<string, string>;
+}
+
 export interface SettingsPanelProps {
   /** Config schema + current values received from the backend via config_schema event. */
   configSchema?: Record<string, unknown>;
   currentValues?: Record<string, unknown>;
+  /** Last config_update_result from the backend, cleared after 4 s. */
+  updateResult?: ConfigUpdateResult | null;
   /** Called when a setting changes — emits a config_update IPC event. */
   onUpdate: (changes: Record<string, unknown>, persist: boolean) => void;
   onClose: () => void;
 }
 
-export function SettingsPanel({ onUpdate, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ onUpdate, onClose, updateResult }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabName>('General');
   const [vals, setVals] = useState<SettingsValues>(DEFAULT_SETTINGS);
 
@@ -89,7 +97,22 @@ export function SettingsPanel({ onUpdate, onClose }: SettingsPanelProps) {
 
       {/* Footer */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: T.space.sm, padding: `${T.space.md}px ${T.space.lg}px`, borderTop: `1px solid ${T.colors.borderSub}`, flexShrink: 0 }}>
-        <div style={{ fontSize: T.font.sm, color: T.colors.textMuted, flex: 1 }}>↻ Requires restart</div>
+        <div style={{ fontSize: T.font.sm, flex: 1 }}>
+          {updateResult && Object.keys(updateResult.errors).length > 0 && (
+            <span style={{ color: T.colors.danger }}>
+              Error: {Object.values(updateResult.errors).join(', ')}
+            </span>
+          )}
+          {updateResult && Object.keys(updateResult.errors).length === 0 && updateResult.pending_restart.length > 0 && (
+            <span style={{ color: T.colors.textMuted }}>↻ Restart required for some changes</span>
+          )}
+          {updateResult && Object.keys(updateResult.errors).length === 0 && updateResult.pending_restart.length === 0 && (
+            <span style={{ color: T.colors.textSec }}>✓ Applied</span>
+          )}
+          {!updateResult && (
+            <span style={{ color: T.colors.textMuted }}>↻ Requires restart</span>
+          )}
+        </div>
         <FooterButton label="Cancel" onClick={onClose} variant="ghost" />
         <FooterButton label="Apply"  onClick={handleApply} variant="secondary" />
         <FooterButton label="Save"   onClick={handleSave}  variant="primary" />

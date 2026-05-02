@@ -26,11 +26,11 @@ def server_and_queue(tmp_path):
     from src.core.config import IPCConfig
     from src.core.state_machine import StateMachine
 
-    config = IPCConfig(address="tcp://127.0.0.1", port=0)
+    config = IPCConfig(address="127.0.0.1", port=0)
     eq: queue.Queue = queue.Queue()
     sm = StateMachine()
 
-    with patch("src.core.event_bridge.IPCTransport") as MockTransport:
+    with patch("src.core.event_bridge.WSTransport") as MockTransport:
         mock_transport = MagicMock()
         MockTransport.return_value = mock_transport
         srv = EventBridge(config=config, event_queue=eq, state_machine=sm)

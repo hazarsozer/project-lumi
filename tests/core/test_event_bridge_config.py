@@ -9,9 +9,9 @@ Covers the 4 new pieces added to src/core/event_bridge.py:
 
 Strategy
 --------
-- IPCTransport is fully mocked so no real socket is created.
+- WSTransport is fully mocked so no real socket is created.
 - Inbound tests call ``_on_raw_message(raw_bytes)`` directly, the same way
-  IPCTransport's recv daemon thread would call it.
+  WSTransport's recv daemon thread would call it.
 - Outbound tests assert the encoded JSON frame passed to ``_transport.send``.
 - A real ``queue.Queue`` is used; ``queue.get(timeout=0.5)`` is used to avoid
   infinite hangs when a test checks that nothing was posted.
@@ -74,14 +74,14 @@ def bridge(
     event_queue: queue.Queue[Any],
     state_machine: StateMachine,
 ) -> EventBridge:
-    """EventBridge with IPCTransport fully mocked — no real socket.
+    """EventBridge with WSTransport fully mocked — no real socket.
 
-    We patch IPCTransport at the point it is imported by event_bridge so no
+    We patch WSTransport at the point it is imported by event_bridge so no
     bind() or thread.start() calls reach the OS.
     """
-    config = IPCConfig(address="tcp://127.0.0.1", port=5555)
+    config = IPCConfig(address="127.0.0.1", port=5555)
 
-    with patch("src.core.event_bridge.IPCTransport") as MockTransport:
+    with patch("src.core.event_bridge.WSTransport") as MockTransport:
         mock_transport_instance = MagicMock()
         MockTransport.return_value = mock_transport_instance
 

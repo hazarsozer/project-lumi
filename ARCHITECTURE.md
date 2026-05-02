@@ -10,12 +10,12 @@
 
 ## 1. System Architecture: "The Split-Brain"
 
-Lumi is decoupled into two independent processes that communicate via ZeroMQ. This ensures the desktop (especially games and renderers) remains fully responsive regardless of what Lumi's brain is doing.
+Lumi is decoupled into two independent processes that communicate via raw TCP with 4-byte length-prefix framing. This ensures the desktop (especially games and renderers) remains fully responsive regardless of what Lumi's brain is doing.
 
 ```
 ┌──────────────────────────────┐        Raw TCP (length-prefix)  ┌──────────────────────┐
 │         THE BRAIN            │ ◄──────────────────────────────► │       THE BODY       │
-│      (Python Backend)        │  JSON: {event, payload,         │  (Godot 4 UI)        │
+│      (Python Backend)        │  JSON: {event, payload,         │  (Tauri/React UI)    │
 │                              │         timestamp, version}     │                      │
 │  Ears → Orchestrator → LLM   │                                  │  Avatar + Animations │
 │  Scribe → TTS → OS Tools     │                                  │  State Overlay       │
@@ -31,7 +31,7 @@ Lumi is decoupled into two independent processes that communicate via ZeroMQ. Th
 
 ### The Body (Frontend)
 - **Role:** Visual avatar, animated overlay, user-facing UI
-- **Tech:** Godot Engine (transparent X11/Wayland window) — Tauri as alternative
+- **Tech:** Tauri/React (WebSocket-to-TCP bridge); Godot 4 (legacy, X11/Wayland)
 - **Target:** < 200MB RAM, negligible GPU at all times
 
 ### The Nerves (IPC)
@@ -186,15 +186,15 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Routing | Reflex (regex) + Reasoning (LLM) |
 | Memory | JSON-based user profile + conversation history |
 
-### Frontend — The Body (Phase 5)
+### Frontend — The Body (Phase 9.5)
 | Component | Technology |
 |---|---|
-| Renderer | Godot 4 (transparent 200×200 overlay, borderless, X11/Wayland) |
-| IPC Client | `LumiClient` (GDScript `StreamPeerTCP`, auto-reconnect every 2 s) |
-| Frame protocol | `ipc_protocol.gd` — 4-byte length-prefix encode/decode |
-| Avatar | `AvatarController` drives `AnimatedSprite2D` from Brain state events; placeholder colored-circle sprites in `ui/assets/sprites/` |
-| Avatar (Phase 6) | Real artwork replacing placeholder sprites; Live2D (Standard) / 3D VRM (Pro) |
-| Settings Panel | `ui/scenes/settings_panel.tscn` + `ui/scripts/settings_panel.gd` — gear icon / Ctrl+, entry; 7-tab configuration UI; `SettingRow` widget with 7 control types (toggle, slider, select, text, number, path, multiselect); requests schema from Brain via `config_schema_request`, applies changes live or marks `[↻]` restart-required |
+| Renderer | Tauri v2 + React 18 (WebSocket bridge to TCP backend) |
+| IPC Client | React hook connecting to `ws_bridge.py` (WebSocket relay at :8765) |
+| Frame protocol | 4-byte length-prefix encode/decode (ws_bridge bridges to TCP :5555) |
+| Avatar | React component driving animated avatar from Brain state events; placeholder SVG/images in `app/src/assets/` |
+| Avatar (Phase 9) | Real artwork replacing placeholder sprites; Live2D (Standard) / 3D VRM (Pro) |
+| Settings Panel | `app/src/components/SettingsPanel.tsx` — gear icon / Ctrl+, entry; 7-tab configuration UI; component-based controls (toggle, slider, select, text, number, path, multiselect); requests schema from Brain via `config_schema_request`, applies changes live or marks restart-required |
 
 ### Infrastructure
 | Component | Technology |
@@ -221,7 +221,7 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | WindowListTool | `src/tools/os_actions.py` | `wmctrl -l` parse; graceful fail if absent |
 | ScreenshotTool | `src/tools/vision.py` | grim → scrot → Pillow fallback; moondream2 GGUF description; 30s idle unload; VRAM mutex with LLM |
 | Viseme extraction | `src/audio/viseme_map.py` + `src/audio/mouth.py` | 8 viseme groups; `map_phoneme()` strips stress digits; `VisemeEvent` posted per phoneme |
-| Token streaming | `src/llm/reasoning_router.py` + `src/core/event_bridge.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Godot |
+| Token streaming | `src/llm/reasoning_router.py` + `src/core/event_bridge.py` | `LLMTokenEvent` per token; `utterance_id` UUID threads through; `llm_token` wire frame to Frontend |
 | Config | `ToolsConfig` + `VisionConfig` in `src/core/config.py`; `tools:` + `vision:` keys in `config.yaml` | |
 
 **Tool-call flow (two-pass):** `_run_inference` → LLM generates `<tool_call>` block → `ToolExecutor.execute()` → result injected into conversation → second LLM pass → `LLMResponseReadyEvent`.
@@ -800,7 +800,7 @@ scripts/
 - [ ] Real avatar artwork (placeholder colored-circle sprites still in use)
 
 ### Phase 8.5: Settings UI (Runtime Config) — COMPLETE
-*Goal: Users can configure Lumi at runtime without restarting, via the Godot overlay.*
+*Goal: Users can configure Lumi at runtime without restarting, via the Tauri/React UI.*
 
 - [x] `src/core/config_runtime.py` — `ConfigManager`, `ConfigObserver`, `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock
 - [x] `src/core/config_schema.py` — `FIELD_META` dict; 47 user-facing fields with control type, min/max, restart_required metadata

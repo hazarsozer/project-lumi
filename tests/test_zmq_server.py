@@ -2,7 +2,7 @@
 Unit tests for EventBridge (src/core/event_bridge.py).
 
 Strategy:
-- IPCTransport is mocked at the class level using pytest-mock / unittest.mock
+- WSTransport is mocked at the class level using pytest-mock / unittest.mock
   so no real TCP sockets are opened.  All ``send()`` call arguments are
   decoded from UTF-8 JSON so assertions are structural rather than brittle
   byte-string comparisons.
@@ -66,7 +66,7 @@ def _decode_sent(mock_transport: MagicMock) -> dict[str, Any]:
 
 @pytest.fixture()
 def ipc_config() -> IPCConfig:
-    return IPCConfig(address="tcp://127.0.0.1", port=5555)
+    return IPCConfig(address="127.0.0.1", port=5555)
 
 
 @pytest.fixture()
@@ -81,7 +81,7 @@ def state_machine() -> StateMachine:
 
 @pytest.fixture()
 def mock_transport() -> MagicMock:
-    """A MagicMock that stands in for IPCTransport."""
+    """A MagicMock that stands in for WSTransport."""
     transport = MagicMock()
     return transport
 
@@ -93,8 +93,8 @@ def zmq_server(
     state_machine: StateMachine,
     mock_transport: MagicMock,
 ) -> EventBridge:
-    """Construct an EventBridge with IPCTransport patched out."""
-    with patch("src.core.event_bridge.IPCTransport", return_value=mock_transport):
+    """Construct an EventBridge with WSTransport patched out."""
+    with patch("src.core.event_bridge.WSTransport", return_value=mock_transport):
         server = EventBridge(
             config=ipc_config,
             event_queue=event_queue,
@@ -402,7 +402,7 @@ def test_state_machine_observer_registered(
 ) -> None:
     """EventBridge must register itself as an observer on the StateMachine so
     transitions automatically trigger on_state_change."""
-    with patch("src.core.event_bridge.IPCTransport", return_value=mock_transport):
+    with patch("src.core.event_bridge.WSTransport", return_value=mock_transport):
         server = EventBridge(
             config=ipc_config,
             event_queue=event_queue,

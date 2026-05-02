@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch, call
 import numpy as np
 import pytest
 
-from src.core.events import EarsErrorEvent
+from src.core.events import EarsErrorCode, EarsErrorEvent
 from src.audio.ears import _MAX_RETRIES, _RETRY_DELAY_S
 
 
@@ -171,7 +171,7 @@ def test_exhausted_retries_posts_ears_error_event():
     assert not eq.empty()
     event = eq.get_nowait()
     assert isinstance(event, EarsErrorEvent)
-    assert event.code == "ears.unrecoverable"
+    assert event.code == EarsErrorCode.UNRECOVERABLE
     assert str(_MAX_RETRIES) in event.detail
 
 
@@ -244,7 +244,7 @@ def test_ears_error_handler_transitions_to_idle_from_listening():
     orch = _make_minimal_orchestrator()
     orch._state_machine.transition_to(LumiState.LISTENING)
 
-    orch._handle_ears_error(EarsErrorEvent(code="ears.unrecoverable", detail="test"))
+    orch._handle_ears_error(EarsErrorEvent(code=EarsErrorCode.UNRECOVERABLE, detail="test"))
 
     assert orch._state_machine.current_state == LumiState.IDLE
 
@@ -257,7 +257,7 @@ def test_ears_error_handler_noop_when_already_idle():
     orch = _make_minimal_orchestrator()
     assert orch._state_machine.current_state == LumiState.IDLE
 
-    orch._handle_ears_error(EarsErrorEvent(code="ears.unrecoverable", detail="test"))
+    orch._handle_ears_error(EarsErrorEvent(code=EarsErrorCode.UNRECOVERABLE, detail="test"))
 
     assert orch._state_machine.current_state == LumiState.IDLE
 

@@ -1,5 +1,5 @@
 """
-Tests for src/core/startup_check.py — Wave A2 promoted hard-failure checks.
+Tests for src/core/startup_check.py.
 
 Covers:
 - _check_openwakeword_version raises on mismatch, passes on match.
@@ -7,14 +7,14 @@ Covers:
 - _check_stt_model warns (not raises) when directory missing.
 - _check_stt_model logs info when directory exists.
 - _check_llm_package raises when llama_cpp import fails.
-- _check_llm_model raises RuntimeError when model file is missing.
-- _check_llm_model passes when model file exists.
+- _check_llm_model returns non-empty list when model file is missing (soft).
+- _check_llm_model returns [] when model file exists.
 - _check_tts_package raises RuntimeError when enabled=True and kokoro-onnx missing.
 - _check_tts_package is a no-op when enabled=False.
 - _check_tts_package passes when enabled=True and kokoro-onnx is installed.
-- _check_tts_model raises RuntimeError when model file is missing.
-- _check_tts_model raises RuntimeError when voices file is missing.
-- _check_tts_model passes when both files exist.
+- _check_tts_model returns non-empty list when model file is missing (soft).
+- _check_tts_model returns non-empty list when voices file is missing (soft).
+- _check_tts_model returns [] when both files exist.
 - _check_rag_packages raises when enabled and packages missing.
 - _check_rag_packages is a no-op when disabled.
 - _check_rag_packages passes when enabled and all packages present.
@@ -22,8 +22,9 @@ Covers:
 - _check_microphone passes when at least one input device is found.
 - _check_microphone handles dict return (single device) from query_devices.
 - run_startup_checks raises TypeError on bad config type.
-- run_startup_checks orchestrates all checks and completes successfully.
+- run_startup_checks returns list[str] and completes successfully.
 - run_startup_checks propagates RuntimeError from any hard-failure check.
+- run_startup_checks skips wake-word checks when wake_word_enabled is False.
 - run_startup_checks skips _check_tts_model when TTS is disabled.
 - run_startup_checks calls _check_tts_model when TTS is enabled.
 """
@@ -42,23 +43,24 @@ import pytest
 
 
 @pytest.mark.unit
-def test_check_llm_model_raises_when_file_missing(tmp_path):
-    """_check_llm_model raises RuntimeError when the GGUF file is absent."""
+def test_check_llm_model_returns_description_when_file_missing(tmp_path):
+    """_check_llm_model returns a non-empty list when the GGUF file is absent."""
     from src.core.startup_check import _check_llm_model
 
     missing = str(tmp_path / "model.gguf")
-    with pytest.raises(SystemExit):
-        _check_llm_model(missing)
+    result = _check_llm_model(missing)
+    assert result, "expected non-empty list for missing LLM model"
+    assert any("llm" in item.lower() or "model" in item.lower() for item in result)
 
 
 @pytest.mark.unit
-def test_check_llm_model_passes_when_file_exists(tmp_path):
-    """_check_llm_model does not raise when the GGUF file is present."""
+def test_check_llm_model_returns_empty_when_file_exists(tmp_path):
+    """_check_llm_model returns [] when the GGUF file is present."""
     from src.core.startup_check import _check_llm_model
 
     model_file = tmp_path / "model.gguf"
     model_file.write_bytes(b"\x00" * 16)
-    _check_llm_model(str(model_file))  # must not raise
+    assert _check_llm_model(str(model_file)) == []
 
 
 # ---------------------------------------------------------------------------
@@ -101,34 +103,36 @@ def test_check_tts_package_passes_when_enabled_and_installed():
 
 
 @pytest.mark.unit
-def test_check_tts_model_raises_when_model_missing(tmp_path):
-    """_check_tts_model raises RuntimeError when the Kokoro ONNX file is absent."""
+def test_check_tts_model_returns_description_when_model_missing(tmp_path):
+    """_check_tts_model returns non-empty list when the Kokoro ONNX file is absent."""
     from src.core.startup_check import _check_tts_model
 
     voices = tmp_path / "voices.bin"
     voices.write_bytes(b"\x00" * 8)
     missing_model = str(tmp_path / "kokoro.onnx")
 
-    with pytest.raises(SystemExit):
-        _check_tts_model(missing_model, str(voices))
+    result = _check_tts_model(missing_model, str(voices))
+    assert result, "expected non-empty list for missing TTS model"
+    assert any("tts" in item.lower() or "model" in item.lower() for item in result)
 
 
 @pytest.mark.unit
-def test_check_tts_model_raises_when_voices_missing(tmp_path):
-    """_check_tts_model raises RuntimeError when voices.bin is absent."""
+def test_check_tts_model_returns_description_when_voices_missing(tmp_path):
+    """_check_tts_model returns non-empty list when voices.bin is absent."""
     from src.core.startup_check import _check_tts_model
 
     model = tmp_path / "kokoro.onnx"
     model.write_bytes(b"\x00" * 8)
     missing_voices = str(tmp_path / "voices.bin")
 
-    with pytest.raises(SystemExit):
-        _check_tts_model(str(model), missing_voices)
+    result = _check_tts_model(str(model), missing_voices)
+    assert result
+    assert any("voices" in item.lower() for item in result)
 
 
 @pytest.mark.unit
-def test_check_tts_model_passes_when_both_files_exist(tmp_path):
-    """_check_tts_model does not raise when both model and voices files exist."""
+def test_check_tts_model_returns_empty_when_both_files_exist(tmp_path):
+    """_check_tts_model returns [] when both model and voices files exist."""
     from src.core.startup_check import _check_tts_model
 
     model = tmp_path / "kokoro.onnx"
@@ -136,7 +140,7 @@ def test_check_tts_model_passes_when_both_files_exist(tmp_path):
     model.write_bytes(b"\x00" * 8)
     voices.write_bytes(b"\x00" * 8)
 
-    _check_tts_model(str(model), str(voices))  # must not raise
+    assert _check_tts_model(str(model), str(voices)) == []
 
 
 # ---------------------------------------------------------------------------
@@ -179,22 +183,23 @@ def test_check_oww_version_raises_on_import_error():
 
 
 @pytest.mark.unit
-def test_check_wake_word_model_raises_when_missing(tmp_path):
-    """_check_wake_word_model raises when the ONNX file is absent."""
+def test_check_wake_word_model_returns_description_when_missing(tmp_path):
+    """_check_wake_word_model returns non-empty list when ONNX file is absent."""
     from src.core.startup_check import _check_wake_word_model
 
-    with pytest.raises(RuntimeError, match="Wake word model not found"):
-        _check_wake_word_model(str(tmp_path / "hey_lumi.onnx"))
+    result = _check_wake_word_model(str(tmp_path / "hey_lumi.onnx"))
+    assert result, "expected non-empty list for missing wake-word model"
+    assert any("wake" in item.lower() for item in result)
 
 
 @pytest.mark.unit
-def test_check_wake_word_model_passes_when_present(tmp_path):
-    """_check_wake_word_model does not raise when the ONNX file exists."""
+def test_check_wake_word_model_returns_empty_when_present(tmp_path):
+    """_check_wake_word_model returns [] when the ONNX file exists."""
     from src.core.startup_check import _check_wake_word_model
 
     model = tmp_path / "hey_lumi.onnx"
     model.write_bytes(b"\x00" * 8)
-    _check_wake_word_model(str(model))  # must not raise
+    assert _check_wake_word_model(str(model)) == []
 
 
 # ---------------------------------------------------------------------------
@@ -221,23 +226,25 @@ def test_check_stt_model_warns_but_does_not_raise_when_missing(tmp_path, caplog)
 
 
 @pytest.mark.unit
-def test_check_llm_package_raises_when_missing():
-    """_check_llm_package raises RuntimeError when llama_cpp cannot be imported."""
+def test_check_llm_package_returns_description_when_missing():
+    """_check_llm_package returns non-empty list when llama_cpp cannot be imported."""
     from src.core.startup_check import _check_llm_package
 
     with patch.dict("sys.modules", {"llama_cpp": None}):
-        with pytest.raises(RuntimeError, match="llama-cpp-python"):
-            _check_llm_package()
+        result = _check_llm_package()
+
+    assert result, "expected non-empty list for missing llama-cpp-python"
+    assert any("llama" in item.lower() or "llm" in item.lower() for item in result)
 
 
 @pytest.mark.unit
-def test_check_llm_package_passes_when_installed():
-    """_check_llm_package does not raise when llama_cpp is importable."""
+def test_check_llm_package_returns_empty_when_installed():
+    """_check_llm_package returns [] when llama_cpp is importable."""
     from src.core.startup_check import _check_llm_package
 
     fake = MagicMock()
     with patch.dict("sys.modules", {"llama_cpp": fake}):
-        _check_llm_package()  # must not raise
+        assert _check_llm_package() == []
 
 
 # ---------------------------------------------------------------------------
@@ -270,48 +277,46 @@ def test_check_rag_packages_raises_when_enabled_and_missing():
 
 
 @pytest.mark.unit
-def test_check_microphone_raises_when_no_input_devices():
-    """_check_microphone raises RuntimeError when no input devices are detected."""
+def test_check_microphone_returns_description_when_no_input_devices():
+    """_check_microphone returns non-empty list when no input devices are detected."""
     from src.core.startup_check import _check_microphone
 
     with patch("sounddevice.query_devices", return_value=[]):
-        with pytest.raises(RuntimeError, match="No microphone"):
-            _check_microphone()
+        result = _check_microphone()
+
+    assert result, "expected non-empty list for missing microphone"
+    assert any("microphone" in item.lower() or "mic" in item.lower() for item in result)
 
 
 @pytest.mark.unit
-def test_check_microphone_passes_when_input_device_present():
-    """_check_microphone does not raise when at least one input device exists."""
+def test_check_microphone_returns_empty_when_device_present():
+    """_check_microphone returns [] when at least one input device exists."""
     from src.core.startup_check import _check_microphone
 
     fake_device = {"max_input_channels": 2, "name": "USB Mic"}
     with patch("sounddevice.query_devices", return_value=[fake_device]):
-        _check_microphone()  # must not raise
+        assert _check_microphone() == []
 
 
 @pytest.mark.unit
-def test_check_microphone_raises_on_portaudio_error():
-    """_check_microphone raises RuntimeError when sounddevice itself throws."""
+def test_check_microphone_returns_description_on_portaudio_error():
+    """_check_microphone returns non-empty list when sounddevice itself throws."""
     from src.core.startup_check import _check_microphone
 
     with patch("sounddevice.query_devices", side_effect=Exception("no portaudio")):
-        with pytest.raises(RuntimeError, match="Failed to query audio devices"):
-            _check_microphone()
+        result = _check_microphone()
+
+    assert result, "expected non-empty list on PortAudio error"
 
 
 @pytest.mark.unit
 def test_check_microphone_handles_single_dict_device():
-    """_check_microphone accepts a single dict (not list) from query_devices.
-
-    sounddevice.query_devices() returns a dict when there is exactly one
-    device on the system.  The branch at line 265 converts it to a list so
-    that the rest of the logic can iterate uniformly.
-    """
+    """_check_microphone accepts a single dict (not list) from query_devices."""
     from src.core.startup_check import _check_microphone
 
     single_device = {"max_input_channels": 1, "name": "Built-in Mic"}
     with patch("sounddevice.query_devices", return_value=single_device):
-        _check_microphone()  # must not raise
+        assert _check_microphone() == []
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +373,7 @@ def _make_fake_lumi_config(
     *,
     tts_enabled: bool = False,
     rag_enabled: bool = False,
+    wake_word_enabled: bool = True,
 ) -> "MagicMock":
     """Return a MagicMock shaped like LumiConfig with realistic path attributes.
 
@@ -380,6 +386,7 @@ def _make_fake_lumi_config(
     cfg = MagicMock(spec=LumiConfig)
     cfg.audio = MagicMock(spec=AudioConfig)
     cfg.audio.wake_word_model_path = str(tmp_path / "hey_lumi.onnx")
+    cfg.audio.wake_word_enabled = wake_word_enabled
     cfg.scribe = MagicMock(spec=ScribeConfig)
     cfg.scribe.model_path = str(tmp_path / "whisper-tiny")
     cfg.llm = MagicMock(spec=LLMConfig)
@@ -420,18 +427,18 @@ def test_run_startup_checks_completes_successfully_tts_disabled(tmp_path):
 
     with (
         patch("src.core.startup_check._check_openwakeword_version"),
-        patch("src.core.startup_check._check_wake_word_model"),
-        patch("src.core.startup_check._check_microphone"),
-        patch("src.core.startup_check._check_llm_package"),
+        patch("src.core.startup_check._check_wake_word_model", return_value=[]),
+        patch("src.core.startup_check._check_microphone", return_value=[]),
+        patch("src.core.startup_check._check_llm_package", return_value=[]),
         patch("src.core.startup_check._check_stt_model"),
-        patch("src.core.startup_check._check_llm_model"),
+        patch("src.core.startup_check._check_llm_model", return_value=[]),
         patch("src.core.startup_check._check_tts_package"),
-        patch("src.core.startup_check._check_tts_model") as mock_tts_model,
+        patch("src.core.startup_check._check_tts_model", return_value=[]) as mock_tts_model,
         patch("src.core.startup_check._check_rag_packages"),
     ):
-        run_startup_checks(cfg)
-        # TTS disabled — _check_tts_model must NOT be called.
+        result = run_startup_checks(cfg)
         mock_tts_model.assert_not_called()
+    assert isinstance(result, list)
 
 
 @pytest.mark.unit
@@ -443,13 +450,13 @@ def test_run_startup_checks_calls_tts_model_check_when_tts_enabled(tmp_path):
 
     with (
         patch("src.core.startup_check._check_openwakeword_version"),
-        patch("src.core.startup_check._check_wake_word_model"),
-        patch("src.core.startup_check._check_microphone"),
-        patch("src.core.startup_check._check_llm_package"),
+        patch("src.core.startup_check._check_wake_word_model", return_value=[]),
+        patch("src.core.startup_check._check_microphone", return_value=[]),
+        patch("src.core.startup_check._check_llm_package", return_value=[]),
         patch("src.core.startup_check._check_stt_model"),
-        patch("src.core.startup_check._check_llm_model"),
+        patch("src.core.startup_check._check_llm_model", return_value=[]),
         patch("src.core.startup_check._check_tts_package"),
-        patch("src.core.startup_check._check_tts_model") as mock_tts_model,
+        patch("src.core.startup_check._check_tts_model", return_value=[]) as mock_tts_model,
         patch("src.core.startup_check._check_rag_packages"),
     ):
         run_startup_checks(cfg)
@@ -458,14 +465,28 @@ def test_run_startup_checks_calls_tts_model_check_when_tts_enabled(tmp_path):
 
 @pytest.mark.unit
 def test_run_startup_checks_propagates_oww_error(tmp_path):
-    """run_startup_checks lets RuntimeError from _check_openwakeword_version propagate."""
+    """run_startup_checks lets RuntimeError from _check_openwakeword_version propagate.
+
+    OWW version check only runs when wake_word_ok (model found, mic present).
+    We patch both wake_word_model and microphone to return [] so the version
+    check is actually reached and can raise.
+    """
     from src.core.startup_check import run_startup_checks
 
     cfg = _make_fake_lumi_config(tmp_path)
 
-    with patch(
-        "src.core.startup_check._check_openwakeword_version",
-        side_effect=RuntimeError("version mismatch"),
+    with (
+        patch("src.core.startup_check._check_wake_word_model", return_value=[]),
+        patch("src.core.startup_check._check_microphone", return_value=[]),
+        patch(
+            "src.core.startup_check._check_openwakeword_version",
+            side_effect=RuntimeError("version mismatch"),
+        ),
+        patch("src.core.startup_check._check_llm_package", return_value=[]),
+        patch("src.core.startup_check._check_stt_model"),
+        patch("src.core.startup_check._check_llm_model", return_value=[]),
+        patch("src.core.startup_check._check_tts_package"),
+        patch("src.core.startup_check._check_rag_packages"),
     ):
         with pytest.raises(RuntimeError, match="version mismatch"):
             run_startup_checks(cfg)
@@ -479,23 +500,52 @@ def test_run_startup_checks_calls_each_check_with_correct_args(tmp_path):
     cfg = _make_fake_lumi_config(tmp_path, tts_enabled=False, rag_enabled=False)
 
     with (
+        patch("src.core.startup_check._check_wake_word_model", return_value=[]) as mock_ww,
+        patch("src.core.startup_check._check_microphone", return_value=[]) as mock_mic,
         patch("src.core.startup_check._check_openwakeword_version") as mock_oww,
-        patch("src.core.startup_check._check_wake_word_model") as mock_ww,
-        patch("src.core.startup_check._check_microphone") as mock_mic,
-        patch("src.core.startup_check._check_llm_package") as mock_llm_pkg,
+        patch("src.core.startup_check._check_llm_package", return_value=[]) as mock_llm_pkg,
         patch("src.core.startup_check._check_stt_model") as mock_stt,
-        patch("src.core.startup_check._check_llm_model") as mock_llm,
+        patch("src.core.startup_check._check_llm_model", return_value=[]) as mock_llm,
         patch("src.core.startup_check._check_tts_package") as mock_tts_pkg,
-        patch("src.core.startup_check._check_tts_model"),
+        patch("src.core.startup_check._check_tts_model", return_value=[]),
         patch("src.core.startup_check._check_rag_packages") as mock_rag,
     ):
         run_startup_checks(cfg)
 
-    mock_oww.assert_called_once_with()
     mock_ww.assert_called_once_with(cfg.audio.wake_word_model_path)
     mock_mic.assert_called_once_with()
+    mock_oww.assert_called_once_with()
     mock_llm_pkg.assert_called_once_with()
     mock_stt.assert_called_once_with(cfg.scribe.model_path)
     mock_llm.assert_called_once_with(cfg.llm.model_path)
     mock_tts_pkg.assert_called_once_with(cfg.tts.enabled)
     mock_rag.assert_called_once_with(cfg.rag.enabled)
+
+
+@pytest.mark.unit
+def test_run_startup_checks_skips_wake_word_checks_when_disabled(tmp_path):
+    """When wake_word_enabled=False, wake-word and microphone checks are skipped.
+
+    PTT-only mode must be able to start without a custom wake-word model file
+    or a connected microphone.
+    """
+    from src.core.startup_check import run_startup_checks
+
+    cfg = _make_fake_lumi_config(tmp_path, wake_word_enabled=False)
+
+    with (
+        patch("src.core.startup_check._check_openwakeword_version") as mock_oww,
+        patch("src.core.startup_check._check_wake_word_model") as mock_ww,
+        patch("src.core.startup_check._check_microphone") as mock_mic,
+        patch("src.core.startup_check._check_llm_package", return_value=[]),
+        patch("src.core.startup_check._check_stt_model"),
+        patch("src.core.startup_check._check_llm_model", return_value=[]),
+        patch("src.core.startup_check._check_tts_package"),
+        patch("src.core.startup_check._check_tts_model", return_value=[]),
+        patch("src.core.startup_check._check_rag_packages"),
+    ):
+        run_startup_checks(cfg)
+
+    mock_oww.assert_not_called()
+    mock_ww.assert_not_called()
+    mock_mic.assert_not_called()

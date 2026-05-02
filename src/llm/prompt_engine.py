@@ -28,12 +28,12 @@ or fabricate information.
 and stop. Do not apologise at length.
 
 Tool calls:
-When an action requires a tool, emit a single JSON object with exactly two \
-keys and nothing else — no prose before or after it:
+When an action requires a tool, respond with a single tool-call block and \
+nothing else — no prose before or after it:
 
-{"tool": "<tool_name>", "args": {<key>: <value>, ...}}
+<tool_call>{"tool": "<tool_name>", "args": {<key>: <value>, ...}}</tool_call>
 
-Do not mix prose and a tool-call JSON in the same response.\
+Do not mix prose and a tool-call block in the same response.\
 """
 
 
@@ -52,6 +52,14 @@ class PromptEngine:
         self._config = config
         if config is not None and config.persona.system_prompt is not None:
             self._default_system_prompt: str = config.persona.system_prompt
+        else:
+            self._default_system_prompt = DEFAULT_SYSTEM_PROMPT
+
+    def reconfigure(self, new_config: LumiConfig) -> None:
+        """Apply hot-reloadable persona changes (e.g. system_prompt)."""
+        self._config = new_config
+        if new_config.persona.system_prompt is not None:
+            self._default_system_prompt = new_config.persona.system_prompt
         else:
             self._default_system_prompt = DEFAULT_SYSTEM_PROMPT
 

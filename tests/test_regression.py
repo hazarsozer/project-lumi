@@ -11,8 +11,7 @@ Contracts covered:
   R2  _dispatch_user_turn is called for TranscriptReadyEvent
   R3  _dispatch_user_turn is called for UserTextEvent
   R4  WakeDetectedEvent while SPEAKING posts InterruptEvent
-  R5  MetricsCollector.snapshot() returns a dict with the correct histogram shape
-  R6  PromptEngine.build_prompt() output contains the system prompt text
+  R5  PromptEngine.build_prompt() output contains the system prompt text
 """
 
 from __future__ import annotations
@@ -35,7 +34,6 @@ from src.core.events import (
     UserTextEvent,
     WakeDetectedEvent,
 )
-from src.core.metrics import MetricsCollector
 from src.core.orchestrator import Orchestrator
 from src.core.state_machine import LumiState
 from src.llm.prompt_engine import DEFAULT_SYSTEM_PROMPT, PromptEngine
@@ -195,47 +193,7 @@ def test_wake_while_speaking_posts_interrupt_event() -> None:
 
 
 # ---------------------------------------------------------------------------
-# R5 — MetricsCollector.snapshot() shape
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-def test_metrics_snapshot_has_correct_histogram_shape() -> None:
-    """MetricsCollector.snapshot() must return a dict with the documented keys.
-
-    Histogram entries must contain: count, mean, p50, p95, p99.
-    Counter entries must be plain integers.
-    An empty collector must return an empty dict (not None or a list).
-    """
-    mc = MetricsCollector()
-
-    # Empty collector
-    empty = mc.snapshot()
-    assert isinstance(empty, dict), "snapshot() must return a dict"
-    assert len(empty) == 0, "fresh collector snapshot must be empty"
-
-    # Record a histogram value and a counter
-    mc.record("latency_ms", 42.0)
-    mc.record("latency_ms", 100.0)
-    mc.increment("requests_total")
-    mc.increment("requests_total")
-    mc.increment("requests_total")
-
-    snap = mc.snapshot()
-
-    assert "latency_ms" in snap, "recorded histogram key must appear in snapshot"
-    assert "requests_total" in snap, "incremented counter must appear in snapshot"
-
-    hist = snap["latency_ms"]
-    assert isinstance(hist, dict), "histogram value must be a dict"
-    for required_key in ("count", "mean", "p50", "p95", "p99"):
-        assert required_key in hist, f"histogram dict missing required key: {required_key!r}"
-
-    assert hist["count"] == 2
-    assert snap["requests_total"] == 3
-
-
-# ---------------------------------------------------------------------------
-# R6 — PromptEngine.build_prompt() contains system prompt text
+# R5 — PromptEngine.build_prompt() contains system prompt text
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit

@@ -11,8 +11,25 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 
 import numpy as np
+
+
+class InterruptSource(StrEnum):  # source values for InterruptEvent
+    ZMQ = "zmq"
+    WAKE_WORD = "wake_word"
+    KEYBOARD = "keyboard"
+    USER_STOP = "user_stop"
+
+
+class EarsErrorCode(StrEnum):  # error code values for EarsErrorEvent
+    UNRECOVERABLE = "ears.unrecoverable"
+
+
+class SystemStatusSource(StrEnum):  # source values for SystemStatusEvent
+    STARTUP = "startup"
+    DEGRADATION = "degradation"
 
 
 @dataclass(frozen=True)
@@ -140,7 +157,7 @@ class LLMTokenEvent:
 class InterruptEvent:
     """Fired to cancel in-flight work and return to IDLE."""
 
-    source: str  # "zmq" | "wake_word" | "keyboard" | "user_stop"
+    source: InterruptSource
 
 
 @dataclass(frozen=True)
@@ -195,6 +212,11 @@ class RAGSetEnabledEvent:
 
 
 @dataclass(frozen=True)
+class RAGStatusRequestEvent:
+    """Fired when the frontend requests current RAG runtime state."""
+
+
+@dataclass(frozen=True)
 class EarsErrorEvent:
     """Fired by Ears when the audio capture thread fails unrecoverably.
 
@@ -202,7 +224,7 @@ class EarsErrorEvent:
       - ``ears.unrecoverable`` — InputStream failed after all retries
     """
 
-    code: str  # e.g. "ears.unrecoverable"
+    code: EarsErrorCode
     detail: str  # human-readable description for logs / UI toast
 
 
@@ -275,4 +297,7 @@ class SystemStatusEvent:
     rag_available: bool
     mic_available: bool
     llm_available: bool
-    source: str = "startup"  # "startup" | "degradation"
+    source: SystemStatusSource = SystemStatusSource.STARTUP
+    # Setup flags: set when required model files are absent on startup.
+    setup_required: bool = False
+    missing_items: tuple[str, ...] = ()

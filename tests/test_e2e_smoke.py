@@ -89,7 +89,7 @@ def _build_orchestrator(
     config: LumiConfig,
     *,
     tts=None,
-    zmq_server=None,
+    event_bridge=None,
     llm_response: str = "Paris",
 ):
     """Context manager that creates an Orchestrator with mocked heavy deps.
@@ -128,7 +128,7 @@ def _build_orchestrator(
         patch("src.core.orchestrator.ConversationMemory", return_value=mock_mem),
         patch("src.core.orchestrator.ReasoningRouter", return_value=mock_reasoning),
     ):
-        orch = Orchestrator(config, speaker=speaker, tts=tts, zmq_server=zmq_server)
+        orch = Orchestrator(config, speaker=speaker, tts=tts, event_bridge=event_bridge)
         try:
             yield orch
         finally:
@@ -457,9 +457,9 @@ def test_ipc_event_forwarded():
     mock_zmq.on_rag_retrieval = MagicMock()
     mock_zmq.stop = MagicMock()
 
-    with _build_orchestrator(config, zmq_server=mock_zmq) as orch:
+    with _build_orchestrator(config, event_bridge=mock_zmq) as orch:
         # The orchestrator registers on_tts_start for LLMResponseReadyEvent
-        # when zmq_server is provided.
+        # when event_bridge is provided.
         response_event = LLMResponseReadyEvent(text="Forwarded response")
 
         # Manually put state into SPEAKING so _handle_llm_response can proceed.

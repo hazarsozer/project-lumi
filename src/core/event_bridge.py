@@ -2,11 +2,10 @@
 EventBridge: event translation bridge between Lumi's Python Brain and the
 Tauri/React frontend.
 
-This module is NOT a ZeroMQ server — it sits on top of ``IPCTransport``
-(a raw TCP length-prefixed server) and provides the event-semantic layer:
-it translates outbound internal events into JSON wire frames and translates
-inbound JSON frames into internal event dataclasses posted to the
-orchestrator's queue.
+This module is NOT a ZeroMQ server — it sits on top of ``WSTransport``
+(a WebSocket server) and provides the event-semantic layer: it translates
+outbound internal events into JSON wire frames and translates inbound JSON
+frames into internal event dataclasses posted to the orchestrator's queue.
 
 Wire format (JSON envelope):
     {
@@ -20,13 +19,12 @@ Threading model:
 - ``publish``-side methods (on_state_change, on_tts_start, …) are called
   from the orchestrator thread.  They call ``_transport.send()`` which is
   thread-safe.
-- ``_on_raw_message`` is called from IPCTransport's recv daemon thread.
+- ``_on_raw_message`` is called from WSTransport's asyncio thread.
   It decodes the frame, validates it, and posts events to the event queue.
   ``queue.Queue`` is thread-safe; no additional locking is required here.
 
 Constraints:
-- No asyncio — stdlib threads + queue.Queue only.
-- No pyzmq — transport is IPCTransport (raw TCP).
+- No pyzmq — transport is WSTransport (WebSocket).
 - No print() — all output via logging.getLogger(__name__).
 """
 
@@ -36,6 +34,7 @@ import json
 import logging
 import queue
 import time
+from collections.abc import Callable
 from typing import Any
 
 from src.core.config import IPCConfig
@@ -43,11 +42,13 @@ from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
     InterruptEvent,
+    InterruptSource,
     LLMResponseReadyEvent,
     LLMTokenEvent,
     RAGRetrievalEvent,
     RAGSetEnabledEvent,
     RAGStatusEvent,
+    RAGStatusRequestEvent,
     SpeechCompletedEvent,
     SystemStatusEvent,
     TranscriptReadyEvent,
@@ -56,29 +57,39 @@ from src.core.events import (
     ZMQMessage,
 )
 from src.core.handshake import HandshakeHandler
-from src.core.ipc_transport import IPCTransport
+from src.core.ws_transport import WSTransport
 from src.core.state_machine import LumiState, StateMachine
 
 logger = logging.getLogger(__name__)
 
-# The "tcp://" scheme prefix used in IPCConfig.address; stripped before
-# passing the host string to IPCTransport.
-_TCP_SCHEME: str = "tcp://"
-
 __all__ = ["EventBridge"]
+
+# Maps each outbound event type to its wire event name.
+# on_state_change, on_error, send_config_schema, and send_config_update_result
+# have custom signatures and are intentionally excluded.
+_OUTBOUND: dict[type, str] = {
+    LLMResponseReadyEvent: "tts_start",
+    VisemeEvent:           "tts_viseme",
+    SpeechCompletedEvent:  "tts_stop",
+    TranscriptReadyEvent:  "transcript",
+    LLMTokenEvent:         "llm_token",
+    RAGRetrievalEvent:     "rag_retrieval",
+    RAGStatusEvent:        "rag_status",
+    SystemStatusEvent:     "system_status",
+}
 
 
 class EventBridge:
     """Bridges internal Lumi events to/from the Tauri/React frontend over IPC.
 
-    Translates outbound internal events → JSON frames sent via IPCTransport.
+    Translates outbound internal events → JSON frames sent via WSTransport.
     Translates inbound JSON frames → internal events posted to the event queue.
     Registers itself as a StateMachine observer for state_change forwarding.
 
     All public on_*() methods are safe to call from any thread.
 
     Args:
-        config:        IPCConfig carrying address (with scheme prefix) and port.
+        config:        IPCConfig carrying address (plain host/IP) and port.
         event_queue:   The orchestrator's event queue. Inbound events are
                        posted here so the orchestrator's dispatch loop
                        processes them on the main thread.
@@ -96,13 +107,8 @@ class EventBridge:
         self._event_queue = event_queue
         self._state_machine = state_machine
 
-        # Strip the "tcp://" scheme prefix that IPCConfig carries — IPCTransport
-        # takes a plain hostname/IP string, not a ZMQ-style URI.
         host = config.address
-        if host.startswith(_TCP_SCHEME):
-            host = host[len(_TCP_SCHEME) :]
-
-        self._transport: IPCTransport = IPCTransport(host=host, port=config.port)
+        self._transport: WSTransport = WSTransport(host=host, port=config.port)
 
         # Wire capability handshake: on client connect, send hello and wait for
         # hello_ack before forwarding normal messages downstream.
@@ -114,6 +120,17 @@ class EventBridge:
         # Register as a state observer so every transition is forwarded to Body.
         state_machine.register_observer(self.on_state_change)
 
+        # Inbound dispatch: wire event name → handler method.
+        # Add entries here when new inbound message types are introduced.
+        self._inbound: dict[str, Callable[[dict[str, Any]], None]] = {
+            "interrupt":             self._handle_interrupt,
+            "user_text":             self._handle_user_text,
+            "rag_set_enabled":       self._handle_rag_set_enabled,
+            "rag_status_request":    self._handle_rag_status_request,
+            "config_schema_request": self._handle_config_schema_request,
+            "config_update":         self._handle_config_update,
+        }
+
         logger.debug("EventBridge initialised — transport %s:%d", host, config.port)
 
     # ------------------------------------------------------------------
@@ -121,7 +138,7 @@ class EventBridge:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        """Bind the TCP socket and start the recv daemon thread. Idempotent."""
+        """Bind the WebSocket server and start the recv daemon thread. Idempotent."""
         logger.info("EventBridge starting transport.")
         self._transport.start()
 
@@ -255,6 +272,8 @@ class EventBridge:
             "mic_available": event.mic_available,
             "llm_available": event.llm_available,
             "source": event.source,
+            "setup_required": event.setup_required,
+            "missing_items": list(event.missing_items),
         }
         self._send("system_status", payload)
 
@@ -321,7 +340,7 @@ class EventBridge:
     def _on_raw_message(self, raw: bytes) -> None:
         """Decode an inbound frame and dispatch to the appropriate handler.
 
-        Called from IPCTransport's recv daemon thread.  Must not raise —
+        Called from WSTransport's asyncio thread.  Must not raise —
         any parse or validation error is logged and silently dropped.
 
         Args:
@@ -331,22 +350,13 @@ class EventBridge:
         if msg is None:
             return
 
-        event_name = msg.event
-
-        if event_name == "interrupt":
-            self._handle_interrupt(msg.payload)
-        elif event_name == "user_text":
-            self._handle_user_text(msg.payload)
-        elif event_name == "rag_set_enabled":
-            self._handle_rag_set_enabled(msg.payload)
-        elif event_name == "config_schema_request":
-            self._handle_config_schema_request(msg.payload)
-        elif event_name == "config_update":
-            self._handle_config_update(msg.payload)
-        else:
+        handler = self._inbound.get(msg.event)
+        if handler is None:
             logger.warning(
-                "EventBridge: received unknown inbound event %r; dropping.", event_name
+                "EventBridge: received unknown inbound event %r; dropping.", msg.event
             )
+            return
+        handler(msg.payload)
 
     def _handle_interrupt(self, payload: dict[str, Any]) -> None:
         """Post an InterruptEvent to the orchestrator queue.
@@ -354,8 +364,8 @@ class EventBridge:
         Args:
             payload: Wire payload (empty dict for ``interrupt``).
         """
-        self._event_queue.put(InterruptEvent(source="zmq"))
-        logger.debug("EventBridge: posted InterruptEvent(source='zmq') to queue.")
+        self._event_queue.put(InterruptEvent(source=InterruptSource.ZMQ))
+        logger.debug("EventBridge: posted InterruptEvent(source=InterruptSource.ZMQ) to queue.")
 
     def _handle_rag_set_enabled(self, payload: dict[str, Any]) -> None:
         """Post a RAGSetEnabledEvent to the orchestrator queue.
@@ -376,6 +386,11 @@ class EventBridge:
         logger.debug(
             "EventBridge: posted RAGSetEnabledEvent(enabled=%s) to queue.", enabled
         )
+
+    def _handle_rag_status_request(self, payload: dict[str, Any]) -> None:  # noqa: ARG002
+        """Post a RAGStatusRequestEvent to the orchestrator queue."""
+        self._event_queue.put(RAGStatusRequestEvent())
+        logger.debug("EventBridge: posted RAGStatusRequestEvent to queue.")
 
     def _handle_user_text(self, payload: dict[str, Any]) -> None:
         """Validate and post a UserTextEvent to the orchestrator queue.
@@ -485,8 +500,8 @@ class EventBridge:
             payload: Arbitrary JSON-serialisable dict.
 
         Returns:
-            UTF-8 encoded JSON bytes (no length prefix — that is added by
-            ``IPCTransport.send()``).
+            UTF-8 encoded JSON bytes delivered as a single WebSocket message
+            via ``WSTransport.send()``.
         """
         msg = ZMQMessage(
             event=event,
@@ -515,7 +530,7 @@ class EventBridge:
         - ``version`` must be a ``str``.
 
         Args:
-            raw: Raw bytes received from IPCTransport.
+            raw: Raw bytes received from WSTransport.
 
         Returns:
             A ``ZMQMessage`` on success, or ``None`` if parsing or
@@ -583,7 +598,7 @@ class EventBridge:
     def _send(self, event: str, payload: dict[str, Any]) -> None:
         """Encode and dispatch a frame via the transport.
 
-        Delegates to ``IPCTransport.send()`` which is thread-safe and drops
+        Delegates to ``WSTransport.send()`` which is thread-safe and drops
         the message silently (logs DEBUG) when no client is connected.
 
         Args:

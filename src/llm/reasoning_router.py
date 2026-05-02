@@ -10,7 +10,7 @@ import threading
 # Using TYPE_CHECKING avoids a circular-import risk at module load time.
 from typing import TYPE_CHECKING, Any
 
-from src.core.config import LLMConfig
+from src.core.config import LLMConfig, LumiConfig
 from src.core.events import LLMTokenEvent, RAGRetrievalEvent
 from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
@@ -45,6 +45,10 @@ class ReasoningRouter:
         self._config = config
         self._event_queue = event_queue
         self._retriever = retriever
+
+    def reconfigure(self, new_config: LumiConfig) -> None:
+        """Apply hot-reloadable LLM config changes (temperature, context_tokens, etc.)."""
+        self._config = new_config.llm
 
     def _maybe_retrieve(self, text: str, cancel_flag: threading.Event) -> str:
         """Run RAG retrieval and return the context string, or "" on miss/skip."""

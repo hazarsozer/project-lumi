@@ -4,14 +4,14 @@ Tests for the ConfigManager wiring in src/core/orchestrator.py (Wave S2).
 Covers:
 - Orchestrator.__init__ creates _config_manager (ConfigManager instance)
 - _config_manager.current returns the config passed to Orchestrator
-- _handle_config_schema_request: no-op when _zmq_server is None
+- _handle_config_schema_request: no-op when _event_bridge is None
 - _handle_config_schema_request: calls send_config_schema with FIELD_META and
   a flat dotted-path current_values dict containing expected keys
 - _handle_config_update: hot field → applied_live, send_config_update_result called
 - _handle_config_update: restart-required field → pending_restart
 - _handle_config_update: unknown field → errors dict populated
 - _handle_config_update: persist=True updates _config_manager.current
-- _handle_config_update: no crash when _zmq_server is None
+- _handle_config_update: no crash when _event_bridge is None
 - _flatten_config helper: returns all expected dotted-path keys
 - _flatten_config: tools.allowed_tools is a list (not a tuple)
 - _flatten_config: llm.kv_cache_quant is None (the default)
@@ -36,7 +36,7 @@ from src.core.orchestrator import Orchestrator, _flatten_config
 # ---------------------------------------------------------------------------
 
 
-def _make_orchestrator(zmq_server: object = None) -> Orchestrator:
+def _make_orchestrator(event_bridge: object = None) -> Orchestrator:
     """Construct an Orchestrator using mock-speaker and optional mock ZMQ server.
 
     The SpeakerThread is mocked to avoid touching real audio devices.
@@ -48,7 +48,7 @@ def _make_orchestrator(zmq_server: object = None) -> Orchestrator:
         config=LumiConfig(),
         speaker=mock_speaker,
         tts=None,
-        zmq_server=zmq_server,
+        event_bridge=event_bridge,
         ears=None,
         scribe=None,
     )
@@ -76,7 +76,7 @@ def test_config_manager_current_matches_passed_config() -> None:
         config=config,
         speaker=mock_speaker,
         tts=None,
-        zmq_server=None,
+        event_bridge=None,
         ears=None,
         scribe=None,
     )
@@ -89,18 +89,18 @@ def test_config_manager_current_matches_passed_config() -> None:
 
 
 @pytest.mark.unit
-def test_schema_request_no_crash_when_zmq_server_none() -> None:
-    """_handle_config_schema_request must return silently when _zmq_server is None."""
-    orch = _make_orchestrator(zmq_server=None)
+def test_schema_request_no_crash_when_event_bridge_none() -> None:
+    """_handle_config_schema_request must return silently when _event_bridge is None."""
+    orch = _make_orchestrator(event_bridge=None)
     # Must not raise.
     orch._handle_config_schema_request(ConfigSchemaRequestEvent())
 
 
 @pytest.mark.unit
 def test_schema_request_calls_send_config_schema() -> None:
-    """When _zmq_server is present, send_config_schema must be called once."""
+    """When _event_bridge is present, send_config_schema must be called once."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     orch._handle_config_schema_request(ConfigSchemaRequestEvent())
 
@@ -111,7 +111,7 @@ def test_schema_request_calls_send_config_schema() -> None:
 def test_schema_request_passes_field_meta_as_first_arg() -> None:
     """send_config_schema must receive FIELD_META as its first positional arg."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     orch._handle_config_schema_request(ConfigSchemaRequestEvent())
 
@@ -124,7 +124,7 @@ def test_schema_request_passes_field_meta_as_first_arg() -> None:
 def test_schema_request_current_values_contains_top_level_keys() -> None:
     """current_values dict must include top-level scalar keys."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     orch._handle_config_schema_request(ConfigSchemaRequestEvent())
 
@@ -140,7 +140,7 @@ def test_schema_request_current_values_contains_top_level_keys() -> None:
 def test_schema_request_current_values_contains_audio_sensitivity() -> None:
     """current_values dict must include 'audio.sensitivity'."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     orch._handle_config_schema_request(ConfigSchemaRequestEvent())
 
@@ -155,7 +155,7 @@ def test_schema_request_current_values_contains_audio_sensitivity() -> None:
 def test_schema_request_allowed_tools_is_list() -> None:
     """tools.allowed_tools in current_values must be a list, not a tuple."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     orch._handle_config_schema_request(ConfigSchemaRequestEvent())
 
@@ -175,7 +175,7 @@ def test_schema_request_allowed_tools_is_list() -> None:
 def test_config_update_hot_field_calls_send_result_applied_live() -> None:
     """Hot field change must result in applied_live=[key], pending_restart=[], errors={}."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     event = ConfigUpdateEvent(changes={"audio.sensitivity": 0.6}, persist=False)
     orch._handle_config_update(event)
@@ -191,7 +191,7 @@ def test_config_update_hot_field_calls_send_result_applied_live() -> None:
 def test_config_update_restart_required_field_calls_send_result_pending_restart() -> None:
     """Restart-required field must appear in pending_restart, not applied_live."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     event = ConfigUpdateEvent(
         changes={"llm.model_path": "models/new.gguf"}, persist=False
@@ -209,7 +209,7 @@ def test_config_update_restart_required_field_calls_send_result_pending_restart(
 def test_config_update_unknown_field_calls_send_result_with_error() -> None:
     """Unknown field must appear in errors dict."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     event = ConfigUpdateEvent(changes={"nonexistent.field": 42}, persist=False)
     orch._handle_config_update(event)
@@ -225,7 +225,7 @@ def test_config_update_unknown_field_calls_send_result_with_error() -> None:
 def test_config_update_persist_true_updates_config_manager() -> None:
     """With persist=True, _config_manager.current must reflect the applied change."""
     mock_zmq = MagicMock()
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
 
     original_sensitivity = orch._config_manager.current.audio.sensitivity
     new_sensitivity = round(original_sensitivity + 0.1, 2)
@@ -244,9 +244,9 @@ def test_config_update_persist_true_updates_config_manager() -> None:
 
 
 @pytest.mark.unit
-def test_config_update_no_crash_when_zmq_server_none() -> None:
-    """_handle_config_update must apply config without crashing when _zmq_server is None."""
-    orch = _make_orchestrator(zmq_server=None)
+def test_config_update_no_crash_when_event_bridge_none() -> None:
+    """_handle_config_update must apply config without crashing when _event_bridge is None."""
+    orch = _make_orchestrator(event_bridge=None)
 
     original_sensitivity = orch._config_manager.current.audio.sensitivity
     new_sensitivity = min(round(original_sensitivity + 0.1, 2), 1.0)

@@ -43,10 +43,10 @@ def mock_transport() -> MagicMock:
 
 @pytest.fixture()
 def zmq_server(mock_transport: MagicMock) -> EventBridge:
-    config = IPCConfig(address="tcp://127.0.0.1", port=5555)
+    config = IPCConfig(address="127.0.0.1", port=5555)
     event_q: queue.Queue[Any] = queue.Queue()
     sm = StateMachine()
-    with patch("src.core.event_bridge.IPCTransport", return_value=mock_transport):
+    with patch("src.core.event_bridge.WSTransport", return_value=mock_transport):
         server = EventBridge(config=config, event_queue=event_q, state_machine=sm)
     return server
 

@@ -36,7 +36,7 @@ from src.tools.base import ToolResult
 
 def _make_orchestrator(
     tools_enabled: bool = True,
-    zmq_server: EventBridge | None = None,
+    event_bridge: EventBridge | None = None,
 ) -> Orchestrator:
     """Create an Orchestrator with mock SpeakerThread and no audio device."""
     mock_speaker = MagicMock(spec=SpeakerThread)
@@ -49,7 +49,7 @@ def _make_orchestrator(
         execution_timeout_s=10.0,
     )
     object.__setattr__(config, "tools", tools_config)
-    return Orchestrator(config=config, speaker=mock_speaker, zmq_server=zmq_server)
+    return Orchestrator(config=config, speaker=mock_speaker, event_bridge=event_bridge)
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ def test_llm_token_event_handler_registered_with_zmq() -> None:
     type in the orchestrator's handler map.
     """
     mock_zmq = MagicMock(spec=EventBridge)
-    orch = _make_orchestrator(zmq_server=mock_zmq)
+    orch = _make_orchestrator(event_bridge=mock_zmq)
     assert LLMTokenEvent in orch._handlers
 
 

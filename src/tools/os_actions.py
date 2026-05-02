@@ -3,16 +3,29 @@ OS action tools for Project Lumi.
 
 Concrete Tool implementations for common desktop operations:
 - AppLaunchTool  (name="launch_app")  — launch an application via Popen
-- ClipboardTool  (name="clipboard")   — read/write system clipboard via xclip
+- ClipboardTool  (name="clipboard")   — read/write system clipboard
 - FileInfoTool   (name="file_info")   — stat a file path safely
-- WindowListTool (name="window_list") — list open windows via wmctrl
+- WindowListTool (name="window_list") — list open windows
 
-Security decisions:
+Platform dispatch
+─────────────────
+ClipboardTool and WindowListTool select a backend at call time based on
+the value returned by _get_platform().  Adapters:
+
+  Linux   — xclip (X11) or wl-clipboard (Wayland) / wmctrl
+  macOS   — pbpaste + pbcopy (built-in) / osascript
+  Windows — pyperclip (optional) / pygetwindow (optional)
+
+AppLaunchTool and FileInfoTool are already cross-platform; no dispatch
+is required.
+
+Security decisions
+──────────────────
 - AppLaunchTool: app_name is NEVER passed directly to subprocess; only the
-  resolved binary path of a known-safe executable is passed, and that binary
-  must exist on the system PATH via shutil.which().
+  resolved binary path of a known-safe executable is passed, verified via
+  shutil.which().
 - FileInfoTool: paths containing ".." components are rejected before any
-  filesystem operation; pathlib.Path.resolve() is used for canonical paths.
+  filesystem operation.
 - No shell=True anywhere — all subprocess calls use explicit argument lists.
 - All inputs are validated before any subprocess or filesystem operation.
 """
@@ -22,12 +35,30 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 from src.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _get_platform() -> str:
+    """Return sys.platform. Isolated so tests can patch it without side-effects."""
+    return sys.platform
+
+
+# macOS GUI apps live in .app bundles and are NOT on $PATH.
+# shutil.which("safari") returns None. Use `open -a BundleName` instead.
+# Maps plain name (in ALLOWED_APPS) → the .app bundle name for `open -a`.
+_MACOS_BUNDLE_APPS: dict[str, str] = {
+    "safari":   "Safari",
+    "terminal": "Terminal",
+    "textedit": "TextEdit",
+    "finder":   "Finder",
+    "iterm2":   "iTerm2",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -52,17 +83,17 @@ class AppLaunchTool:
 
     name: str = "launch_app"
     description: str = (
-        "Launch a desktop application. "
+        "Launch a desktop application by name. "
         'Args: {"app": "<name>"}. '
-        "Allowed apps: firefox, thunar, gedit, gnome-terminal, konsole, "
-        "nautilus, libreoffice, vlc, xterm, mousepad."
+        "Common apps: firefox, terminal, file manager, text editor, vlc."
     )
 
-    # Hardcoded allowlist — the only apps this tool will ever launch.
+    # Cross-platform allowlist — the only apps this tool will ever launch.
     # Security rationale: user-controlled strings are NEVER passed directly
     # to subprocess; we look up the canonical binary of the allow-listed name.
     ALLOWED_APPS: frozenset[str] = frozenset(
         {
+            # Linux
             "firefox",
             "thunar",
             "gedit",
@@ -73,6 +104,21 @@ class AppLaunchTool:
             "vlc",
             "xterm",
             "mousepad",
+            # macOS (command-line binaries on PATH)
+            "open",
+            "safari",
+            "terminal",
+            "textedit",
+            "finder",
+            "iterm2",
+            "code",
+            # Windows (command-line binaries on PATH)
+            "notepad",
+            "explorer",
+            "calc",
+            "powershell",
+            "cmd",
+            "mspaint",
         }
     )
 
@@ -87,14 +133,17 @@ class AppLaunchTool:
 
         app = app.strip()
 
-        # Allowlist gate — reject before any subprocess interaction.
         if app not in self.ALLOWED_APPS:
             logger.warning(
                 "AppLaunchTool: app '%s' is not in allowlist; rejected.", app
             )
             return ToolResult(success=False, output=f"App not allowed: {app}", data={})
 
-        # Resolve binary — never pass user string directly to Popen.
+        # macOS GUI apps live in .app bundles — launch via `open -a` instead of
+        # PATH lookup, which would return None for every bundle-based app.
+        if _get_platform() == "darwin" and app in _MACOS_BUNDLE_APPS:
+            return self._launch_macos_bundle(app, _MACOS_BUNDLE_APPS[app])
+
         binary = shutil.which(app)
         if binary is None:
             logger.warning("AppLaunchTool: app '%s' not found on PATH.", app)
@@ -119,6 +168,31 @@ class AppLaunchTool:
         logger.info("AppLaunchTool: launched '%s' (%s).", app, binary)
         return ToolResult(success=True, output=f"Launched: {app}", data={})
 
+    @staticmethod
+    def _launch_macos_bundle(app: str, bundle_name: str) -> ToolResult:
+        """Launch a macOS .app bundle via `open -a BundleName`."""
+        open_bin = shutil.which("open")
+        if open_bin is None:
+            return ToolResult(
+                success=False, output="'open' not found (expected on macOS)", data={}
+            )
+        try:
+            subprocess.Popen(  # noqa: S603
+                [open_bin, "-a", bundle_name],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            logger.error(
+                "AppLaunchTool: OSError launching macOS bundle '%s': %s", bundle_name, exc
+            )
+            return ToolResult(
+                success=False, output=f"Failed to launch {app}: {exc}", data={}
+            )
+        logger.info("AppLaunchTool: launched macOS bundle '%s'.", bundle_name)
+        return ToolResult(success=True, output=f"Launched: {app}", data={})
+
 
 # ---------------------------------------------------------------------------
 # ClipboardTool
@@ -126,7 +200,7 @@ class AppLaunchTool:
 
 
 class ClipboardTool:
-    """Read from or write to the system clipboard using xclip.
+    """Read from or write to the system clipboard.
 
     Schema:
         name: "clipboard"
@@ -140,13 +214,15 @@ class ClipboardTool:
     Returns (write):
         ToolResult(success=True, output="Clipboard updated.", data={})
 
-    On xclip not installed:
-        ToolResult(success=False, output="xclip not found. Install with: sudo apt install xclip", data={})
+    Platform backends:
+        Linux   — xclip (X11) or wl-clipboard (Wayland)
+        macOS   — pbpaste / pbcopy (built-in)
+        Windows — pyperclip (optional; install with: pip install pyperclip)
     """
 
     name: str = "clipboard"
     description: str = (
-        "Read from or write to the system clipboard via xclip. "
+        "Read from or write to the system clipboard. "
         'Args: {"action": "read"} or {"action": "write", "text": "<content>"}.'
     )
 
@@ -166,42 +242,89 @@ class ClipboardTool:
             return self._read()
         return self._write(args.get("text", ""))
 
+    # ------------------------------------------------------------------
+    # Read dispatch
+    # ------------------------------------------------------------------
+
     def _read(self) -> ToolResult:
-        """Read clipboard contents via xclip."""
+        platform = _get_platform()
+        if platform == "darwin":
+            return self._read_darwin()
+        if platform == "win32":
+            return self._read_win32()
+        return self._read_linux()
+
+    def _read_linux(self) -> ToolResult:
         xclip = shutil.which("xclip")
-        if xclip is None:
-            logger.warning("ClipboardTool: xclip not found on PATH.")
+        if xclip is not None:
+            return self._run_read([xclip, "-selection", "clipboard", "-o"])
+        wl_paste = shutil.which("wl-paste")
+        if wl_paste is not None:
+            return self._run_read([wl_paste])
+        logger.warning("ClipboardTool: no clipboard tool found on Linux PATH.")
+        return ToolResult(
+            success=False,
+            output=(
+                "No clipboard tool found. "
+                "Install xclip (sudo apt install xclip) "
+                "or wl-clipboard (sudo apt install wl-clipboard)."
+            ),
+            data={},
+        )
+
+    def _read_darwin(self) -> ToolResult:
+        pbpaste = shutil.which("pbpaste")
+        if pbpaste is None:
+            logger.warning("ClipboardTool: pbpaste not found on macOS PATH.")
             return ToolResult(
                 success=False,
-                output="xclip not found. Install with: sudo apt install xclip",
+                output="pbpaste not found (expected built into macOS).",
                 data={},
             )
+        return self._run_read([pbpaste])
 
+    def _read_win32(self) -> ToolResult:
+        try:
+            import pyperclip
+
+            return ToolResult(success=True, output=pyperclip.paste(), data={})
+        except ImportError:
+            logger.warning("ClipboardTool: pyperclip not installed on Windows.")
+            return ToolResult(
+                success=False,
+                output="pyperclip not installed. Run: pip install pyperclip",
+                data={},
+            )
+        except Exception as exc:
+            logger.warning("ClipboardTool: Windows clipboard read failed: %s", exc)
+            return ToolResult(
+                success=False, output=f"Clipboard read failed: {exc}", data={}
+            )
+
+    def _run_read(self, cmd: list[str]) -> ToolResult:
         try:
             proc = subprocess.run(  # noqa: S603
-                [xclip, "-selection", "clipboard", "-o"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                cmd, capture_output=True, text=True, timeout=5
             )
             text = proc.stdout
             logger.info("ClipboardTool: read %d chars from clipboard.", len(text))
             return ToolResult(success=True, output=text, data={})
         except FileNotFoundError:
-            logger.warning("ClipboardTool: xclip disappeared during read.")
+            logger.warning("ClipboardTool: %s disappeared during read.", cmd[0])
             return ToolResult(
-                success=False,
-                output="xclip not found. Install with: sudo apt install xclip",
-                data={},
+                success=False, output=f"{cmd[0]} not found.", data={}
             )
         except subprocess.TimeoutExpired:
-            logger.warning("ClipboardTool: xclip read timed out.")
+            logger.warning("ClipboardTool: clipboard read timed out.")
             return ToolResult(
                 success=False, output="Clipboard read timed out.", data={}
             )
 
+    # ------------------------------------------------------------------
+    # Write dispatch
+    # ------------------------------------------------------------------
+
     def _write(self, text: Any) -> ToolResult:
-        """Write text to clipboard via xclip."""
         if not isinstance(text, str):
             return ToolResult(
                 success=False,
@@ -221,43 +344,87 @@ class ClipboardTool:
                 data={},
             )
 
+        platform = _get_platform()
+        if platform == "darwin":
+            return self._write_darwin(text)
+        if platform == "win32":
+            return self._write_win32(text)
+        return self._write_linux(text)
+
+    def _write_linux(self, text: str) -> ToolResult:
         xclip = shutil.which("xclip")
-        if xclip is None:
-            logger.warning("ClipboardTool: xclip not found on PATH.")
+        if xclip is not None:
+            return self._run_write([xclip, "-selection", "clipboard"], text)
+        wl_copy = shutil.which("wl-copy")
+        if wl_copy is not None:
+            return self._run_write([wl_copy], text)
+        logger.warning("ClipboardTool: no clipboard tool found on Linux PATH.")
+        return ToolResult(
+            success=False,
+            output=(
+                "No clipboard tool found. "
+                "Install xclip (sudo apt install xclip) "
+                "or wl-clipboard (sudo apt install wl-clipboard)."
+            ),
+            data={},
+        )
+
+    def _write_darwin(self, text: str) -> ToolResult:
+        pbcopy = shutil.which("pbcopy")
+        if pbcopy is None:
+            logger.warning("ClipboardTool: pbcopy not found on macOS PATH.")
             return ToolResult(
                 success=False,
-                output="xclip not found. Install with: sudo apt install xclip",
+                output="pbcopy not found (expected built into macOS).",
                 data={},
             )
+        return self._run_write([pbcopy], text)
 
+    def _write_win32(self, text: str) -> ToolResult:
+        try:
+            import pyperclip
+
+            pyperclip.copy(text)
+            logger.info("ClipboardTool: wrote %d chars to clipboard (Windows).", len(text))
+            return ToolResult(success=True, output="Clipboard updated.", data={})
+        except ImportError:
+            logger.warning("ClipboardTool: pyperclip not installed on Windows.")
+            return ToolResult(
+                success=False,
+                output="pyperclip not installed. Run: pip install pyperclip",
+                data={},
+            )
+        except Exception as exc:
+            logger.warning("ClipboardTool: Windows clipboard write failed: %s", exc)
+            return ToolResult(
+                success=False, output=f"Clipboard write failed: {exc}", data={}
+            )
+
+    def _run_write(self, cmd: list[str], text: str) -> ToolResult:
         try:
             proc = subprocess.run(  # noqa: S603
-                [xclip, "-selection", "clipboard"],
-                input=text,
-                capture_output=True,
-                text=True,
-                timeout=5,
+                cmd, input=text, capture_output=True, text=True, timeout=5
             )
             if proc.returncode != 0:
                 logger.warning(
-                    "ClipboardTool: xclip write exited with code %d.", proc.returncode
+                    "ClipboardTool: %s write exited with code %d.",
+                    cmd[0],
+                    proc.returncode,
                 )
                 return ToolResult(
                     success=False,
-                    output=f"xclip write failed (exit {proc.returncode}).",
+                    output=f"{cmd[0]} write failed (exit {proc.returncode}).",
                     data={},
                 )
             logger.info("ClipboardTool: wrote %d chars to clipboard.", len(text))
             return ToolResult(success=True, output="Clipboard updated.", data={})
         except FileNotFoundError:
-            logger.warning("ClipboardTool: xclip disappeared during write.")
+            logger.warning("ClipboardTool: %s disappeared during write.", cmd[0])
             return ToolResult(
-                success=False,
-                output="xclip not found. Install with: sudo apt install xclip",
-                data={},
+                success=False, output=f"{cmd[0]} not found.", data={}
             )
         except subprocess.TimeoutExpired:
-            logger.warning("ClipboardTool: xclip write timed out.")
+            logger.warning("ClipboardTool: clipboard write timed out.")
             return ToolResult(
                 success=False, output="Clipboard write timed out.", data={}
             )
@@ -284,6 +451,7 @@ class FileInfoTool:
         )
 
     Security: paths containing ".." are rejected before any os.stat() call.
+    Cross-platform: uses pathlib — works on Linux, macOS, and Windows.
     """
 
     name: str = "file_info"
@@ -300,7 +468,6 @@ class FileInfoTool:
                 success=False, output="Missing required arg: path", data={}
             )
 
-        # Security: reject path traversal attempts before touching the filesystem.
         if ".." in Path(raw_path).parts:
             logger.warning("FileInfoTool: path traversal rejected for '%s'.", raw_path)
             return ToolResult(success=False, output="Invalid path", data={})
@@ -350,9 +517,24 @@ class FileInfoTool:
 # WindowListTool
 # ---------------------------------------------------------------------------
 
+# AppleScript that collects "app: window" pairs for visible processes on macOS.
+_DARWIN_WINDOW_SCRIPT = """\
+set out to ""
+tell application "System Events"
+  repeat with p in (every process whose visible is true)
+    set pName to name of p
+    try
+      repeat with w in every window of p
+        set out to out & pName & ": " & (name of w) & "\\n"
+      end repeat
+    end try
+  end repeat
+end tell
+return out"""
+
 
 class WindowListTool:
-    """List currently open windows using wmctrl.
+    """List currently open windows on the desktop.
 
     Schema:
         name: "window_list"
@@ -362,20 +544,34 @@ class WindowListTool:
         ToolResult(
             success=True,
             output="N windows",
-            data={"windows": [{"id": str, "desktop": str, "host": str, "title": str}, ...]}
+            data={"windows": [...]}
         )
 
-    On wmctrl not installed:
-        ToolResult(success=False, output="wmctrl not found. Install with: sudo apt install wmctrl", data={})
+    Platform backends:
+        Linux   — wmctrl; each entry has id/desktop/host/title keys
+        macOS   — osascript; each entry has app/title keys
+        Windows — pygetwindow (optional); each entry has title key
     """
 
     name: str = "window_list"
     description: str = (
-        "List all open windows on the desktop using wmctrl. "
+        "List all open windows on the desktop. "
         "Args: {} (no arguments needed)."
     )
 
     def execute(self, args: dict[str, Any]) -> ToolResult:  # args unused
+        platform = _get_platform()
+        if platform == "darwin":
+            return self._list_darwin()
+        if platform == "win32":
+            return self._list_win32()
+        return self._list_linux()
+
+    # ------------------------------------------------------------------
+    # Platform backends
+    # ------------------------------------------------------------------
+
+    def _list_linux(self) -> ToolResult:
         wmctrl = shutil.which("wmctrl")
         if wmctrl is None:
             logger.warning("WindowListTool: wmctrl not found on PATH.")
@@ -405,21 +601,76 @@ class WindowListTool:
 
         windows = self._parse_wmctrl(proc.stdout)
         count = len(windows)
-        logger.info("WindowListTool: found %d windows.", count)
-
+        logger.info("WindowListTool: found %d windows (Linux).", count)
         return ToolResult(
             success=True,
             output=f"{count} windows",
             data={"windows": windows},
         )
 
+    def _list_darwin(self) -> ToolResult:
+        osascript = shutil.which("osascript")
+        if osascript is None:
+            logger.warning("WindowListTool: osascript not found on macOS PATH.")
+            return ToolResult(
+                success=False,
+                output="osascript not found (expected built into macOS).",
+                data={},
+            )
+
+        try:
+            proc = subprocess.run(  # noqa: S603
+                [osascript, "-e", _DARWIN_WINDOW_SCRIPT],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("WindowListTool: osascript timed out.")
+            return ToolResult(success=False, output="osascript timed out.", data={})
+
+        windows = self._parse_osascript(proc.stdout)
+        count = len(windows)
+        logger.info("WindowListTool: found %d windows (macOS).", count)
+        return ToolResult(
+            success=True,
+            output=f"{count} windows",
+            data={"windows": windows},
+        )
+
+    def _list_win32(self) -> ToolResult:
+        try:
+            import pygetwindow
+
+            titles = [t for t in pygetwindow.getAllTitles() if t]
+            windows = [{"title": t} for t in titles]
+            count = len(windows)
+            logger.info("WindowListTool: found %d windows (Windows).", count)
+            return ToolResult(
+                success=True,
+                output=f"{count} windows",
+                data={"windows": windows},
+            )
+        except ImportError:
+            logger.warning("WindowListTool: pygetwindow not installed on Windows.")
+            return ToolResult(
+                success=False,
+                output="pygetwindow not installed. Run: pip install pygetwindow",
+                data={},
+            )
+        except Exception as exc:
+            logger.warning("WindowListTool: pygetwindow failed: %s", exc)
+            return ToolResult(
+                success=False, output=f"Window list failed: {exc}", data={}
+            )
+
+    # ------------------------------------------------------------------
+    # Parsers
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _parse_wmctrl(output: str) -> list[dict[str, str]]:
-        """Parse ``wmctrl -l`` output into a list of window dicts.
-
-        wmctrl -l format (space-separated, title may contain spaces):
-            <id>  <desktop>  <host>  <title...>
-        """
+        """Parse ``wmctrl -l`` output (space-separated: id desktop host title)."""
         windows: list[dict[str, str]] = []
         for line in output.splitlines():
             parts = line.split(None, 3)
@@ -433,4 +684,19 @@ class WindowListTool:
                     "title": parts[3],
                 }
             )
+        return windows
+
+    @staticmethod
+    def _parse_osascript(output: str) -> list[dict[str, str]]:
+        """Parse ``osascript`` output: one 'app: window' pair per line."""
+        windows: list[dict[str, str]] = []
+        for line in output.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            app, sep, title = line.partition(": ")
+            if sep:
+                windows.append({"app": app, "title": title})
+            else:
+                windows.append({"title": line})
         return windows

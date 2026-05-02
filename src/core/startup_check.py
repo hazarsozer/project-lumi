@@ -7,21 +7,31 @@ early with clear, human-readable error messages.
 
 Failure policy:
     HARD failures (raise RuntimeError — caller decides whether to abort):
-        - openwakeword version mismatch
+        - openwakeword version mismatch — ONLY when wake_word_enabled=True AND
+          the model file is already present (wrong installed version is a real
+          deployment bug that must be fixed, not worked around).
+        - RAG packages missing when config.rag.enabled is True.
+
+    SOFT failures (log WARNING; returned as list[str] for UI display):
         - Wake word ONNX model file not found
         - No microphone device detected
-        - llama-cpp-python not installed (required for LLM inference)
-        - RAG packages missing when config.rag.enabled is True
-
-    SOFT failures (log WARNING — application can continue degraded):
+        - llama-cpp-python not installed
         - STT model directory not found
-        - LLM model file not found  (model is optional until PROCESSING)
-        - kokoro-onnx not installed when config.tts.enabled is True
+        - LLM model file not found
         - TTS model or voices file not found
+
+Return value:
+    run_startup_checks() returns list[str] — each entry describes a missing
+    component with a short installation/download hint.  Empty list means all
+    required components are present.
+
+    The orchestrator passes this list into SystemStatusEvent so the frontend
+    can show a first-run setup panel.  main.py skips Ears startup when the
+    wake-word related items are present (model missing or mic absent).
 
 Constraints:
     - No print() calls — all output via logging.getLogger(__name__)
-    - No sys.exit() — raise RuntimeError and let main.py decide
+    - No sys.exit() — raise RuntimeError only for genuine deployment bugs
     - No imports from src/audio/, src/llm/, or src/interface/
 """
 
@@ -29,7 +39,6 @@ from __future__ import annotations
 
 import importlib.metadata as _meta
 import logging
-import sys
 from pathlib import Path
 
 from src.core.config import LumiConfig
@@ -75,21 +84,22 @@ def _check_openwakeword_version() -> None:
     )
 
 
-def _check_wake_word_model(model_path: str) -> None:
-    """Raise RuntimeError if the wake word ONNX file is absent.
+def _check_wake_word_model(model_path: str) -> list[str]:
+    """Return a non-empty list if the wake-word ONNX file is absent.
 
-    Without this file the wake word detector cannot start at all, so this
-    is a hard failure regardless of edition.
+    Soft failure: the Brain can start without the model (PTT still works).
     """
     path = Path(model_path)
     if not path.is_file():
-        raise RuntimeError(
-            f"Wake word model not found: '{model_path}'\n"
-            "Place the hey_lumi.onnx file at the expected path or update\n"
-            "config.yaml → audio.wake_word_model_path."
-        )
-
+        logger.warning("Wake word model not found: '%s'.", model_path)
+        return [
+            f"Wake-word model not found: {model_path}\n"
+            "  → place hey_lumi.onnx at the path above, or set\n"
+            "    audio.wake_word_model_path in config.yaml, or disable\n"
+            "    wake-word with audio.wake_word_enabled: false and use PTT."
+        ]
     logger.info("Wake word model found: %s", model_path)
+    return []
 
 
 def _check_stt_model(model_path: str) -> None:
@@ -113,96 +123,80 @@ def _check_stt_model(model_path: str) -> None:
         logger.info("STT model directory found: %s", model_path)
 
 
-def _check_llm_model(model_path: str) -> None:
-    """Exit with a user-friendly message if the LLM GGUF file is missing.
+def _check_llm_model(model_path: str) -> list[str]:
+    """Return a non-empty list if the LLM GGUF file is missing, empty otherwise.
 
-    llama-cpp-python is installed but the model file is not present —
-    inference would crash at the first user query rather than at startup.
-    Surfacing this here gives the user a clear remediation message before
-    any subsystem is initialised.
+    Changed from hard-exit to soft-return so the Brain can start in degraded
+    mode and the frontend can display a setup panel with download instructions.
     """
     path = Path(model_path)
     if not path.is_file():
-        sys.stderr.write(
-            f"\nERROR: LLM model file not found: '{model_path}'\n\n"
-            "Download the Phi-3.5-mini Q4_K_M GGUF and place it at the configured path,\n"
-            "or update config.yaml → llm.model_path.\n\n"
-            "Example:\n"
-            "  huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF "
-            "Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir models/llm/\n\n"
+        logger.warning(
+            "LLM model file not found: '%s'. "
+            "Lumi will start in degraded mode without LLM inference. "
+            "Download: huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF "
+            "Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir models/llm/",
+            model_path,
         )
-        if Path(_SETUP_WIZARD_PATH).is_file():
-            sys.stderr.write(
-                f"Run the setup wizard for guided installation:\n"
-                f"  uv run python {_SETUP_WIZARD_PATH}\n\n"
-            )
-        sys.exit(1)
+        return [
+            f"LLM model not found: {model_path}\n"
+            "  → huggingface-cli download bartowski/Phi-3.5-mini-instruct-GGUF "
+            "Phi-3.5-mini-instruct-Q4_K_M.gguf --local-dir models/llm/"
+        ]
     logger.info("LLM model file found: %s", model_path)
+    return []
 
 
-def _check_tts_model(model_path: str, voices_path: str) -> None:
-    """Exit with a user-friendly message if TTS model or voices files are missing.
+def _check_tts_model(model_path: str, voices_path: str) -> list[str]:
+    """Return a list of missing TTS file descriptions (empty if all present).
 
-    When TTS is enabled, both files are required for Kokoro to produce any
-    audio.  Exiting early prevents a run where the assistant appears to
-    respond but produces no sound.
+    Changed from hard-exit to soft-return so the Brain can start in degraded
+    mode (silent) and the frontend can display a setup panel.
     """
-    model = Path(model_path)
-    voices = Path(voices_path)
-    messages: list[str] = []
+    missing: list[str] = []
+    _KOKORO_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases"
 
-    if not model.is_file():
-        messages.append(
-            f"  - TTS model file not found: '{model_path}'\n"
-            "    Download kokoro-v1_0.onnx from the kokoro-onnx releases page\n"
-            "    and place it at the configured path, or update config.yaml → tts.model_path.\n"
+    if not Path(model_path).is_file():
+        logger.warning("TTS model file not found: '%s'.", model_path)
+        missing.append(
+            f"TTS model not found: {model_path}\n"
+            f"  → download kokoro-v1_0.onnx from {_KOKORO_URL}"
         )
     else:
         logger.info("TTS model file found: %s", model_path)
 
-    if not voices.is_file():
-        messages.append(
-            f"  - TTS voices file not found: '{voices_path}'\n"
-            "    Download voices.bin from the kokoro-onnx releases page\n"
-            "    and place it at the configured path, or update config.yaml → tts.voices_path.\n"
+    if not Path(voices_path).is_file():
+        logger.warning("TTS voices file not found: '%s'.", voices_path)
+        missing.append(
+            f"TTS voices not found: {voices_path}\n"
+            f"  → download voices.bin from {_KOKORO_URL}"
         )
     else:
         logger.info("TTS voices file found: %s", voices_path)
 
-    if messages:
-        sys.stderr.write(
-            "\nERROR: Required TTS file(s) not found. Lumi cannot produce audio.\n\n"
-            + "".join(messages)
-            + "\n"
-        )
-        if Path(_SETUP_WIZARD_PATH).is_file():
-            sys.stderr.write(
-                f"Run the setup wizard for guided installation:\n"
-                f"  uv run python {_SETUP_WIZARD_PATH}\n\n"
-            )
-        sys.exit(1)
+    return missing
 
 
-def _check_llm_package() -> None:
-    """Raise RuntimeError if llama-cpp-python is not installed.
+def _check_llm_package() -> list[str]:
+    """Return a non-empty list if llama-cpp-python is not installed.
 
-    llama-cpp-python is required for all LLM inference.  It lives in the
-    optional ``llm`` extra and is not installed by a plain ``uv sync``.
-    Failing here gives the user a clear remediation path before the
-    pipeline reaches the LLM load step.
+    Soft failure: the Brain starts in degraded mode; the setup screen guides
+    the user to install the package.
     """
     try:
         import llama_cpp  # noqa: F401
-    except ImportError as exc:
-        raise RuntimeError(
-            "llama-cpp-python is not installed but is required for LLM inference.\n"
-            "Install with:\n"
-            "  uv sync --extra llm\n"
-            "Note: building llama-cpp-python requires CMake and a C++ compiler.\n"
-            "  sudo apt install cmake build-essential  # Debian/Ubuntu"
-        ) from exc
-
-    logger.info("llama-cpp-python package check passed.")
+        logger.info("llama-cpp-python package check passed.")
+        return []
+    except ImportError:
+        logger.warning(
+            "llama-cpp-python is not installed — LLM inference unavailable."
+        )
+        return [
+            "LLM package not installed: llama-cpp-python\n"
+            "  → uv sync --extra llm\n"
+            "  Note: requires CMake + C++ compiler\n"
+            "    sudo apt install cmake build-essential  # Debian/Ubuntu"
+        ]
 
 
 def _check_tts_package(enabled: bool) -> None:
@@ -262,23 +256,23 @@ def _check_rag_packages(enabled: bool) -> None:
     logger.info("RAG package check passed: all required packages present.")
 
 
-def _check_microphone() -> None:
-    """Raise RuntimeError if no input (microphone) device is available.
+def _check_microphone() -> list[str]:
+    """Return a non-empty list if no microphone is available.
 
-    Uses sounddevice to query the host audio API.  Any exception from
-    sounddevice (PortAudio not found, no devices, etc.) is treated as a
-    hard failure because the entire pipeline depends on microphone input.
+    Soft failure: the Brain starts without audio capture (PTT + typed text
+    still work).
     """
     try:
         import sounddevice as sd
 
         devices = sd.query_devices()
     except Exception as exc:
-        raise RuntimeError(
-            f"Failed to query audio devices: {exc}\n"
-            "Ensure PortAudio is installed and a microphone is connected.\n"
-            "On Debian/Ubuntu: sudo apt install portaudio19-dev"
-        ) from exc
+        logger.warning("Failed to query audio devices: %s", exc)
+        return [
+            f"Microphone check failed: {exc}\n"
+            "  → sudo apt install portaudio19-dev  # Debian/Ubuntu\n"
+            "  → connect a microphone and grant audio input permission"
+        ]
 
     # query_devices() returns either a dict (single device) or a list.
     if isinstance(devices, dict):
@@ -289,24 +283,29 @@ def _check_microphone() -> None:
     input_devices = [d for d in device_list if d.get("max_input_channels", 0) > 0]
 
     if not input_devices:
-        raise RuntimeError(
-            "No microphone (input audio device) detected.\n"
-            "Connect a microphone and ensure the operating system grants\n"
-            "application access to audio input."
-        )
+        logger.warning("No microphone (input audio device) detected.")
+        return [
+            "No microphone detected\n"
+            "  → connect a microphone and grant audio input permission"
+        ]
 
     logger.info(
         "Microphone check passed: %d input device(s) available.",
         len(input_devices),
     )
+    return []
 
 
-def run_startup_checks(config: LumiConfig) -> None:
+def run_startup_checks(config: LumiConfig) -> list[str]:
     """Run all startup validation checks for Project Lumi.
 
     Args:
         config: The fully loaded LumiConfig instance produced by
                 load_config().
+
+    Returns:
+        List of human-readable strings for each missing model file.
+        Empty list means everything required is present.
 
     Raises:
         TypeError: If *config* is not a LumiConfig instance.
@@ -321,20 +320,46 @@ def run_startup_checks(config: LumiConfig) -> None:
 
     logger.info("--- Project Lumi startup checks ---")
 
-    # Hard failures — raise immediately on error.
-    _check_openwakeword_version()
-    _check_wake_word_model(config.audio.wake_word_model_path)
-    _check_microphone()
-    _check_llm_package()
+    missing: list[str] = []
 
-    # Soft failures — warn but continue.
+    # Wake-word pipeline checks — skipped entirely when wake_word_enabled=False.
+    # These are now SOFT: missing model/mic means Ears won't start, but the
+    # Brain still launches (PTT or typed text remain available).
+    if config.audio.wake_word_enabled:
+        missing.extend(_check_wake_word_model(config.audio.wake_word_model_path) or [])
+        missing.extend(_check_microphone() or [])
+
+        # OWW version check is HARD but only runs when the model IS present
+        # (wrong installed version is a real deployment bug, not a first-run
+        # issue).  If the model is absent we already collected it above and
+        # Ears won't start, so there's no point validating the package version.
+        wake_word_ok = not any(
+            "wake" in item.lower() or "microphone" in item.lower()
+            for item in missing
+        )
+        if wake_word_ok:
+            _check_openwakeword_version()  # raises RuntimeError on version mismatch
+
+    # LLM package — soft: Brain starts without LLM; setup screen guides install.
+    missing.extend(_check_llm_package() or [])
+
+    # STT model directory — soft (faster-whisper downloads on first use).
     _check_stt_model(config.scribe.model_path)
-    _check_llm_model(config.llm.model_path)
+
+    # LLM + TTS model files — soft.
+    missing.extend(_check_llm_model(config.llm.model_path) or [])
     _check_tts_package(config.tts.enabled)
     if config.tts.enabled:
-        _check_tts_model(config.tts.model_path, config.tts.voices_path)
+        missing.extend(_check_tts_model(config.tts.model_path, config.tts.voices_path) or [])
 
-    # Hard failure when RAG feature is explicitly enabled without its extras.
+    # RAG packages — hard when explicitly enabled without its extras.
     _check_rag_packages(config.rag.enabled)
 
+    if missing:
+        logger.warning(
+            "Setup required: %d component(s) missing. "
+            "Lumi will run in degraded mode.",
+            len(missing),
+        )
     logger.info("--- Startup checks complete ---")
+    return missing

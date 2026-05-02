@@ -15,6 +15,7 @@ import pytest
 
 # RED: these imports will fail until src/llm/prompt_engine.py is written.
 from src.llm.prompt_engine import DEFAULT_SYSTEM_PROMPT, PromptEngine  # type: ignore[import]
+from src.llm.tool_call_parser import parse_tool_calls  # type: ignore[import]
 
 
 # ---------------------------------------------------------------------------
@@ -217,3 +218,32 @@ def test_persona_overridable_from_config() -> None:
         )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Round-trip: prompt format → parser
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_prompt_tool_call_format_uses_delimiters() -> None:
+    """DEFAULT_SYSTEM_PROMPT must instruct the model to wrap tool calls in
+    <tool_call>…</tool_call> delimiters so the parser can find them."""
+    assert "<tool_call>" in DEFAULT_SYSTEM_PROMPT, (
+        "DEFAULT_SYSTEM_PROMPT must contain the <tool_call> delimiter so it "
+        "matches what tool_call_parser.parse_tool_calls expects"
+    )
+
+
+@pytest.mark.unit
+def test_tool_call_format_roundtrips_through_parser() -> None:
+    """A tool call formatted exactly as DEFAULT_SYSTEM_PROMPT prescribes must
+    be parsed correctly by parse_tool_calls — verifying end-to-end alignment."""
+    # Simulate a model response that follows the prompt instructions literally
+    model_output = (
+        '<tool_call>{"tool": "open_app", "args": {"name": "Finder"}}</tool_call>'
+    )
+    results = parse_tool_calls(model_output)
+    assert len(results) == 1
+    assert results[0]["tool"] == "open_app"
+    assert results[0]["args"] == {"name": "Finder"}

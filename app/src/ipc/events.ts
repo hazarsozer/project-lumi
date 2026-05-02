@@ -7,7 +7,7 @@ export interface WireMessage {
 
 // Brain → React
 
-export type BrainState = "IDLE" | "LISTENING" | "PROCESSING" | "SPEAKING";
+export type BrainState = "idle" | "listening" | "processing" | "speaking";
 
 export type LumiBrainEvent =
   | { event: "state_change"; payload: { state: BrainState } }
@@ -42,6 +42,8 @@ export type LumiBrainEvent =
         mic_available: boolean;
         llm_available: boolean;
         source: "startup" | "degradation";
+        setup_required: boolean;
+        missing_items: string[];
       };
     }
   | { event: "error"; payload: { code: string; message: string } }

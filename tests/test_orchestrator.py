@@ -11,6 +11,7 @@ from src.core.config import LumiConfig
 from src.core.events import (
     ShutdownEvent,
     InterruptEvent,
+    InterruptSource,
     WakeDetectedEvent,
     TranscriptReadyEvent,
     UserTextEvent,
@@ -137,7 +138,7 @@ def test_interrupt_in_processing_returns_to_idle() -> None:
     orch.state_machine.transition_to(LumiState.LISTENING)
     orch.state_machine.transition_to(LumiState.PROCESSING)
 
-    orch.post_event(InterruptEvent(source="user_stop"))
+    orch.post_event(InterruptEvent(source=InterruptSource.USER_STOP))
     orch.post_event(ShutdownEvent())
     orch.run()
 
@@ -151,7 +152,7 @@ def test_interrupt_in_processing_sets_llm_cancel_flag() -> None:
     orch.state_machine.transition_to(LumiState.LISTENING)
     orch.state_machine.transition_to(LumiState.PROCESSING)
 
-    orch.post_event(InterruptEvent(source="keyboard"))
+    orch.post_event(InterruptEvent(source=InterruptSource.KEYBOARD))
     orch.post_event(ShutdownEvent())
     orch.run()
 
@@ -167,7 +168,7 @@ def test_interrupt_in_speaking_returns_to_idle() -> None:
     orch.state_machine.transition_to(LumiState.PROCESSING)
     orch.state_machine.transition_to(LumiState.SPEAKING)
 
-    orch.post_event(InterruptEvent(source="zmq"))
+    orch.post_event(InterruptEvent(source=InterruptSource.ZMQ))
     orch.post_event(ShutdownEvent())
     orch.run()
 
@@ -179,7 +180,7 @@ def test_interrupt_in_speaking_returns_to_idle() -> None:
 def test_interrupt_in_idle_is_ignored() -> None:
     orch = _make_orchestrator()
     # State is already IDLE
-    orch.post_event(InterruptEvent(source="keyboard"))
+    orch.post_event(InterruptEvent(source=InterruptSource.KEYBOARD))
     orch.post_event(ShutdownEvent())
     orch.run()
 
@@ -477,8 +478,8 @@ def test_handle_transcript_stale_state_response_discarded(
 
 @pytest.mark.unit
 @pytest.mark.timeout(3)
-def test_zmq_server_receives_state_change() -> None:
-    """Injected ZMQServer.on_state_change is called when a state transition fires.
+def test_event_bridge_receives_state_change() -> None:
+    """Injected EventBridge.on_state_change is called when a state transition fires.
 
     The Orchestrator registers on_state_change as a StateMachine observer for
     injected instances.  We verify this by triggering a LISTENING transition
@@ -487,7 +488,7 @@ def test_zmq_server_receives_state_change() -> None:
     mock_speaker = MagicMock(spec=SpeakerThread)
     mock_zmq = MagicMock(spec=EventBridge)
 
-    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, zmq_server=mock_zmq)
+    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, event_bridge=mock_zmq)
 
     # Trigger a valid state transition.
     orch.state_machine.transition_to(LumiState.LISTENING)
@@ -530,16 +531,16 @@ def test_user_text_routes_to_llm() -> None:
 
 @pytest.mark.unit
 @pytest.mark.timeout(3)
-def test_shutdown_stops_zmq_server() -> None:
-    """ShutdownEvent causes the Orchestrator to call zmq_server.stop().
+def test_shutdown_stops_event_bridge() -> None:
+    """ShutdownEvent causes the Orchestrator to call event_bridge.stop().
 
-    Injects a mock ZMQServer, runs the event loop until ShutdownEvent is
+    Injects a mock EventBridge, runs the event loop until ShutdownEvent is
     processed, and asserts that stop() was called exactly once.
     """
     mock_speaker = MagicMock(spec=SpeakerThread)
     mock_zmq = MagicMock(spec=EventBridge)
 
-    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, zmq_server=mock_zmq)
+    orch = Orchestrator(config=LumiConfig(), speaker=mock_speaker, event_bridge=mock_zmq)
 
     orch.post_event(ShutdownEvent())
     orch.run()

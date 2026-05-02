@@ -24,7 +24,7 @@
 | 7 | RAG Personal Knowledge Base | COMPLETE |
 | 8.5 | Settings UI (Runtime Config) | COMPLETE |
 | 9 | Avatar Artwork | NOT STARTED |
-| 9.5 | Tauri UI Overlay | IN PROGRESS |
+| 9.5 | Tauri UI Overlay | COMPLETE |
 
 ---
 
@@ -41,11 +41,11 @@
 - Typed configuration loaded from `config.yaml` with auto-detected hardware edition
 - Startup validation halts on missing wake word model, wrong openwakeword version, or no microphone
 - Structured logging (human-readable or JSON) via `src/core/logging_config.py`
-- **Godot 4 transparent overlay** (`ui/`) connects to the Python Brain via raw TCP on port 5555; drives an animated avatar from Brain state events. Set `ipc.enabled: true` in `config.yaml` to activate the IPC server.
-- **Runtime settings panel** — open with gear icon or Ctrl+, in the Godot overlay; reads live config schema from Brain, applies hot changes instantly, marks restart-required fields with `[↻]`
+- **Tauri/React UI** (`app/`) connects to the Python Brain via raw TCP on port 5555; drives an animated avatar from Brain state events. Set `ipc.enabled: true` in `config.yaml` to activate the IPC server. (Legacy: Godot 4 UI in `ui/` is available but superseded.)
+- **Runtime settings panel** — open with gear icon or Ctrl+, in the Tauri/React UI; reads live config schema from Brain, applies hot changes instantly, marks restart-required fields with `[↻]`
 - **RAG personal knowledge base** — hybrid BM25 + vector kNN retrieval (SQLite FTS5 + sqlite-vec), RRF fusion, `all-MiniLM-L6-v2` embeddings; `scripts/ingest_docs.py` to index personal documents; off by default
 - OS automation tools: app launch, clipboard, file info, window list, screenshot analysis (moondream2)
-- LLM token streaming to Godot overlay; per-viseme-group mouth animations (Kokoro lip-sync)
+- LLM token streaming to Tauri/React UI; per-viseme-group mouth animations (Kokoro lip-sync)
 - ~932 tests collected (925 passing, 4 skipped at last run); 80% coverage gate enforced in CI; behavioral regression contract suite in `tests/test_regression.py`
 
 ---
@@ -137,13 +137,13 @@
 - `scribe` — faster-whisper model size and quantization. Smaller models run faster on CPU.
 - `llm` — model path, GPU layer offload (`n_gpu_layers`). Phi-3.5 Mini or Gemma 2 by default.
 - `tts` — TTS voice, speech rate. Kokoro ONNX recommended.
-- `ipc` — set `enabled: true` to activate the Godot 4 overlay (default `false`).
+- `ipc` — set `enabled: true` to activate the Tauri/React UI (default `false`).
 - `tools` — enable/disable OS automation (app launch, clipboard, window list, screenshot).
 - `vision` — screenshot tool settings and moondream2 vision model.
 - `persona` — custom system prompt for personality injection.
 - `rag` — enable/disable personal knowledge base; embedding model path.
 
-**Settings UI (new in Phase 8.5):** Open with the **⚙ gear icon** or **Ctrl+,** while the Godot overlay is running. The panel reads the live schema from the Brain and writes changes back via the IPC channel. Changes marked `[↻]` require a restart:
+**Settings UI (new in Phase 8.5):** Open with the **⚙ gear icon** or **Ctrl+,** in the Tauri/React UI. The panel reads the live schema from the Brain and writes changes back via the IPC channel. Changes marked `[↻]` require a restart:
 - **Live (hot) changes** — audio thresholds, `log_level`, LLM `temperature` / `max_tokens`, TTS `voice`, tools enabled, RAG enabled, persona prompt
 - **Restart required `[↻]`** — model paths, `sample_rate`, IPC settings, `n_gpu_layers`, KV cache quantization
 
@@ -153,15 +153,15 @@
 
 ## Architecture Overview
 
-Lumi uses a "Split-Brain" design: a Python backend handles all intelligence and audio processing; a Godot 4 frontend renders the avatar overlay. They communicate over raw TCP with 4-byte length-prefix framing.
+Lumi uses a "Split-Brain" design: a Python backend handles all intelligence and audio processing; a frontend renders the avatar overlay and settings UI. They communicate over raw TCP with 4-byte length-prefix framing.
 
 ```
-Python Backend  ◄──── Raw TCP (length-prefix) ────►  Godot 4 Frontend
+Python Backend  ◄──── Raw TCP (length-prefix) ────►  Tauri/React Frontend
 (Ears, Brain,          JSON wire frames               (Avatar, Animations,
- Scribe, Mouth)        127.0.0.1:5555                  Overlay)
+ Scribe, Mouth)        127.0.0.1:5555                  Settings, Overlay)
 ```
 
-To connect the frontend, set `ipc.enabled: true` in `config.yaml`, start the Python Brain first, then open `ui/project.godot` in Godot 4 and press F5.
+To connect the frontend, set `ipc.enabled: true` in `config.yaml`, start the Python Brain first, then start the Tauri app from the `app/` directory.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
@@ -180,7 +180,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | Fine-tuning (planned) | QLoRA + llama.cpp GGUF export |
 | TTS | Kokoro-82M ONNX |
 | Knowledge retrieval | Hybrid BM25+vec RAG (Phase 7); SQLite FTS5 + sqlite-vec; all-MiniLM-L6-v2 |
-| Frontend | Godot 4 (`ui/`; set `ipc.enabled: true` to activate) |
+| Frontend | Tauri/React (`app/`) over WebSocket-to-TCP bridge; Godot 4 (`ui/`) legacy available |
 | IPC | Raw TCP, 4-byte length-prefix framing (`IPCTransport` + `EventBridge`; no pyzmq) |
 | IPC handshake | Version negotiation via `src/core/handshake.py` (`hello` / `hello_ack`) |
 | Metrics | Stdlib histogram module `src/core/metrics.py` (p50/p95/p99, no external deps) |

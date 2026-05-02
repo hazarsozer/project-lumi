@@ -34,8 +34,7 @@ export const tokens = {
 } as const;
 
 // Per-state derived values used by avatar and overlay.
-// NOTE: The IPC layer (events.ts) uses uppercase BrainState ("IDLE" | "LISTENING" | ...)
-// Map it at the app shell level: brainState.toLowerCase() as AvatarStateKey
+// BrainState (events.ts) and AvatarStateKey share the same lowercase values.
 export type AvatarStateKey = 'idle' | 'listening' | 'processing' | 'speaking';
 
 export interface StateStyle {

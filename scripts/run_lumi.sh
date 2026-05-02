@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_lumi.sh — launch Brain + WS bridge + Tauri dev with clean shutdown on Ctrl+C
+# run_lumi.sh — launch Brain + Tauri dev with clean shutdown on Ctrl+C
 
 set -euo pipefail
 
@@ -33,18 +33,12 @@ if command -v setsid >/dev/null 2>&1 && [[ -z "${_LUMI_REEXEC:-}" ]]; then
   exec setsid "$0" "$@"
 fi
 
-echo "[lumi] starting Brain..."
+echo "[lumi] starting Brain (WebSocket server on ws://127.0.0.1:5556)..."
 uv run python -m src.main >"${LOG_DIR}/brain.log" 2>&1 &
 PIDS+=($!)
 echo "[lumi]   brain pid=${PIDS[-1]} -> ${LOG_DIR}/brain.log"
 
-sleep 2  # wait for Brain to bind TCP 5555
-
-echo "[lumi] starting WS bridge..."
-uv run python -m src.ipc.ws_bridge >"${LOG_DIR}/ws_bridge.log" 2>&1 &
-PIDS+=($!)
-echo "[lumi]   bridge pid=${PIDS[-1]} -> ${LOG_DIR}/ws_bridge.log"
-
+# Wait for the Brain's WebSocket server to bind before Tauri connects.
 sleep 1
 
 echo "[lumi] starting Tauri dev..."
@@ -55,7 +49,7 @@ echo "[lumi]   tauri pid=${PIDS[-1]} -> ${LOG_DIR}/tauri.log"
 
 echo ""
 echo "[lumi] all running. Ctrl+C to stop."
-echo "       tail -F ${LOG_DIR}/brain.log ${LOG_DIR}/ws_bridge.log ${LOG_DIR}/tauri.log"
+echo "       tail -F ${LOG_DIR}/brain.log ${LOG_DIR}/tauri.log"
 echo ""
 
 # If any child exits, bring everything down
