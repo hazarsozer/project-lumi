@@ -67,13 +67,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ws://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["appimage", "deb"],
     "icon": ["icons/icon.png"],
-    "externalBin": ["binaries/lumi-brain"]
+    "externalBin": ["binaries/lumi-brain"],
+    "linux": {
+      "deb": {
+        "depends": ["libportaudio2", "libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    }
   }
 }

@@ -301,3 +301,15 @@ class SystemStatusEvent:
     # Setup flags: set when required model files are absent on startup.
     setup_required: bool = False
     missing_items: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TimerExpiredEvent:
+    """Fired by TimerTool when a user-set countdown timer reaches zero.
+
+    The Orchestrator handles this by speaking a verbal alarm if Lumi is idle,
+    or logging and skipping if Lumi is busy.
+    """
+
+    label: str
+    seconds: int

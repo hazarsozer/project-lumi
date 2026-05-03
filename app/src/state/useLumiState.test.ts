@@ -500,6 +500,7 @@ describe("useLumiState — system_status event", () => {
           llm_available: true,
           setup_required: false,
           missing_items: [],
+          source: "startup",
         },
       });
     });
@@ -511,6 +512,7 @@ describe("useLumiState — system_status event", () => {
       llm_available: true,
       setup_required: false,
       missing_items: [],
+      source: "startup",
     });
   });
 
@@ -528,6 +530,7 @@ describe("useLumiState — system_status event", () => {
           llm_available: false,
           setup_required: true,
           missing_items: ["models/llm/phi.gguf", "models/tts/kokoro.onnx"],
+          source: "startup",
         },
       });
     });
@@ -557,6 +560,7 @@ describe("useLumiState — system_status event", () => {
           llm_available: true,
           setup_required: false,
           missing_items: [],
+          source: "startup",
         },
       });
     });

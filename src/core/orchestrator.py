@@ -47,6 +47,7 @@ from src.core.events import (
     SpeechCompletedEvent,
     SystemStatusEvent,
     SystemStatusSource,
+    TimerExpiredEvent,
     TranscriptReadyEvent,
     UserTextEvent,
     VisemeEvent,
@@ -68,6 +69,7 @@ from src.tools.os_actions import (
     WindowListTool,
 )
 from src.tools.rag_ingest import RagIngestTool
+from src.tools.timer_tool import TimerTool
 from src.tools.web_search import WebSearchTool
 
 logger = logging.getLogger(__name__)
@@ -184,6 +186,7 @@ class Orchestrator:
             self._tool_registry.register(RagIngestTool(rag_config=config.rag))
             self._tool_registry.register(WebSearchTool())
             self._tool_registry.register(DateTimeTool())
+            self._tool_registry.register(TimerTool(post_event=self.post_event))
 
         # Register ScreenshotTool if vision is enabled.
         if config.vision.enabled:
@@ -225,10 +228,14 @@ class Orchestrator:
         # still transitions correctly via a synthetic SpeechCompletedEvent).
         self._tts: KokoroTTS | None = tts
 
-        # Guards _current_utterance_id so _handle_interrupt can atomically
-        # read and cancel the active utterance.
+        # Guards _current_utterance_id and _tts_pending_count so that interrupt
+        # and multi-sentence completion can atomically read and modify TTS state.
         self._tts_state_lock: threading.Lock = threading.Lock()
         self._current_utterance_id: str | None = None
+        # Counts in-flight TTS sentences.  SpeechCompletedEvent only triggers
+        # SPEAKING→IDLE when this reaches zero, preventing state-machine flicker
+        # during multi-sentence streaming (C4 Trap 3 fix).
+        self._tts_pending_count: int = 0
 
         # Audio-in pipeline — both are optional (None = text-only mode / testing).
         self._ears: Ears | None = ears
@@ -262,6 +269,7 @@ class Orchestrator:
         self.register_handler(UserTextEvent, self._handle_user_text)
         self.register_handler(RAGSetEnabledEvent, self._handle_rag_set_enabled)
         self.register_handler(RAGStatusRequestEvent, self._handle_rag_status_request)
+        self.register_handler(TimerExpiredEvent, self._handle_timer_expired)
         self.register_handler(
             ConfigSchemaRequestEvent, self._handle_config_schema_request
         )
@@ -457,16 +465,20 @@ class Orchestrator:
 
         tts = self._tts
 
-        # Prepare KokoroTTS BEFORE starting the thread so that a cancel() call
-        # arriving between thread start and synthesize() executing its first lock
-        # acquisition can correctly target the utterance (see KokoroTTS.prepare()).
+        # Increment pending count and prepare KokoroTTS BEFORE starting the
+        # thread.  Both must happen under the same lock so a cancel() call
+        # arriving between thread start and synthesize() can correctly target
+        # the utterance.  The pending count ensures SpeechCompletedEvent only
+        # triggers SPEAKING→IDLE when all streamed sentences have finished.
         with self._tts_state_lock:
+            self._tts_pending_count += 1
             self._current_utterance_id = utterance_id
             if tts is not None:
                 tts.prepare(utterance_id)
 
         if tts is None:
-            # No TTS engine configured — fire completion immediately.
+            # No TTS engine configured — fire completion immediately so the
+            # pending count is decremented and state returns to IDLE.
             logger.debug(
                 "No TTS engine; posting SpeechCompletedEvent for utterance_id=%s",
                 utterance_id,
@@ -490,21 +502,67 @@ class Orchestrator:
     def _handle_speech_completed(self, event: SpeechCompletedEvent) -> None:
         """Handle SpeechCompletedEvent: transition from SPEAKING to IDLE.
 
+        With multi-sentence streaming (C4), multiple LLMResponseReadyEvents fire
+        per turn.  Each spawns a TTS thread that posts SpeechCompletedEvent when
+        done.  The _tts_pending_count guard ensures SPEAKING→IDLE only fires when
+        the last sentence has finished, preventing state-machine flicker between
+        consecutive sentences.
+
         Args:
             event: The speech-completion event carrying the utterance identifier.
         """
+        with self._tts_state_lock:
+            self._tts_pending_count = max(0, self._tts_pending_count - 1)
+            pending = self._tts_pending_count
+
         current = self._state_machine.current_state
         if current == LumiState.SPEAKING:
-            with self._tts_state_lock:
-                self._current_utterance_id = None
-            self._state_machine.transition_to(LumiState.IDLE)
-            logger.info(
-                "Speech completed (utterance_id=%s), returning to IDLE",
-                event.utterance_id,
-            )
+            if pending == 0:
+                with self._tts_state_lock:
+                    self._current_utterance_id = None
+                self._state_machine.transition_to(LumiState.IDLE)
+                logger.info(
+                    "All sentences complete (utterance_id=%s), returning to IDLE",
+                    event.utterance_id,
+                )
+            else:
+                logger.debug(
+                    "Sentence complete (utterance_id=%s), %d still pending",
+                    event.utterance_id,
+                    pending,
+                )
         else:
             logger.debug(
                 "SpeechCompletedEvent received in state %s, ignoring",
+                current.value,
+            )
+
+    def _handle_timer_expired(self, event: TimerExpiredEvent) -> None:
+        """Handle TimerExpiredEvent: speak a verbal alarm when a user timer fires.
+
+        If Lumi is IDLE, she transitions to SPEAKING and announces the alarm.
+        If Lumi is busy (PROCESSING or SPEAKING), the alarm is logged and skipped
+        to avoid interrupting ongoing work.  This is an MVP limitation — a future
+        version could queue the alarm for the next IDLE transition.
+
+        Args:
+            event: The expired timer, containing label and original seconds.
+        """
+        logger.info(
+            "Timer expired: '%s' (%ds)", event.label, event.seconds
+        )
+        current = self._state_machine.current_state
+        if current in (LumiState.IDLE, LumiState.LISTENING):
+            alarm_text = f"Your {event.label} timer just went off!"
+            if current == LumiState.IDLE:
+                self._state_machine.transition_to(LumiState.LISTENING)
+            self._state_machine.transition_to(LumiState.PROCESSING)
+            self._state_machine.transition_to(LumiState.SPEAKING)
+            self.post_event(LLMResponseReadyEvent(text=alarm_text))
+        else:
+            logger.warning(
+                "Timer '%s' fired but Lumi is busy (state=%s) — alarm skipped",
+                event.label,
                 current.value,
             )
 

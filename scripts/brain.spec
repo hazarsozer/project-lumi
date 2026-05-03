@@ -35,12 +35,24 @@ SRC_ENTRY = str(REPO_ROOT / "src" / "main.py")
 _model_dir = REPO_ROOT / "models"
 _config_src = str(REPO_ROOT / "config.yaml")
 
+import glob as _glob
+import sys as _sys
+
+_VENV_SITE = str(REPO_ROOT / ".venv" / "lib" / f"python{_sys.version_info.major}.{_sys.version_info.minor}" / "site-packages")
+
+# llama-cpp-python ships its own libllama.so; ctypes loads it by name at runtime.
+_LLAMA_LIBS = _glob.glob(f"{_VENV_SITE}/llama_cpp/lib/libllama*")
+
 a = Analysis(
     [SRC_ENTRY],
     pathex=[str(REPO_ROOT)],
-    binaries=[],
+    binaries=[(lib, "llama_cpp/lib") for lib in _LLAMA_LIBS],
     datas=[
         (_config_src, "."),
+        # openwakeword ships melspectrogram.onnx and sample wake-word models
+        # as package resources; onnxruntime loads them by absolute path at
+        # runtime so they must be collected into the bundle.
+        (f"{_VENV_SITE}/openwakeword/resources", "openwakeword/resources"),
     ] + (
         [(str(_model_dir), "models")] if _model_dir.is_dir() else []
     ),

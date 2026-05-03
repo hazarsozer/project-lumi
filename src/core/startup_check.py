@@ -58,7 +58,22 @@ def _check_openwakeword_version() -> None:
     The monkey-patch applied in ears.py targets the internal API of exactly
     version 0.4.0.  A version mismatch would cause silent misbehaviour or
     a hard crash at runtime rather than a clear error at startup.
+
+    When running as a PyInstaller frozen binary, importlib.metadata cannot
+    read package metadata because dist-info directories are not always bundled.
+    In that case the version check is skipped — the build spec is responsible
+    for pinning the correct version at freeze time.
     """
+    import sys
+
+    if getattr(sys, "frozen", False):
+        logger.debug(
+            "Frozen binary: skipping openwakeword version check "
+            "(build spec must pin openwakeword==%s)",
+            _REQUIRED_OWW_VERSION,
+        )
+        return
+
     try:
         installed = _meta.version("openwakeword")
     except Exception as exc:

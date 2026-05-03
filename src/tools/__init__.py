@@ -100,15 +100,49 @@ Returns on success: docs indexed count + chunk count.
 Returns on error: descriptive message if path is missing, invalid, or ingest fails.
 Failure cases: non-existent path, path traversal attempt, non-string arg, ingest error.
 
+web_search
+~~~~~~~~~~
+Search the web via DuckDuckGo (no API key required).
+
+Schema::
+
+    {"tool": "web_search", "args": {"query": "<search terms>"}}
+
+Returns up to 5 result snippets as a numbered list.
+Failure cases: empty query, HTTP error, no results.
+
+datetime
+~~~~~~~~
+Return the current local date and time.
+
+Schema::
+
+    {"tool": "datetime", "args": {}}
+
+Returns ISO-8601 timestamp, human-readable date, weekday, hour, minute.
+
+set_timer
+~~~~~~~~~
+Set a countdown timer that speaks a verbal alarm when it expires.
+
+Schema::
+
+    {"tool": "set_timer", "args": {"seconds": <int>, "label": "<str>"}}
+
+Args: seconds (1-86400), label (human-friendly name for the timer).
+Returns: confirmation string ("Timer set: 'pasta' will fire in 5 minutes.").
+When the timer fires: Lumi speaks the alarm if IDLE; skips if busy.
+
 Default ToolsConfig allowlist: ("launch_app", "clipboard", "file_info", "window_list")
 Note: "screenshot" is registered separately when VisionConfig.enabled=True.
-Note: "rag_ingest" must be added to allowed_tools to activate it.
+Note: "rag_ingest", "web_search", "datetime", "set_timer" must be added to allowed_tools to activate them.
 """
 
 from src.tools.base import Tool, ToolResult
 from src.tools.datetime_tool import DateTimeTool
 from src.tools.executor import ToolExecutor
 from src.tools.registry import ToolRegistry
+from src.tools.timer_tool import TimerTool
 from src.tools.web_search import WebSearchTool
 
 __all__ = [
@@ -117,5 +151,6 @@ __all__ = [
     "ToolRegistry",
     "ToolExecutor",
     "DateTimeTool",
+    "TimerTool",
     "WebSearchTool",
 ]
