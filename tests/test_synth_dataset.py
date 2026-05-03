@@ -84,7 +84,7 @@ def test_required_keys_present(records: list[dict]) -> None:
     for i, rec in enumerate(records):
         missing = required - rec.keys()
         assert not missing, f"record {i} is missing keys: {missing}"
-        assert rec["source"] == "synthetic_v0"
+        assert rec["source"] == "synthetic_v1"
 
 
 @pytest.mark.unit

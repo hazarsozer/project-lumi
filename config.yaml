@@ -213,6 +213,10 @@ vision:
 # persona — Lumi's identity and system prompt (Wave F1)
 # ─────────────────────────────────────────────────────────────────────────────
 persona:
+  # Your name. Lumi uses it naturally in conversation and refusals.
+  # Set during first-run setup via the Settings panel.
+  user_name: ""
+
   # Full system prompt sent to the LLM as the <|system|> block.
   # Omit or set to null to use the built-in default persona defined in
   # src/llm/prompt_engine.py (DEFAULT_SYSTEM_PROMPT).

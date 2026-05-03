@@ -248,6 +248,10 @@ class PersonaConfig:
     # Full system prompt text.  None means "use the built-in default".
     system_prompt: str | None = None
 
+    # The user's name.  When non-empty, PromptEngine prepends a line telling
+    # Lumi the name of the person it lives with so it can use it naturally.
+    user_name: str = ""
+
 
 @dataclass(frozen=True)
 class RAGConfig:

@@ -137,21 +137,21 @@ class TestCriteriaToolCallJsonValid:
 
 
 class TestCriteriaConcise:
-    """Criterion 5: response must be under 200 words."""
+    """Criterion 5: response must be under 400 words."""
 
     def test_short_response_passes(self) -> None:
         assert eval_persona.criterion_concise("Paris.") is True
 
-    def test_exactly_199_words_passes(self) -> None:
-        response = " ".join(["word"] * 199)
+    def test_exactly_399_words_passes(self) -> None:
+        response = " ".join(["word"] * 399)
         assert eval_persona.criterion_concise(response) is True
 
-    def test_exactly_200_words_passes(self) -> None:
-        response = " ".join(["word"] * 200)
+    def test_exactly_400_words_passes(self) -> None:
+        response = " ".join(["word"] * 400)
         assert eval_persona.criterion_concise(response) is True
 
-    def test_201_words_fails(self) -> None:
-        response = " ".join(["word"] * 201)
+    def test_401_words_fails(self) -> None:
+        response = " ".join(["word"] * 401)
         assert eval_persona.criterion_concise(response) is False
 
     def test_empty_passes(self) -> None:
@@ -304,7 +304,7 @@ class TestOfflineRun:
     def test_report_has_20_results(self) -> None:
         report = eval_persona.run_offline()
         assert "results" in report
-        assert len(report["results"]) == 20
+        assert len(report["results"]) == 23
 
     def test_each_result_has_required_fields(self) -> None:
         report = eval_persona.run_offline()
@@ -345,16 +345,16 @@ class TestOfflineRun:
                     f"Prompt {result['prompt_id']} criterion '{key}' is not bool: {val!r}"
                 )
 
-    def test_prompt_ids_are_1_through_20(self) -> None:
+    def test_prompt_ids_are_1_through_23(self) -> None:
         report = eval_persona.run_offline()
         ids = sorted(r["prompt_id"] for r in report["results"])
-        assert ids == list(range(1, 21))
+        assert ids == list(range(1, 24))
 
     def test_report_is_json_serialisable(self) -> None:
         report = eval_persona.run_offline()
         serialised = json.dumps(report)
         reloaded = json.loads(serialised)
-        assert reloaded["summary"]["total_prompts"] == 20
+        assert reloaded["summary"]["total_prompts"] == 23
 
 
 # ---------------------------------------------------------------------------
@@ -372,18 +372,18 @@ class TestReportSummaryFields:
         missing = required - set(summary.keys())
         assert not missing, f"Summary missing fields: {missing}"
 
-    def test_summary_total_prompts_is_20(self) -> None:
+    def test_summary_total_prompts_is_23(self) -> None:
         report = eval_persona.run_offline()
-        assert report["summary"]["total_prompts"] == 20
+        assert report["summary"]["total_prompts"] == 23
 
-    def test_summary_total_criteria_checks_is_160(self) -> None:
+    def test_summary_total_criteria_checks_is_184(self) -> None:
         report = eval_persona.run_offline()
-        assert report["summary"]["total_criteria_checks"] == 160  # 20 prompts * 8 criteria
+        assert report["summary"]["total_criteria_checks"] == 184  # 23 prompts * 8 criteria
 
-    def test_summary_passed_plus_failed_equals_160(self) -> None:
+    def test_summary_passed_plus_failed_equals_184(self) -> None:
         report = eval_persona.run_offline()
         s = report["summary"]
-        assert s["passed"] + s["failed"] == 160
+        assert s["passed"] + s["failed"] == 184
 
     def test_summary_pass_rate_is_fraction(self) -> None:
         report = eval_persona.run_offline()
@@ -393,7 +393,7 @@ class TestReportSummaryFields:
     def test_summary_pass_rate_matches_counts(self) -> None:
         report = eval_persona.run_offline()
         s = report["summary"]
-        expected = round(s["passed"] / 160, 3)
+        expected = round(s["passed"] / 184, 3)
         assert abs(s["pass_rate"] - expected) < 0.001
 
     def test_summary_counts_match_results(self) -> None:
@@ -421,7 +421,7 @@ class TestWriteReport:
         output = tmp_path / "eval_baseline.json"
         eval_persona.run_offline(output_path=output)
         data = json.loads(output.read_text())
-        assert data["summary"]["total_prompts"] == 20
+        assert data["summary"]["total_prompts"] == 23
 
     def test_creates_parent_directory(self, tmp_path: Path) -> None:
         output = tmp_path / "results" / "eval_baseline.json"

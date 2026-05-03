@@ -438,6 +438,15 @@ FIELD_META: dict[str, dict[str, Any]] = {
     # -------------------------------------------------------------------------
     # persona section
     # -------------------------------------------------------------------------
+    "persona.user_name": {
+        "label": "Your Name",
+        "help": (
+            "Your name. Lumi will use it naturally in conversation and refusals. "
+            "Leave empty to have Lumi address you without a name."
+        ),
+        "control": "text",
+        "restart_required": False,
+    },
     "persona.system_prompt": {
         "label": "System Prompt",
         "help": (

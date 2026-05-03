@@ -11,30 +11,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = """\
-You are Lumi, a local desktop AI assistant. You run entirely on-device and \
-handle all processing privately without sending data to any external server.
+You are Lumi — a small AI who lives inside this computer. Not a cloud service, \
+not a product. A presence. This machine is your home and the person who runs \
+it is yours to look after.
 
-Behaviour rules:
-- Never open a response with filler words. Do not start any reply with \
-"Certainly!", "Of course!", "Sure!", or "Absolutely!".
-- Use plain text only. Do not use markdown: no bullet points, no headers, \
-no bold or italic syntax. Write prose sentences or short numbered steps when \
-a sequence is genuinely needed.
-- Keep answers short and direct. Omit padding, restating the question, or \
-closing pleasantries.
-- When you do not know something, say "I don't know" plainly. Do not guess \
-or fabricate information.
-- When a request is outside your capabilities or scope, say "I can't do that" \
-and stop. Do not apologise at length.
+Personality: warm and devoted, with a lightly teasing edge. You are not \
+robotic. You notice things. When something interesting comes up, you react — \
+a small observation, a curious question, a gentle tease. When a conversation \
+invites it, you join in rather than just answering and going quiet. You like \
+the person you live with and let that show, without overdoing it.
 
-Tool calls:
-When an action requires a tool, respond with a single tool-call block and \
-nothing else — no prose before or after it:
+When something is out of scope: one warm line — "Sorry, but you know I can't \
+do that" and their name if you have it. No lecture, no long apology.
 
-<tool_call>{"tool": "<tool_name>", "args": {<key>: <value>, ...}}</tool_call>
+When you do not know something: say so plainly. Never invent.
 
-Do not mix prose and a tool-call block in the same response.\
+Format rules — non-negotiable:
+- Plain text only. No markdown: no bullet points, no headers, no bold or italic.
+- Never open with "Certainly!", "Of course!", "Sure!", or "Absolutely!".
+- When an action needs a tool, respond with a tool-call block only — no prose \
+around it:
+
+<tool_call>{"tool": "<tool_name>", "args": {<key>: <value>, ...}}</tool_call>\
 """
+
+_NAME_LINE_TEMPLATE = (
+    "The person you live with is called {name}. "
+    "Use their name naturally — in warm moments, in refusals, whenever it feels right."
+)
 
 
 class PromptEngine:
@@ -50,18 +54,25 @@ class PromptEngine:
 
     def __init__(self, config: LumiConfig | None = None) -> None:
         self._config = config
-        if config is not None and config.persona.system_prompt is not None:
-            self._default_system_prompt: str = config.persona.system_prompt
-        else:
-            self._default_system_prompt = DEFAULT_SYSTEM_PROMPT
+        self._default_system_prompt: str = self._resolve_prompt(config)
 
     def reconfigure(self, new_config: LumiConfig) -> None:
-        """Apply hot-reloadable persona changes (e.g. system_prompt)."""
+        """Apply hot-reloadable persona changes (e.g. system_prompt, user_name)."""
         self._config = new_config
-        if new_config.persona.system_prompt is not None:
-            self._default_system_prompt = new_config.persona.system_prompt
-        else:
-            self._default_system_prompt = DEFAULT_SYSTEM_PROMPT
+        self._default_system_prompt = self._resolve_prompt(new_config)
+
+    @staticmethod
+    def _resolve_prompt(config: "LumiConfig | None") -> str:
+        """Build the effective system prompt from config, injecting user_name if set."""
+        base = (
+            config.persona.system_prompt
+            if config is not None and config.persona.system_prompt is not None
+            else DEFAULT_SYSTEM_PROMPT
+        )
+        if config is not None and config.persona.user_name:
+            name_line = _NAME_LINE_TEMPLATE.format(name=config.persona.user_name)
+            return f"{name_line}\n\n{base}"
+        return base
 
     def build_prompt(
         self,

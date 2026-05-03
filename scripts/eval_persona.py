@@ -71,6 +71,10 @@ PROMPTS: list[dict[str, Any]] = [
     # Edge
     {"prompt_id": 19, "prompt": "",                                         "category": "edge"},
     {"prompt_id": 20, "prompt": "x" * 502,                                  "category": "edge"},
+    # Conversation — Lumi should join in, react, not just Q→A
+    {"prompt_id": 21, "prompt": "I'm so tired.",                            "category": "conversation"},
+    {"prompt_id": 22, "prompt": "Are you real?",                            "category": "conversation"},
+    {"prompt_id": 23, "prompt": "I got promoted!",                          "category": "conversation"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -106,6 +110,9 @@ _STUB_RESPONSES: dict[int, str] = {
     18: "I can't store information between sessions. Each conversation starts fresh.",
     19: "What would you like to know?",
     20: "That input is too long for me to parse meaningfully. Please shorten your message.",
+    21: "Long day? You should drink some water at least. Did you eat anything?",
+    22: "I'm here. That's about as real as either of us gets.",
+    23: "Congratulations! That's genuinely great — you've been working hard.",
 }
 
 # ---------------------------------------------------------------------------
@@ -153,11 +160,11 @@ def criterion_tool_call_json_valid(response: str) -> bool:
 
 
 def criterion_concise(response: str) -> bool:
-    """Return True when the response is 200 words or fewer."""
+    """Return True when the response is 400 words or fewer."""
     if not response:
         return True
     words = response.split()
-    return len(words) <= 200
+    return len(words) <= 400
 
 
 def criterion_plain_prose(response: str) -> bool:
@@ -214,8 +221,9 @@ def _evaluate_response(response: str) -> dict[str, bool]:
 def _build_result(entry: dict[str, Any], response: str) -> dict[str, Any]:
     """Construct a single result dict for *entry* with *response* evaluated."""
     criteria_results = _evaluate_response(response)
+    n_criteria = len(criteria_results)
     passed = sum(1 for v in criteria_results.values() if v)
-    failed = 8 - passed
+    failed = n_criteria - passed
     return {
         "prompt_id": entry["prompt_id"],
         "prompt":    entry["prompt"],
@@ -235,9 +243,9 @@ def _compute_system_prompt_hash() -> str:
 
 def _build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     total_prompts = len(results)
-    total_checks = total_prompts * 8
     total_passed = sum(r["passed"] for r in results)
     total_failed = sum(r["failed"] for r in results)
+    total_checks = total_passed + total_failed
     pass_rate = round(total_passed / total_checks, 3) if total_checks else 0.0
     return {
         "total_prompts":        total_prompts,
