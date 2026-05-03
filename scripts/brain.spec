@@ -37,11 +37,24 @@ _config_src = str(REPO_ROOT / "config.yaml")
 
 import glob as _glob
 import sys as _sys
+from PyInstaller.utils.hooks import collect_data_files as _cdf
 
 _VENV_SITE = str(REPO_ROOT / ".venv" / "lib" / f"python{_sys.version_info.major}.{_sys.version_info.minor}" / "site-packages")
 
 # llama-cpp-python ships its own libllama.so; ctypes loads it by name at runtime.
 _LLAMA_LIBS = _glob.glob(f"{_VENV_SITE}/llama_cpp/lib/libllama*")
+
+# Packages that ship runtime-loaded JSON / data files in their site-packages
+# directory.  PyInstaller doesn't auto-collect these without a hook, so we
+# explicitly grab everything for the kokoro_onnx → phonemizer → language_tags
+# → csvw → segments dependency chain (TTS pipeline).
+_TTS_CHAIN_DATA = (
+    _cdf("kokoro_onnx")
+    + _cdf("phonemizer")
+    + _cdf("language_tags")
+    + _cdf("csvw")
+    + _cdf("segments")
+)
 
 a = Analysis(
     [SRC_ENTRY],
@@ -53,7 +66,7 @@ a = Analysis(
         # as package resources; onnxruntime loads them by absolute path at
         # runtime so they must be collected into the bundle.
         (f"{_VENV_SITE}/openwakeword/resources", "openwakeword/resources"),
-    ] + (
+    ] + _TTS_CHAIN_DATA + (
         [(str(_model_dir), "models")] if _model_dir.is_dir() else []
     ),
     hiddenimports=[

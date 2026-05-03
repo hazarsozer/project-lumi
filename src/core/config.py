@@ -424,6 +424,12 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     means the application starts successfully even without a ``config.yaml``,
     which is important for CI environments.
 
+    When running as a PyInstaller frozen binary, the bundled ``config.yaml``
+    inside ``sys._MEIPASS`` (the ``_internal/`` directory) is used as a fallback
+    when the requested path does not exist in the current working directory.
+    This lets the sidecar binary ship with sensible defaults (e.g. ``ipc.enabled``)
+    without requiring the user to maintain a config file.
+
     Args:
         path: Path to the YAML configuration file.  Relative paths are
               resolved against the current working directory.
@@ -431,7 +437,19 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     Returns:
         A fully populated, frozen ``LumiConfig`` instance.
     """
+    import sys
     config_path = Path(path)
+
+    # Frozen-binary fallback: if cwd doesn't have the requested config, look
+    # for a bundled copy alongside the binary's resources.
+    if not config_path.exists() and getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            bundled = Path(meipass) / path
+            if bundled.exists():
+                logger.info("Using bundled config from frozen binary: %s", bundled)
+                config_path = bundled
+
     raw: dict[str, Any] = {}
 
     if config_path.exists():
