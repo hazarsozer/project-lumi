@@ -51,6 +51,15 @@ ui/.godot/
 app/node_modules/
 app/dist/
 app/src-tauri/target/
+# Brain sidecar binaries — built by scripts/build_brain.sh, not source.
+# Keep the directory itself (Tauri requires the path to exist for cargo check)
+# but ignore everything inside it. A stub file should be checked in if the
+# directory must be empty in fresh clones.
+app/src-tauri/binaries/lumi-brain-*/
+
+# --- PyInstaller build artifacts ---
+scripts/build/
+scripts/dist/
 
 # --- pytest / coverage ---
 .pytest_cache/
