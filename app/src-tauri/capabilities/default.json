@@ -13,6 +13,8 @@
     "core:window:allow-hide",
     "core:window:allow-is-visible",
     "core:window:allow-set-focus",
-    "core:clipboard:allow-write-text"
+    "core:clipboard:allow-write-text",
+    "shell:allow-execute",
+    "shell:allow-spawn"
   ]
 }

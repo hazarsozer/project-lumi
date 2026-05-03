@@ -106,12 +106,16 @@ Note: "rag_ingest" must be added to allowed_tools to activate it.
 """
 
 from src.tools.base import Tool, ToolResult
+from src.tools.datetime_tool import DateTimeTool
 from src.tools.executor import ToolExecutor
 from src.tools.registry import ToolRegistry
+from src.tools.web_search import WebSearchTool
 
 __all__ = [
     "Tool",
     "ToolResult",
     "ToolRegistry",
     "ToolExecutor",
+    "DateTimeTool",
+    "WebSearchTool",
 ]

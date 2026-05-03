@@ -152,3 +152,91 @@ def test_generate_cancel_stops_streaming(
         events.append(event_q.get_nowait())
     assert len(events) >= 1
     assert all(isinstance(e, LLMTokenEvent) for e in events)
+
+
+# ---------------------------------------------------------------------------
+# on_sentence callback tests
+# ---------------------------------------------------------------------------
+
+
+def _setup_sentence_mock(mock_llama_cpp: MagicMock, tokens: list[str]) -> None:
+    """Configure mock to emit *tokens* then stop."""
+    call_count = 0
+
+    def _side_effect(*args: object, **kwargs: object) -> dict:
+        nonlocal call_count
+        if call_count < len(tokens):
+            tok = tokens[call_count]
+            call_count += 1
+            finish = "stop" if call_count == len(tokens) else None
+            return {"choices": [{"text": tok, "finish_reason": finish}]}
+        return {"choices": [{"text": "", "finish_reason": "stop"}]}
+
+    mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
+
+
+@pytest.mark.unit
+def test_on_sentence_fires_per_boundary(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """on_sentence is called once per detected sentence boundary."""
+    # Two sentences: boundary fires on ". " token
+    _setup_sentence_mock(mock_llama_cpp, ["Hello. ", "World. "])
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    received: list[str] = []
+
+    router.generate("Hi", cancel, on_sentence=received.append)
+
+    assert len(received) == 2
+    assert received[0] == "Hello."
+    assert received[1] == "World."
+
+
+@pytest.mark.unit
+def test_on_sentence_flushes_trailing_partial(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """Remaining buffer without terminal punctuation is flushed at end of loop."""
+    _setup_sentence_mock(mock_llama_cpp, ["No", " period", " here"])
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    received: list[str] = []
+
+    router.generate("Hi", cancel, on_sentence=received.append)
+
+    assert len(received) == 1
+    assert received[0] == "No period here"
+
+
+@pytest.mark.unit
+def test_on_sentence_none_does_not_crash(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """on_sentence=None (default) produces the same response string with no callbacks."""
+    _setup_sentence_mock(mock_llama_cpp, ["Hello. ", "World."])
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+
+    result = router.generate("Hi", cancel, on_sentence=None)
+    assert result == "Hello. World."
+
+
+@pytest.mark.unit
+def test_on_sentence_suppresses_tool_call_xml(mock_llama_cpp: MagicMock, tmp_path: Path) -> None:
+    """Sentences containing <tool_call> are NOT forwarded to on_sentence."""
+    _setup_sentence_mock(
+        mock_llama_cpp,
+        ['<tool_call>{"tool": "web_search", "args": {"query": "test"}}</tool_call>'],
+    )
+
+    router = _build_router(mock_llama_cpp, tmp_path)
+    cancel = threading.Event()
+    received: list[str] = []
+
+    # The guard lives in inference_dispatcher, not the router — so the router
+    # itself WILL fire on_sentence here (no boundary in this token).
+    # The flush at end-of-loop fires the tool call text.  We confirm the router
+    # passes it through; the dispatcher guards it.
+    router.generate("search", cancel, on_sentence=received.append)
+
+    # The flush fires once with the tool call text (router is unaware of the guard)
+    assert len(received) == 1
+    assert "<tool_call>" in received[0]

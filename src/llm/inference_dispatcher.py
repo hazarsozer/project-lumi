@@ -106,6 +106,35 @@ class LLMInferenceDispatcher:
         use_rag = rag_runtime_enabled and self._reflex_router.route_rag_intent(text)
 
         def _run_inference() -> None:
+            # Count of LLMResponseReadyEvent firings so far this turn.
+            # Streaming fires one per sentence; the state transition happens on
+            # the first firing.  If zero events fire (e.g. empty response or
+            # pure tool-call detection pass), the non-streaming fallback runs.
+            posted_count = 0
+
+            def _post_sentence(text: str) -> None:
+                nonlocal posted_count
+                sentence = text.strip()
+                # Suppress tool-call XML so TTS never speaks raw JSON.
+                if not sentence or "<tool_call>" in sentence:
+                    return
+                if self._llm_cancel_flag.is_set():
+                    return
+                with self._llm_state_lock:
+                    state = self._state_machine.current_state
+                    if state == LumiState.PROCESSING and posted_count == 0:
+                        # First sentence: post and transition to SPEAKING atomically.
+                        post_event(LLMResponseReadyEvent(text=sentence))
+                        self._state_machine.transition_to(LumiState.SPEAKING)
+                        posted_count += 1
+                    elif state == LumiState.SPEAKING:
+                        post_event(LLMResponseReadyEvent(text=sentence))
+                        posted_count += 1
+                    else:
+                        logger.debug(
+                            "Dropping streamed sentence (state=%s): %r", state, sentence[:50]
+                        )
+
             try:
                 if not self._model_loader.is_loaded:
                     logger.info("Loading LLM model on first inference request...")
@@ -115,6 +144,7 @@ class LLMInferenceDispatcher:
                     self._llm_cancel_flag,
                     utterance_id=utterance_id,
                     use_rag=use_rag,
+                    on_sentence=_post_sentence,
                 )
             except InterruptedError:
                 logger.info("LLM generation cancelled for %r (source=%s)", text, source)
@@ -129,8 +159,11 @@ class LLMInferenceDispatcher:
                 return
 
             # Tool-call pass: execute any tool calls and do a follow-up inference.
+            # The first-pass response may have been suppressed by the tool-call
+            # guard in _post_sentence, so reset posted_count before the followup.
             tool_calls = parse_tool_calls(response)
             if tool_calls:
+                posted_count = 0
                 results = self._tool_executor.execute(tool_calls, self._llm_cancel_flag)
                 result_lines = [
                     f"Tool {tc['tool']!r}: {'OK' if tr.success else 'FAIL'} — {tr.output}"
@@ -142,6 +175,7 @@ class LLMInferenceDispatcher:
                         followup_prompt,
                         self._llm_cancel_flag,
                         utterance_id=utterance_id,
+                        on_sentence=_post_sentence,
                     )
                 except InterruptedError:
                     logger.info(
@@ -157,25 +191,38 @@ class LLMInferenceDispatcher:
                             self._state_machine.transition_to(LumiState.IDLE)
                     return
 
-            with self._llm_state_lock:
-                if self._state_machine.current_state != LumiState.PROCESSING:
-                    logger.debug(
-                        "State changed during inference, discarding response for %r (source=%s)",
-                        text,
-                        source,
-                    )
-                    return
+            if posted_count == 0:
+                # No sentences were streamed (empty response or cancelled before
+                # any boundary).  Fall back to the original blocking post so the
+                # state machine always reaches SPEAKING or IDLE.
+                with self._llm_state_lock:
+                    if self._state_machine.current_state != LumiState.PROCESSING:
+                        logger.debug(
+                            "State changed during inference, discarding response for %r (source=%s)",
+                            text,
+                            source,
+                        )
+                        return
+                    try:
+                        self._memory.save()
+                        post_event(LLMResponseReadyEvent(text=response))
+                        self._state_machine.transition_to(LumiState.SPEAKING)
+                    except Exception:
+                        logger.exception(
+                            "Post-inference save/dispatch failed for %r (source=%s); returning to IDLE",
+                            text,
+                            source,
+                        )
+                        self._state_machine.transition_to(LumiState.IDLE)
+            else:
+                # Streaming already handled events and PROCESSING→SPEAKING transition.
+                # Just persist the conversation turn.
                 try:
                     self._memory.save()
-                    post_event(LLMResponseReadyEvent(text=response))
-                    self._state_machine.transition_to(LumiState.SPEAKING)
                 except Exception:
                     logger.exception(
-                        "Post-inference save/dispatch failed for %r (source=%s); returning to IDLE",
-                        text,
-                        source,
+                        "Memory save failed after streaming for %r (source=%s)", text, source
                     )
-                    self._state_machine.transition_to(LumiState.IDLE)
 
         _timeout_s = self._llm_config.inference_timeout_s
         _watchdog_timer: threading.Timer | None = None

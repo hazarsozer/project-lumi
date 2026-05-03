@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+from collections.abc import Callable
 
 # Optional RAG import — only resolved when a retriever is actually injected.
 # Using TYPE_CHECKING avoids a circular-import risk at module load time.
@@ -84,6 +85,7 @@ class ReasoningRouter:
         cancel_flag: threading.Event,
         utterance_id: str = "",
         use_rag: bool = False,
+        on_sentence: Callable[[str], None] | None = None,
     ) -> str:
         """Generate a response to *text* using the local LLM.
 
@@ -94,11 +96,19 @@ class ReasoningRouter:
         non-empty, an ``LLMTokenEvent`` is posted per generated token for
         live streaming display on the frontend.
 
+        When *on_sentence* is provided, it is called once per detected sentence
+        boundary (`. `, `! `, `? ` patterns) as tokens accumulate, enabling TTS
+        to start on the first sentence while the LLM generates the rest.  Any
+        remaining partial sentence is flushed after the token loop ends.
+
         Args:
             text: The user's query.
             cancel_flag: A ``threading.Event``; when set, generation is aborted.
             utterance_id: Optional utterance identifier for token streaming.
                 When empty, no ``LLMTokenEvent`` events are posted.
+            use_rag: Whether to run RAG retrieval before generation.
+            on_sentence: Optional callback invoked with each complete sentence as
+                it forms.  Called synchronously inside the token loop.
 
         Returns:
             The generated response string.
@@ -127,8 +137,12 @@ class ReasoningRouter:
         model = self._model_loader.model
 
         collected: list[str] = []
+        sentence_buf = ""
         prev_token: str | None = None
         remaining = self._config.max_tokens
+
+        # Sentence boundary suffixes that trigger an on_sentence flush.
+        _BOUNDARIES = (". ", "! ", "? ", ".\n", "!\n", "?\n")
 
         while remaining > 0:
             if cancel_flag.is_set():
@@ -150,11 +164,18 @@ class ReasoningRouter:
 
             finish_reason = chunk["choices"][0].get("finish_reason")
             collected.append(token)
+            sentence_buf += token
 
             if self._event_queue is not None and utterance_id:
                 self._event_queue.put(
                     LLMTokenEvent(token=token, utterance_id=utterance_id)
                 )
+
+            if on_sentence is not None and any(sentence_buf.endswith(b) for b in _BOUNDARIES):
+                flushed = sentence_buf.strip()
+                sentence_buf = ""
+                if flushed:
+                    on_sentence(flushed)
 
             prev_token = token
             remaining -= 1
@@ -168,6 +189,10 @@ class ReasoningRouter:
         # committing an incomplete assistant turn to memory.
         if cancel_flag.is_set():
             raise InterruptedError("Generation cancelled during final token")
+
+        # Flush any trailing partial sentence (no terminal punctuation).
+        if on_sentence is not None and sentence_buf.strip():
+            on_sentence(sentence_buf.strip())
 
         response = "".join(collected)
         self._memory.add_turn("user", text)

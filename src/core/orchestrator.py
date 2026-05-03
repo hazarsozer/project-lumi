@@ -60,6 +60,7 @@ from src.llm.prompt_engine import PromptEngine
 from src.llm.reasoning_router import ReasoningRouter
 from src.llm.reflex_router import ReflexRouter
 from src.tools import ToolExecutor, ToolRegistry
+from src.tools.datetime_tool import DateTimeTool
 from src.tools.os_actions import (
     AppLaunchTool,
     ClipboardTool,
@@ -67,6 +68,7 @@ from src.tools.os_actions import (
     WindowListTool,
 )
 from src.tools.rag_ingest import RagIngestTool
+from src.tools.web_search import WebSearchTool
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +182,8 @@ class Orchestrator:
             self._tool_registry.register(FileInfoTool())
             self._tool_registry.register(WindowListTool())
             self._tool_registry.register(RagIngestTool(rag_config=config.rag))
+            self._tool_registry.register(WebSearchTool())
+            self._tool_registry.register(DateTimeTool())
 
         # Register ScreenshotTool if vision is enabled.
         if config.vision.enabled:
