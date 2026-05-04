@@ -28,6 +28,13 @@ cd app && npm install && npm run build
 cd app && npm run tauri -- build
 ```
 
+### Persona LoRA Training (optional)
+
+The LoRA → GGUF merge/quantize pipeline (`scripts/merge_and_quantize.py`) requires:
+
+1. Install the `[qlora]` extra: `uv sync --extra qlora`
+2. Build `llama.cpp` locally. The script expects bins at `<llama-cpp-dir>/build/bin/llama-quantize` and `<llama-cpp-dir>/convert_hf_to_gguf.py`. Pass the path via `--llama-cpp-dir`. See `scripts/merge_and_quantize.py --help` for full usage.
+
 ## Code Style
 
 - Python: `black` + `ruff` (see `pyproject.toml`)

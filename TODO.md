@@ -10,12 +10,26 @@ The following items were delivered as part of Ring 1 (make it installable):
 - **C1 DONE** — `SetupPanel.tsx`: first-run guidance screen; `startup_check.py` all-soft-return pattern; `main.py` gates `Ears` on missing wake-word items; `ipc.enabled: true` default.
 - **B2 DONE (partial)** — Tauri AppImage + deb bundle targets configured. Full Brain sidecar bundling (PyInstaller + `externalBin`) promoted to Ring 2 item 6.
 
-**Ring 2 items (see `MVP_REPORT.md`):**
-1. Brain sidecar bundling (PyInstaller + Tauri `externalBin`)
-2. Persona LoRA training (200–300 examples, Q4_K_M)
-3. Streaming TTS on sentence boundaries
-4. Web search + datetime/timer tools
-5. End-to-end integration smoke test
+## Ring 2 — Complete (2026-05-04)
+
+The following items were delivered as part of Ring 2:
+
+- **DONE** — Brain sidecar bundling: `scripts/brain.spec` (PyInstaller spec) + `scripts/build_brain.sh` build script; Tauri `externalBin` integration.
+- **DONE** — Persona LoRA v1: QLoRA training pipeline fully debugged (`scripts/train_lumi.py` → `scripts/merge_and_quantize.py` → `scripts/eval_persona.py`). Merged GGUF at `models/llm/lumi-phi35-v1-Q4_K_M.gguf` (2.4 GB, gitignored). `[qlora]` extra added to `pyproject.toml` (`gguf>=0.10.0`, `protobuf>=4.21,<5`, `sentencepiece>=0.2.0`). Note: v1 has known quality regressions in identity consistency, refusal discipline, and filler-opener patterns; these are deferred to persona v2 (final pre-MVP task after Ring 3).
+- **DONE** — Streaming TTS on sentence boundaries; `scripts/measure_streaming_latency.py` latency benchmark.
+- **DONE** — Web search + datetime/timer tools: `src/tools/web_search.py`, `src/tools/datetime_tool.py`, `src/tools/timer_tool.py`.
+- **DONE** — End-to-end integration smoke test: `tests/integration/test_brain_e2e.py`.
+
+## Ring 3 — In Progress
+
+- [ ] **I2/I3** — Privacy and threat-model docs; these back the "privacy-first" marketing claim and land first in Ring 3.
+- [ ] **I5** — Conversation memory rotation + LLM summarisation.
+- [ ] **C2** — Avatar artwork or animated SVG fallback.
+- [ ] **I6** — Delete `src/ipc/ws_bridge.py` stub (deprecated since Ring 1, marked for Ring 3 removal) and verify `ui/` (Godot legacy) is already gone.
+- [ ] **I7** — `.gitignore` cleanup + scrub committed binaries from history.
+- [ ] **I1** — Orchestrator decomposition.
+- [ ] **I4** — `openwakeword` upstream PR or vendor fork to remove the monkey-patch in `ears.py`.
+- [ ] **Persona v2** — Final pre-MVP task after Ring 3; addresses identity consistency, refusal discipline, and filler-opener regressions from v1.
 
 ---
 
@@ -157,32 +171,31 @@ The following items were delivered as part of Ring 1 (make it installable):
   - `ipc_transport.py` at 78% (socket error paths; marginal miss, covered by integration tests)
   - 568 tests passing, 4 skipped
 
-## 16. No Fine-Tuning Pipeline
+## ~~16. No Fine-Tuning Pipeline~~ — PARTIALLY DONE (Ring 2)
 
 * **Context:** Lumi currently uses a stock base model with no personality, no Lumi identity, and no OS tool-call schema. Out of the box it will claim to be "a large language model by Microsoft" and refuse benign OS operations.
 * **Why it matters:** Without fine-tuning, the user experience is degraded. With fine-tuning, Lumi becomes a coherent character with predictable behavior.
 * **Items:**
-  - QLoRA training script (`scripts/train_lumi.py`) — SFTTrainer with 90/10 train/eval split, r=16 for personality, r=32 for tool-use
-  - Dataset generation (synthetic + manual + live mining) — ~1000–1200 examples across 6 categories
-  - GGUF export pipeline — merge LoRA → convert → quantize → evaluate (Q4_K_M vs FP16 baseline)
-  - Evaluation suite (`tests/test_model_quality.py`) — automated assertions (identity, tool calls, brevity) + manual checklist
+  - ~~QLoRA training script (`scripts/train_lumi.py`) — SFTTrainer with 90/10 train/eval split, r=16 for personality, r=32 for tool-use~~ — **DONE** (Ring 2)
+  - ~~Dataset generation (synthetic + manual + live mining) — ~1000–1200 examples across 6 categories~~ — **DONE** (Ring 2; `scripts/synth_dataset.py`)
+  - ~~GGUF export pipeline — merge LoRA → convert → quantize → evaluate (Q4_K_M vs FP16 baseline)~~ — **DONE** (Ring 2; `scripts/merge_and_quantize.py`; `[qlora]` extra in `pyproject.toml`). Requires `llama.cpp` built locally (pass `--llama-cpp-dir`).
+  - ~~Evaluation suite (`tests/test_model_quality.py`) — automated assertions (identity, tool calls, brevity) + manual checklist~~ — **DONE**
   - ~~Domain router (`src/llm/domain_router.py`) — Option A (regex, <1ms), Option B (embedding, ~20ms), decision gate at 20% miss rate~~ — **DONE** (shipped; `DomainRouter.classify()`, 6 domains, safety-first priority order; 39 tests passing)
   - LoRA hot-swap architecture — verify `llama_lora_adapter_set` API in `llama-cpp-python>=0.2.90`; fallback to ModelRegistry if unavailable
   - ~~ModelRegistry (`src/llm/model_registry.py`) — Full GGUF swapping (2.5–7s) if LoRA API missing~~ — **DONE** (shipped; `register()`, `load()`, `unload()`, `current_name`, `is_loaded`, `model`, `list_registered()`; 11 tests passing)
   - Versioning scheme: `lumi-phi35-v{N}-Q4_K_M.gguf` + specialist variants (`lumi-phi35-chat-v1`, `lumi-phi35-os-v1`)
-* **Phased rollout:** v1 (identity + brevity), v2 (+ OS tools), v3 (+ code + multi-turn), v4 (+ internet tools)
+* **v1 delivered (Ring 2):** `models/llm/lumi-phi35-v1-Q4_K_M.gguf` (2.4 GB, gitignored). Known quality regressions: identity consistency, refusal discipline, filler-opener patterns. These are deferred to **persona v2**, which is the final pre-MVP task after Ring 3.
+* **Phased rollout:** ~~v0~~ → **v1 DONE** (identity + brevity, with known regressions) → v2 (+ OS tools + regression fixes) → v3 (+ code + multi-turn) → v4 (+ internet tools)
 * **Reference:** See `ARCHITECTURE.md` Section 5 for full strategy: LoRA config table, dataset category specs, training workflow, tool palette, proof-of-concept experiment gate, and open questions.
 
 **GPU status (checked 2026-04-23):** RTX 4070, 12 GB VRAM — **UNBLOCKED** (requirement was ≥8 GB).
 
-**Backlog:**
-  - Wave H3 — QLoRA fine-tune (`scripts/finetune_lora.py`): ~~blocked on ≥8 GB VRAM GPU~~ **UNBLOCKED — RTX 4070 12 GB confirmed**
-  - Wave H4 — Merge LoRA adapter: blocked on Wave H3
-  - Wave H5 — Evaluate delta (Q4_K_M vs FP16 baseline): blocked on Wave H3
-  - Wave H6 — Hot-swap wiring into orchestrator: blocked on Wave H3
+**Still open:**
+  - Wave H6 — Hot-swap wiring into orchestrator (LoRA adapter live swap)
   - Wave I3 — Avatar sprite integration (`app/src/assets/`): blocked on external PNG delivery; target is React `LumiAvatar.tsx` component
   - TurboQuant activation — uncomment `kv_cache_quant: "turbo3"` in `config.yaml`: blocked on llama.cpp PR #21089 shipping in `llama-cpp-python`
   - Wave J1+ — pip-installable wheel: not yet scoped
+  - **Persona v2** — See Ring 3 section above
 
 ## ~~22. Phase 7: RAG Personal Knowledge Base~~ — DONE
 

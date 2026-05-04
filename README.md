@@ -11,9 +11,9 @@
 
 ## Current Status
 
-**Phases 1–9.5 + Ring 1 complete. MVP-track: voice assistant pipeline + OS tools + personal knowledge base RAG + runtime settings UI + Tauri/React frontend.**
+**Phases 1–9.5 + Ring 1 + Ring 2 + Ring 2.5 complete (closed 2026-05-04). Active work: Ring 3.**
 
-| Phase | Name | Status |
+| Phase / Ring | Name | Status |
 |---|---|---|
 | 1 | The Ears (Audio Input) | COMPLETE |
 | 2 | The Scribe (Transcription) | COMPLETE |
@@ -25,6 +25,8 @@
 | 8.5 | Settings UI (Runtime Config) | COMPLETE |
 | 9 | Avatar Artwork | NOT STARTED |
 | 9.5 | Tauri UI Overlay + Ring 1 | COMPLETE |
+| Ring 2 | Sidecar bundling, persona LoRA v1, streaming TTS, web + datetime/timer tools, E2E smoke test | COMPLETE |
+| Ring 3 | Privacy docs, conversation memory rotation, avatar artwork, repo hygiene | IN PROGRESS |
 
 ---
 
@@ -48,7 +50,9 @@
 - LLM token streaming to Tauri/React UI; per-viseme-group mouth animations (Kokoro lip-sync)
 - **Push-to-talk** global hotkey (default Ctrl+Space) as wake-word fallback (`src/audio/hotkey.py`, `PTTListener`; optional `pynput` dep); toggle via `audio.ptt_enabled` in settings
 - **First-run setup screen** — `SetupPanel` appears when required models are absent; lists missing items from `SystemStatusEvent`
-- ~900 tests passing (7 skipped); 80% coverage gate enforced in CI; behavioral regression contract suite in `tests/test_regression.py`
+- **Web search, datetime, and timer tools** — `WebSearchTool` (DuckDuckGo scrape), `DatetimeTool`, `TimerTool` available to the LLM via the tool-call pipeline
+- **Persona LoRA v1** — custom Lumi identity via QLoRA fine-tune (`models/llm/lumi-phi35-v1-Q4_K_M.gguf`, gitignored; produced by `scripts/train_lumi.py` + `scripts/merge_and_quantize.py`). Note: v1 has known quality regressions addressed in the upcoming persona v2.
+- ~1005 tests passing (4 skipped); 80% coverage gate enforced in CI; behavioral regression contract suite in `tests/test_regression.py`
 
 ---
 
@@ -132,6 +136,22 @@
 - [x] Cross-platform OS tools: macOS bundle dispatch, Windows adapters (pyperclip/pygetwindow)
 - [x] `SystemStatusEvent` — broadcasts capability flags + setup state to frontend on startup
 
+### Ring 2 — Complete (2026-05-04)
+
+- [x] Brain sidecar bundling — PyInstaller spec (`scripts/brain.spec`) + build script (`scripts/build_brain.sh`); Tauri `externalBin` integration
+- [x] Persona LoRA v1 — QLoRA training pipeline (`scripts/train_lumi.py` → `scripts/merge_and_quantize.py` → `scripts/eval_persona.py`); model at `models/llm/lumi-phi35-v1-Q4_K_M.gguf` (2.4 GB, gitignored). Note: v1 has known quality regressions (identity consistency, refusal discipline, filler-opener); v2 is the final pre-MVP task after Ring 3.
+- [x] Streaming TTS on sentence boundaries — latency benchmark script `scripts/measure_streaming_latency.py`
+- [x] Web search + datetime/timer tools — `src/tools/web_search.py`, `src/tools/datetime_tool.py`, `src/tools/timer_tool.py`
+- [x] End-to-end smoke test — `tests/integration/test_brain_e2e.py`
+
+### Ring 3 — In Progress
+
+- Privacy/threat-model docs (backing the "privacy-first" claim)
+- Conversation memory rotation + LLM summarisation
+- Avatar artwork or animated SVG fallback
+- Repository hygiene: delete `src/ipc/ws_bridge.py` stub, clean `.gitignore`, scrub committed binaries
+- Orchestrator decomposition
+
 ---
 
 ## Configuring Lumi
@@ -183,7 +203,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 | VAD | Silero VAD v5 |
 | STT | faster-whisper (int8, CPU) |
 | LLM | llama-cpp-python, Phi-3.5 Mini or Gemma 2 2B |
-| Fine-tuning (planned) | QLoRA + llama.cpp GGUF export |
+| Fine-tuning | QLoRA (`scripts/train_lumi.py` → `merge_and_quantize.py`); persona LoRA v1 shipped at `models/llm/lumi-phi35-v1-Q4_K_M.gguf` (v1 has known quality regressions being addressed in v2) |
 | TTS | Kokoro-82M ONNX |
 | Knowledge retrieval | Hybrid BM25+vec RAG (Phase 7); SQLite FTS5 + sqlite-vec; all-MiniLM-L6-v2 |
 | Frontend | Tauri 2 + React 18 (`app/`) |
@@ -196,4 +216,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 ## Pre-Alpha Notice
 
-This is a work-in-progress. Phases 1–9.5 and Ring 1 are complete: the full audio-to-speech pipeline, Tauri/React overlay, OS tools, personal knowledge base RAG, runtime settings UI, and first-run setup screen are all functional. The next milestone is Ring 2: Brain sidecar bundling, persona LoRA training, streaming TTS, and an E2E integration smoke test. See [TODO.md](TODO.md) and [MVP_REPORT.md](MVP_REPORT.md) for the active work backlog.
+This is a work-in-progress. Phases 1–9.5 and Rings 1–2 are complete: the full audio-to-speech pipeline, Tauri/React overlay, OS tools, personal knowledge base RAG, runtime settings UI, first-run setup screen, Brain sidecar bundling, persona LoRA v1 training pipeline, streaming TTS, web and datetime/timer tools, and an E2E smoke test are all functional. Active work is Ring 3: privacy/threat-model docs, conversation memory rotation, avatar artwork, and repository hygiene. See [TODO.md](TODO.md) and [MVP_REPORT.md](MVP_REPORT.md) for the active work backlog.

@@ -1,8 +1,21 @@
 """QLoRA fine-tuning pipeline for Project Lumi.
 
 Fine-tunes a HuggingFace causal-LM with 4-bit quantisation (bitsandbytes)
-and LoRA adapters (PEFT) using TRL's SFTTrainer on the synthetic ChatML
+and LoRA adapters (PEFT) using TRL's SFTTrainer (≥1.0) on the synthetic
 dataset produced by ``scripts/synth_dataset.py``.
+
+Key changes in Ring 2 (2026-05-04):
+  - Dataset format: ``{prompt, completion}`` columns (was ``{text}``) so TRL ≥1.0
+    auto-detects prompt-completion shape and applies completion-only loss.
+  - Training format: Uses ``tokenizer.apply_chat_template`` for Phi-3 native format
+    instead of hand-rolled ChatML. Critical: training and inference must use the
+    same format or token-level gibberish results.
+  - Config migration: ``TrainingArguments`` → ``SFTConfig``, ``tokenizer=`` →
+    ``processing_class=``, ``torch_dtype=`` → ``dtype=``, ``warmup_ratio`` →
+    ``warmup_steps=10``.
+  - New SFTConfig params: ``completion_only_loss=True``, ``packing=False``,
+    ``gradient_checkpointing=True`` + ``gradient_checkpointing_kwargs``.
+  - Learning rate: lowered ``2e-4`` → ``1e-4`` to stabilize completion-only loss.
 
 Requirements
 ------------
@@ -13,23 +26,24 @@ Usage
     # Quick smoke run (1 step, no GPU required if you have MPS/CPU):
     uv run python scripts/train_lumi.py --dry-run
 
-    # Full training on RTX 4070 12 GB:
+    # Full training on RTX 4070 12 GB (reproducible Ring 2 command):
+    PYTORCH_ALLOC_CONF=expandable_segments:True \\
     uv run python scripts/train_lumi.py \\
-        --base-model microsoft/Phi-3.5-mini-instruct \\
-        --dataset    data/finetune/synthetic_v0.jsonl \\
+        --base-model models/llm/checkpoints/phi-3.5-mini \\
+        --dataset    data/finetune/synthetic_v1.jsonl \\
         --output-dir models/lumi-lora-v1 \\
         --epochs 3 \\
-        --batch-size 4
+        --batch-size 2
 
 Output
 ------
-A LoRA adapter directory at ``--output-dir`` that can be loaded with:
-
-    from peft import PeftModel
-    model = PeftModel.from_pretrained(base_model, output_dir)
+A LoRA adapter directory at ``--output-dir`` containing:
+  - adapter_config.json, adapter_model.safetensors (PEFT LoRA weights)
+  - tokenizer.json, tokenizer_config.json, special_tokens_map.json
+  - (tokenizer.model copied by merge_and_quantize.py if SentencePiece)
 
 The directory can later be merged into the base weights for GGUF export with
-``scripts/merge_and_quantize.py`` (Phase 10).
+``scripts/merge_and_quantize.py`` (Ring 2 onwards).
 """
 
 from __future__ import annotations

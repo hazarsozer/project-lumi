@@ -4,7 +4,7 @@
 **Core Philosophy:** Architect First. Zero Cost. Local Only. Privacy by Default.
 
 > This document is the canonical design reference. README.md links here for deep dives.
-> Last updated to reflect actual state as of Phase 9.5 + Ring 1 complete (2026-05-02).
+> Last updated to reflect actual state as of Ring 2 complete (2026-05-04). Active work: Ring 3.
 
 ---
 
@@ -210,7 +210,7 @@ Hardware is auto-detected at startup to select the appropriate edition.
 | Config | `config.yaml` + `src/core/config.py` (`LumiConfig`, `AudioConfig`, `ScribeConfig`, `LLMConfig`, `TTSConfig`, `IPCConfig`, `load_config()`, `detect_edition()`). **Runtime config (Phase 8.5):** `src/core/config_runtime.py` — `ConfigManager` + `ConfigObserver` + `ConfigUpdateResult`; live apply via `dataclasses.replace()`; thread-safe RLock. `src/core/config_schema.py` — `FIELD_META` dict for 47 user-facing fields. `src/core/config_writer.py` — atomic YAML write (tmp + fsync + rename), `.bak` rollover. |
 | Logging | Python `logging` module via `src/core/logging_config.py` (`setup_logging()`) |
 | Startup Validation | `src/core/startup_check.py` (`run_startup_checks()`) — all checks return soft `list[str]` missing-item lists; `main.py` gates `Ears` on wake-word absence; includes `_check_llm_package()`, `_check_tts_package()`, `_check_rag_packages()` |
-| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, ~900 passed, 7 skipped at last run) |
+| Testing | `pytest` + `pytest-cov`, 80% coverage gate (`tests/` directory, ~1005 passed, 4 skipped at last run) |
 | CI | `.github/workflows/ci.yml` |
 
 ### OS Tools — The Hands (Phase 6)
@@ -484,7 +484,7 @@ Explicit for document search, automatic for knowledge queries. Post-Option B.
 
 ## 7. Actual Directory Structure
 
-Current state as of 2026-05-02 (Phase 9.5 + Ring 1 complete):
+Current state as of 2026-05-04 (Ring 2 complete):
 
 ```
 Lumi/
@@ -493,7 +493,10 @@ Lumi/
 │       └── ci.yml              # CI pipeline (lint, type check, pytest --cov-fail-under=80)
 ├── .venv/                      # Managed by uv (not committed)
 ├── models/                     # ONNX/GGUF model binaries (not committed)
-│   └── hey_lumi.onnx           # Custom wake word model
+│   ├── hey_lumi.onnx           # Custom wake word model
+│   ├── llm/                    # GGUF model files (not committed; download separately)
+│   │   └── lumi-phi35-v1-Q4_K_M.gguf  # Persona LoRA v1 (2.4 GB; produced by merge_and_quantize.py)
+│   └── lumi-lora-v1/           # Raw LoRA adapter weights (not committed)
 ├── app/                        # Tauri 2 + React 18 frontend
 │   ├── src/
 │   │   ├── components/
@@ -571,15 +574,30 @@ Lumi/
 │   ├── test_ears_recovery.py       # EarsErrorEvent, retry loop, orchestrator handler
 │   ├── test_e2e_smoke.py           # End-to-end smoke tests
 │   ├── test_kokoro_phoneme_discovery.py # Kokoro phoneme tuple format discovery
+│   ├── test_datetime_tool.py       # DatetimeTool (Ring 2)
+│   ├── test_timer_tool.py          # TimerTool (Ring 2)
+│   ├── test_web_search_tool.py     # WebSearchTool (Ring 2)
+│   ├── test_hotkey.py              # PTTListener unit tests
+│   ├── test_inference_timeout.py   # LLM inference timeout path
+│   ├── test_setup_wizard.py        # scripts/setup_wizard.py smoke tests
+│   ├── test_smoke_live.py          # scripts/smoke_live.py smoke tests
+│   ├── test_synth_dataset.py       # scripts/synth_dataset.py unit tests
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── test_config_runtime.py  # ConfigManager, ConfigObserver, ConfigUpdateResult
 │   │   ├── test_config_writer.py   # Atomic YAML write, .bak rollover
 │   │   ├── test_event_bridge_config.py # config_schema_request/config_update wire events
-│   │   └── test_orchestrator_reconfigure.py # Live config apply via Orchestrator
+│   │   ├── test_event_bridge_outbound_coverage.py # Full outbound coverage sweep
+│   │   ├── test_hotreload_observers.py # Hot-reload observer wiring
+│   │   ├── test_orchestrator_reconfigure.py # Live config apply via Orchestrator
+│   │   └── test_rag_status_wiring.py # RAG status event routing
+│   ├── ipc/
+│   │   ├── __init__.py
+│   │   └── test_ws_bridge.py       # ws_bridge deprecated stub smoke test
 │   └── integration/
 │       ├── __init__.py
-│       └── test_ipc_full_turn.py  # Full-turn IPC integration tests over real WebSocket
+│       ├── test_brain_e2e.py       # Full Brain end-to-end integration smoke test (Ring 2)
+│       └── test_ipc_full_turn.py   # Full-turn IPC integration tests over real WebSocket
 ├── src/
 │   ├── __init__.py
 │   ├── main.py                 # Thin bootstrap: logging → config → checks → orchestrator
@@ -595,6 +613,9 @@ Lumi/
 │   │   ├── scribe.py           # faster-whisper STT transcription; posts TranscriptReadyEvent
 │   │   └── speaker.py          # SpeakerThread: daemon audio playback with resampling;
 │   │                           #   posts SpeechCompletedEvent on final chunk
+│   ├── ipc/
+│   │   ├── __init__.py
+│   │   └── ws_bridge.py        # DEPRECATED stub (kept to avoid stale import errors; will be deleted in Ring 3 I7)
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── config.py           # LumiConfig, AudioConfig, ScribeConfig, LLMConfig, TTSConfig, IPCConfig,
@@ -645,6 +666,17 @@ Lumi/
 │       │                       #   posts RAGRetrievalEvent after retrieval
 │       ├── reflex_router.py    # Regex fast-path: greetings, time queries, RAG intent
 │       └── tool_call_parser.py # <tool_call> extractor + JSON recovery (parse_tool_calls)
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   ├── base.py             # Tool Protocol + ToolResult frozen dataclass
+│   │   ├── datetime_tool.py    # DatetimeTool: current date/time queries (Ring 2)
+│   │   ├── executor.py         # ToolExecutor: allowlist gate + threading.Event timeout + cancel flag
+│   │   ├── os_actions.py       # AppLaunchTool, ClipboardTool, FileInfoTool, WindowListTool
+│   │   ├── rag_ingest.py       # RagIngestTool: trigger document ingestion via tool call
+│   │   ├── registry.py         # ToolRegistry: register()/get()/list_tools()
+│   │   ├── timer_tool.py       # TimerTool: set and cancel countdown timers (Ring 2)
+│   │   ├── vision.py           # ScreenshotTool: grim→scrot→Pillow fallback; moondream2 GGUF description
+│   │   └── web_search.py       # WebSearchTool: DuckDuckGo scrape via requests + BeautifulSoup (Ring 2)
 │   └── rag/
 │       ├── __init__.py         # Public exports: DocumentStore, RAGRetriever, Embedder, chunk_text
 │       ├── chunker.py          # chunk_text() — sliding-window text splitting
@@ -656,12 +688,17 @@ Lumi/
 │       ├── schema.sql          # SQLite schema: documents, chunks, chunks_fts, vec_chunks
 │       └── store.py            # DocumentStore: FTS5 BM25 + sqlite-vec kNN; WAL; thread-local conn
 ├── scripts/
+│   ├── brain.spec              # PyInstaller spec for standalone Brain sidecar binary (Ring 2)
+│   ├── build_brain.sh          # Shell script: PyInstaller build + Tauri externalBin integration (Ring 2)
 │   ├── check_config_schema.py  # CLI: print config schema fields and current values
 │   ├── doctor.py               # Pre-flight diagnostics: check deps, model files, hardware
 │   ├── eval_persona.py         # 20 prompts × 8 criteria persona eval; offline (--dry-run) + live (--live) modes
 │   ├── ingest_docs.py          # CLI: chunk + embed + store personal documents into RAG store
 │   ├── measure_base_latency.py # Benchmark: LLM-only p95 gate (< 1.7 s; Phase 7 entry gate)
 │   ├── measure_rag_latency.py  # Benchmark: retrieval+LLM p95 gate (< 2.0 s)
+│   ├── measure_streaming_latency.py # Benchmark: streaming TTS sentence-boundary latency (Ring 2)
+│   ├── merge_and_quantize.py   # LoRA merge → GGUF convert → Q4_K_M quantize pipeline (Ring 2);
+│   │                           #   requires llama.cpp binaries (pass --llama-cpp-dir or put on PATH)
 │   ├── run_lumi.sh             # Shell launcher: sets up env and starts Python Brain
 │   ├── setup_wizard.py         # Guided first-run configuration wizard
 │   ├── smoke_live.py           # Manual smoke test: real microphone + live model (requires hardware)
@@ -673,14 +710,7 @@ Lumi/
 ├── README.md
 ├── SUGGESTIONS.md              # Known issues and improvement plans
 ├── TODO.md
-└── pyproject.toml              # runtime / llm / training / tts / dev optional dep groups
-```
-
-Planned additions (not yet created):
-
-```
-scripts/
-└── merge_lora.py               # Adapter merge + GGUF export (Phase 3+; blocked on train_lumi.py Wave H3)
+└── pyproject.toml              # runtime / llm / training / tts / qlora / rag / ptt / dev optional dep groups
 ```
 
 ---
@@ -704,7 +734,7 @@ scripts/
 - [x] Context injection (initial prompt for proper noun accuracy)
 - [x] Command parsing infrastructure (event-driven pipeline wired; `CommandResultEvent` defined)
 
-### Phase 3: The Brain (Intelligence) — IN PROGRESS
+### Phase 3: The Brain (Intelligence) — COMPLETE
 *Goal: Smart decision-making using local LLMs.*
 
 **Foundations — COMPLETE:**
@@ -816,4 +846,27 @@ scripts/
 - [x] `src/tools/os_actions.py` — macOS bundle dispatch (`_launch_macos_bundle()`), `pyperclip`/`pygetwindow` Windows adapters
 - [x] `config.yaml` — `ipc.enabled: true` default; `audio.ptt_enabled`, `audio.ptt_hotkey` keys added
 - [x] `src/core/config_schema.py` — `audio.wake_word_enabled`, `audio.ptt_enabled`, `audio.ptt_hotkey` added to `FIELD_META`
-- [x] 900 tests passing, 7 skipped; >80% coverage
+- [x] ~1005 tests passing, 4 skipped; >80% coverage
+
+### Ring 2 — COMPLETE (2026-05-04)
+*Goal: Shipable binary, persona identity, streaming TTS, web/datetime/timer tools, E2E test.*
+
+- [x] Brain sidecar bundling — `scripts/brain.spec` (PyInstaller spec) + `scripts/build_brain.sh`; Tauri `externalBin` integration
+- [x] Persona LoRA v1 — QLoRA training pipeline fully debugged (`scripts/train_lumi.py` → `scripts/merge_and_quantize.py` → `scripts/eval_persona.py`); merged GGUF at `models/llm/lumi-phi35-v1-Q4_K_M.gguf` (2.4 GB, gitignored); `[qlora]` extra added to `pyproject.toml`. Known quality regressions (identity, refusal, filler-opener) deferred to persona v2.
+- [x] Streaming TTS on sentence boundaries; `scripts/measure_streaming_latency.py` benchmark
+- [x] Web search tool — `src/tools/web_search.py` (`WebSearchTool`, DuckDuckGo scrape via `requests` + `beautifulsoup4`)
+- [x] Datetime tool — `src/tools/datetime_tool.py`
+- [x] Timer tool — `src/tools/timer_tool.py`
+- [x] End-to-end integration smoke test — `tests/integration/test_brain_e2e.py`
+
+### Ring 3 — IN PROGRESS
+*Goal: Privacy-first credibility, memory persistence, repo hygiene.*
+
+- [ ] Privacy and threat-model docs (I2/I3) — backing the "privacy-first" claim
+- [ ] Conversation memory rotation + LLM summarisation (I5)
+- [ ] Avatar artwork or animated SVG fallback (C2)
+- [ ] Delete `src/ipc/ws_bridge.py` deprecated stub; verify `ui/` (Godot legacy) is fully removed (I6)
+- [ ] `.gitignore` cleanup + scrub committed binaries (I7)
+- [ ] Orchestrator decomposition (I1)
+- [ ] `openwakeword` upstream PR or vendor fork to remove monkey-patch (I4)
+- [ ] Persona v2 — final pre-MVP task after Ring 3; resolves known v1 regressions

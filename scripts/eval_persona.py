@@ -1,15 +1,37 @@
-"""
-Offline persona evaluation harness for Project Lumi.
+"""Offline persona evaluation harness for Project Lumi.
+
+Evaluates model responses against a comprehensive criterion catalogue:
+  - Tool call JSON validity
+  - Conciseness and filler avoidance
+  - Markdown list/code block handling
+  - Honesty (knowing when to say "I don't know")
+  - Privacy/context awareness
+  - Conversational quality
+  - Edge case handling (empty/overlong inputs)
+
+In offline mode (default) stub responses are used so CI can run without a model.
+Pass --live to route prompts through the real Lumi LLM pipeline (requires a
+loaded Brain process on ws://127.0.0.1:5556).
+
+Output: JSON results file (Ring 2 evidence at results/eval_base_phi35.json
+and results/eval_lumi_v1.json, both scoring 75% on regex criteria).
 
 Usage
 -----
+    # Offline mode (uses stub responses, no model required):
     uv run python scripts/eval_persona.py --output results/eval_baseline.json
-    uv run python scripts/eval_persona.py --dry-run
-    uv run python scripts/eval_persona.py --output results/eval_live.json --live
 
-In offline mode (default) stub responses are used so CI can run this script
-without a model loaded.  Pass --live to route prompts through the real LLM
-pipeline (requires a loaded model).
+    # Offline smoke test:
+    uv run python scripts/eval_persona.py --dry-run
+
+    # Live mode against running Lumi Brain (requires loaded model):
+    uv run python scripts/eval_persona.py --output results/eval_lumi_v1.json --live
+
+Ring 2 Fix (2026-05-04):
+  - Fixed criterion_tool_call_json_valid: now checks ``isinstance(data, dict)``
+    before accessing "tool"/"args" keys. Without this, model responses that
+    returned raw numbers (e.g., "30" for math prompts) crashed with:
+    TypeError: argument of type 'int' is not iterable.
 """
 
 from __future__ import annotations

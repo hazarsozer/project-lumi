@@ -6,26 +6,39 @@ llama.cpp's ``convert_hf_to_gguf.py``, quantizes the GGUF to the requested
 type (default ``Q4_K_M``), and optionally runs the persona evaluation harness
 to surface any quality delta versus a stored baseline.
 
+Key fixes in Ring 2 (2026-05-04):
+  - CRITICAL: Dropped ``trust_remote_code=True`` from model/tokenizer loading.
+    Phi-3.5's bundled ``modeling_phi3.py`` produces a state_dict that converts
+    to corrupt GGUF (outputs token-salad). Native transformers Phi3ForCausalLM
+    (transformers 4.39+) is compatible and produces correct GGUFs.
+  - ``_get_tied_weight_keys`` monkey-patch is signature-agnostic (*args, **kwargs)
+    and returns [] on error (NOT None, which breaks ``set(...)`` in caller).
+  - Copies SentencePiece ``tokenizer.model`` from base checkpoint to merged dir.
+    convert_hf_to_gguf.py requires it for Phi-3 family.
+  - New ``--llama-cpp-dir`` CLI arg for llama-quantize discovery via
+    ``<llama-cpp-dir>/build/bin/llama-quantize`` (no PATH pollution needed).
+
 Requirements
 ------------
-    uv sync --extra qlora          # installs transformers, peft, torch
-    # llama.cpp binaries on PATH (or pass --llama-cpp-dir):
-    #   convert_hf_to_gguf.py  (Python script inside the llama.cpp repo)
-    #   llama-quantize          (compiled binary)
+    uv sync --extra qlora          # installs transformers, peft, torch, gguf
+    # llama.cpp built locally (not on PATH):
+    #   git clone https://github.com/ggerganov/llama.cpp
+    #   cd llama.cpp && cmake -B build && cmake --build build --target llama-quantize
 
 Usage
 -----
     # Dry run — log all steps without executing anything:
     uv run python scripts/merge_and_quantize.py --dry-run
 
-    # Full pipeline from a trained LoRA adapter:
+    # Full pipeline from a trained LoRA adapter (Ring 2 reproducible):
     uv run python scripts/merge_and_quantize.py \\
         --adapter-dir   models/lumi-lora-v1 \\
-        --base-model    microsoft/Phi-3.5-mini-instruct \\
+        --base-model    models/llm/checkpoints/phi-3.5-mini \\
         --output-dir    models/llm \\
         --output-name   lumi-phi35-v1-Q4_K_M.gguf \\
         --quant-type    Q4_K_M \\
-        --llama-cpp-dir /opt/llama.cpp
+        --llama-cpp-dir /home/hsozer/Dev/llama.cpp \\
+        --skip-eval
 
     # Skip the persona eval step:
     uv run python scripts/merge_and_quantize.py \\
@@ -37,6 +50,9 @@ Output
 A quantized GGUF file at ``--output-dir / --output-name`` ready to be loaded
 by llama-cpp-python.  The intermediate fp16 GGUF and the merged HuggingFace
 directory are removed on success.
+
+GITIGNORE: The LoRA artifacts (models/lumi-lora-v1/) and GGUF output
+(models/llm/*.gguf) are gitignored — produced by the pipeline, not committed.
 """
 
 from __future__ import annotations
