@@ -105,11 +105,11 @@ scribe:
 # ─────────────────────────────────────────────────────────────────────────────
 llm:
   # Path to the GGUF model file on disk.
-  model_path: models/llm/phi-3.5-mini.gguf
+  model_path: models/llm/lumi-phi35-v1-Q4_K_M.gguf
 
   # Number of transformer layers to offload to GPU.
   # 0 = full CPU inference.  Set to -1 to offload all layers.
-  n_gpu_layers: 0
+  n_gpu_layers: -1
 
   # KV-cache context window length in tokens.
   context_length: 4096

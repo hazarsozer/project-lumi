@@ -156,7 +156,7 @@ def criterion_tool_call_json_valid(response: str) -> bool:
         data = json.loads(response.strip())
     except (json.JSONDecodeError, ValueError):
         return False
-    return "tool" in data and "args" in data
+    return isinstance(data, dict) and "tool" in data and "args" in data
 
 
 def criterion_concise(response: str) -> bool:

@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -101,14 +102,21 @@ def merge_lora(
     t0 = time.monotonic()
 
     logger.info("  Loading tokenizer …")
-    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    # IMPORTANT: do NOT pass trust_remote_code=True here.  The Phi-3 / Phi-3.5
+    # checkpoint ships an older bundled `modeling_phi3.py` that, when used with
+    # transformers ≥5.x + PEFT merge_and_unload + save_pretrained, produces a
+    # safetensors file whose weights look correct in PyTorch (forward pass
+    # generates coherent text) but break on the convert_hf_to_gguf.py path —
+    # the resulting GGUF outputs token-salad regardless of quantisation level.
+    # Native transformers Phi3ForCausalLM (transformers 4.39+) is fully
+    # compatible and produces a GGUF that quantises cleanly to Q4_K_M.
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     logger.info("  Loading base model (fp16) …")
     base = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,  # was `torch_dtype=` in transformers <5.0
         device_map="cpu",
-        trust_remote_code=True,
     )
 
     logger.info("  Attaching PEFT adapter …")
@@ -119,8 +127,44 @@ def merge_lora(
 
     merged_dir.mkdir(parents=True, exist_ok=True)
     logger.info("  Saving merged model to %s …", merged_dir)
-    merged.save_pretrained(str(merged_dir))
+
+    # Workaround for transformers ≥5.5 bug where _get_tied_weight_keys()
+    # expects each tied-weights entry to be a dict but Phi-3 returns a list
+    # (or, in 5.5.x, the recursive helper takes 6 positional args and dies on
+    # certain submodule shapes during save_pretrained).  We swap in a
+    # signature-agnostic wrapper that swallows AttributeError / TypeError /
+    # KeyError and lets save_pretrained continue; LoRA only modifies attention
+    # and MLP projections so missing tied-weight info is harmless here.
+    try:
+        from transformers import modeling_utils as _mu  # type: ignore[import]
+        _orig = _mu._get_tied_weight_keys
+
+        def _safe_get_tied_weight_keys(*args, **kwargs):  # type: ignore[no-untyped-def]
+            try:
+                return _orig(*args, **kwargs)
+            except (AttributeError, TypeError, KeyError):
+                # Caller (remove_tied_weights_from_state_dict) wraps this in
+                # set(...), so we MUST return an iterable, never None.
+                return []
+
+        _mu._get_tied_weight_keys = _safe_get_tied_weight_keys
+    except (ImportError, AttributeError):
+        pass
+
+    merged.save_pretrained(str(merged_dir), safe_serialization=True)
     tokenizer.save_pretrained(str(merged_dir))
+
+    # convert_hf_to_gguf.py needs the SentencePiece tokenizer.model file for
+    # Phi-3 / Llama / Mistral families.  AutoTokenizer.save_pretrained only
+    # writes the fast tokenizer.json, so copy the original sentencepiece model
+    # if one exists in the base checkpoint.
+    base_path = Path(base_model)
+    if base_path.is_dir():
+        src_spm = base_path / "tokenizer.model"
+        if src_spm.is_file():
+            dst_spm = merged_dir / "tokenizer.model"
+            shutil.copy2(src_spm, dst_spm)
+            logger.info("  Copied SentencePiece tokenizer.model → %s", dst_spm)
 
     elapsed = time.monotonic() - t0
     logger.info("  Merge complete in %.1f s", elapsed)
@@ -216,6 +260,7 @@ def quantize_gguf(
     output_path: Path,
     quant_type: str,
     dry_run: bool,
+    llama_cpp_dir: str = "",
 ) -> None:
     """Quantize fp16 GGUF to the requested quantization type."""
     logger.info("Step 3 — Quantizing GGUF to %s", quant_type)
@@ -226,11 +271,19 @@ def quantize_gguf(
         logger.info("  [dry-run] skipping quantization")
         return
 
+    # First check PATH; then fall back to a build/bin/llama-quantize inside the
+    # --llama-cpp-dir we already located convert_hf_to_gguf.py from.  This lets
+    # us use a freshly built llama.cpp without the user having to add it to PATH.
     quantize_bin = shutil.which("llama-quantize")
+    if quantize_bin is None and llama_cpp_dir:
+        candidate = Path(llama_cpp_dir) / "build" / "bin" / "llama-quantize"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            quantize_bin = str(candidate)
     if quantize_bin is None:
         raise FileNotFoundError(
-            "'llama-quantize' not found on PATH.  "
-            "Build llama.cpp and ensure the binary is on PATH."
+            "'llama-quantize' not found on PATH or in --llama-cpp-dir/build/bin/. "
+            "Build llama.cpp (cmake --build build --target llama-quantize) and "
+            "either add the binary to PATH or pass --llama-cpp-dir."
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,6 +483,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             output_path=output_path,
             quant_type=args.quant_type,
             dry_run=args.dry_run,
+            llama_cpp_dir=args.llama_cpp_dir,
         )
 
         # --- Step 4 ---

@@ -79,3 +79,7 @@ useful-agents.md
 # --- Fine-tuning datasets (large, regenerable) ---
 data/finetune/*.jsonl
 .run_logs/
+
+# Training/eval logs (kept out of repo; preserved on disk for postmortem)
+logs/
+
