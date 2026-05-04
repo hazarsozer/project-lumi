@@ -138,8 +138,11 @@ class HandshakeHandler:
         """Call for every raw incoming frame from the client.
 
         Inspects the frame:
-        - If it is a valid hello_ack and handshake is pending → consume it.
-        - Otherwise → forward to the downstream callback.
+        - If handshake is pending (not yet complete):
+            * hello_ack → consume (token verified here when expected_token is set).
+            * Anything else + token required → DROP (prevents auth bypass).
+            * Anything else + no token required → forward (dev/CI backward compat).
+        - Handshake already done → forward unconditionally.
 
         Safe to call from any thread.
 
@@ -152,7 +155,14 @@ class HandshakeHandler:
                 if ack is not None:
                     self._consume_hello_ack(ack)
                     return
-                # Not a hello_ack — fall through to downstream.
+                # Not a hello_ack while handshake is still pending.
+                # With token auth enabled: drop silently (no bypass).
+                # Without token auth: forward for backward compatibility (dev mode).
+                if self._expected_token is not None:
+                    logger.debug(
+                        "Pre-handshake frame dropped (auth required, token not yet verified)."
+                    )
+                    return
 
             downstream = self._downstream
 
@@ -239,7 +249,11 @@ class HandshakeHandler:
             logger.debug("IPC handshake complete (ok, remote=%s).", remote_version)
 
     def _on_timeout(self) -> None:
-        """Called by the Timer when no hello_ack is received within the deadline."""
+        """Called by the Timer when no hello_ack is received within the deadline.
+
+        With token auth (expected_token set): fail closed — disconnect the client.
+        Without token auth: fail open — log a warning and continue (dev/CI compat).
+        """
         with self._lock:
             if self._handshake_done:
                 # Ack arrived concurrently with the timer firing — ignore.
@@ -248,9 +262,18 @@ class HandshakeHandler:
             self._handshake_pending = False
             self._handshake_done = True
             self._timeout_timer = None
+            token_required = self._expected_token is not None
 
-        logger.warning(
-            "IPC handshake timeout: no hello_ack received within %.1fs; "
-            "continuing without handshake.",
-            HANDSHAKE_TIMEOUT_S,
-        )
+        if token_required:
+            logger.warning(
+                "IPC handshake timeout: no hello_ack within %.1fs with token auth "
+                "enabled — disconnecting client (fail closed).",
+                HANDSHAKE_TIMEOUT_S,
+            )
+            self._transport.disconnect_client()
+        else:
+            logger.warning(
+                "IPC handshake timeout: no hello_ack received within %.1fs; "
+                "continuing without handshake.",
+                HANDSHAKE_TIMEOUT_S,
+            )

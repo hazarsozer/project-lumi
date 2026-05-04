@@ -335,8 +335,8 @@ FIELD_META: dict[str, dict[str, Any]] = {
     "ipc.enabled": {
         "label": "Enable IPC Server",
         "help": (
-            "When enabled, starts a ZeroMQ TCP server to communicate with "
-            "the Godot frontend. Keep disabled for audio-only or CI runs."
+            "When enabled, starts a WebSocket server on 127.0.0.1 to communicate "
+            "with the Tauri/React frontend. Keep disabled for audio-only or CI runs."
         ),
         "control": "toggle",
         "restart_required": True,
@@ -344,7 +344,7 @@ FIELD_META: dict[str, dict[str, Any]] = {
     "ipc.address": {
         "label": "IPC Address",
         "help": (
-            "Host address for the TCP IPC socket. "
+            "Host address for the WebSocket IPC server. "
             "For local-only use keep '127.0.0.1'."
         ),
         "control": "text",
@@ -352,10 +352,20 @@ FIELD_META: dict[str, dict[str, Any]] = {
     },
     "ipc.port": {
         "label": "IPC Port",
-        "help": "Port number for the TCP IPC socket [1024–65535].",
+        "help": "Port number for the WebSocket IPC server [1024–65535].",
         "control": "number",
         "min": 1024,
         "max": 65535,
+        "restart_required": True,
+    },
+    "ipc.token_path": {
+        "label": "IPC Token File Path",
+        "help": (
+            "Path where the Brain writes the single-use bearer token on startup "
+            "(chmod 0600). The Tauri frontend reads this to authenticate the "
+            "WebSocket handshake. Change only if the default conflicts with your setup."
+        ),
+        "control": "text",
         "restart_required": True,
     },
     # -------------------------------------------------------------------------

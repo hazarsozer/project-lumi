@@ -410,3 +410,155 @@ def test_concurrent_message_delivery_is_safe() -> None:
         t.join(timeout=5.0)
 
     assert not errors, f"Thread errors: {errors}"
+
+
+# ===========================================================================
+# Token-auth tests (Ring 3.5 — R3.f)
+# ===========================================================================
+
+
+def _ack_with_token(token: str, status: str = "ok") -> bytes:
+    return _encode_frame(
+        {"type": "hello_ack", "version": HELLO_VERSION, "status": status, "token": token}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Correct token accepted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_correct_token_in_hello_ack_accepted(caplog: pytest.LogCaptureFixture) -> None:
+    """hello_ack with the correct token must complete the handshake and NOT disconnect."""
+    transport = _make_transport()
+    handler = HandshakeHandler(transport, expected_token="good_token")
+
+    received: list[bytes] = []
+    handler.set_downstream_callback(received.append)
+    handler.on_client_connected()
+
+    handler.on_message_received(_ack_with_token("good_token"))
+
+    assert handler.is_handshake_complete()
+    transport.disconnect_client.assert_not_called()
+
+    # Post-handshake messages flow normally.
+    msg = _encode_frame({"event": "user_text", "payload": {}})
+    handler.on_message_received(msg)
+    assert received == [msg]
+
+
+# ---------------------------------------------------------------------------
+# Wrong token → disconnect
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_wrong_token_in_hello_ack_disconnects() -> None:
+    """hello_ack with a wrong token must call disconnect_client()."""
+    transport = _make_transport()
+    handler = HandshakeHandler(transport, expected_token="expected")
+
+    handler.on_client_connected()
+    handler.on_message_received(_ack_with_token("wrong"))
+
+    transport.disconnect_client.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Missing token → disconnect (empty string)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_missing_token_in_hello_ack_disconnects() -> None:
+    """hello_ack without a token field must call disconnect_client()."""
+    transport = _make_transport()
+    handler = HandshakeHandler(transport, expected_token="expected")
+
+    handler.on_client_connected()
+    # hello_ack with no token field at all.
+    handler.on_message_received(_ack_frame(status="ok"))
+
+    transport.disconnect_client.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Pre-handshake non-hello_ack frame → dropped when token required
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_pre_handshake_frame_dropped_when_token_required() -> None:
+    """Non-hello_ack frames received before handshake completes must be dropped when token auth is on."""
+    transport = _make_transport()
+    handler = HandshakeHandler(transport, expected_token="token")
+
+    received: list[bytes] = []
+    handler.set_downstream_callback(received.append)
+    handler.on_client_connected()
+
+    # Send a user_text event before hello_ack — must be dropped.
+    evil_frame = _encode_frame({"event": "user_text", "payload": {"text": "launch firefox"}})
+    handler.on_message_received(evil_frame)
+
+    assert received == [], "Pre-handshake frame must not reach downstream when token required"
+
+
+# ---------------------------------------------------------------------------
+# Pre-handshake non-hello_ack frame → forwarded when no token (dev mode)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_pre_handshake_frame_forwarded_without_token() -> None:
+    """Existing behavior: pre-handshake frames forwarded when no token configured (dev/CI compat)."""
+    transport = _make_transport()
+    handler = HandshakeHandler(transport)  # no expected_token
+
+    received: list[bytes] = []
+    handler.set_downstream_callback(received.append)
+    handler.on_client_connected()
+
+    msg = _encode_frame({"event": "user_text", "payload": {"text": "hi"}})
+    handler.on_message_received(msg)
+
+    assert received == [msg]
+
+
+# ---------------------------------------------------------------------------
+# Timeout with token → disconnect (fail closed)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_timeout_with_token_disconnects() -> None:
+    """When expected_token is set and no hello_ack arrives, timeout must disconnect the client."""
+    transport = _make_transport()
+
+    with patch("src.core.handshake.HANDSHAKE_TIMEOUT_S", 0.05):
+        handler = HandshakeHandler(transport, expected_token="token")
+        handler.on_client_connected()
+        time.sleep(0.2)  # let the timer fire
+
+    transport.disconnect_client.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Timeout without token → warns and continues (old behavior preserved)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_timeout_without_token_continues() -> None:
+    """Without expected_token, timeout must NOT disconnect — existing behaviour preserved."""
+    transport = _make_transport()
+
+    with patch("src.core.handshake.HANDSHAKE_TIMEOUT_S", 0.05):
+        handler = HandshakeHandler(transport)
+        handler.on_client_connected()
+        time.sleep(0.2)
+
+    transport.disconnect_client.assert_not_called()
+    assert handler.is_handshake_complete()

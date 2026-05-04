@@ -25,7 +25,7 @@ from src.audio.ears import Ears
 from src.audio.mouth import KokoroTTS
 from src.audio.scribe import Scribe
 from src.audio.speaker import SpeakerThread
-from src.core.config import LumiConfig
+from src.core.config import LLMConfig, LumiConfig
 from src.core.config_runtime import ConfigManager, ConfigUpdateResult
 from src.core.config_schema import FIELD_META
 from src.core.event_bridge import EventBridge
@@ -147,7 +147,10 @@ class Orchestrator:
         self._reflex_router: ReflexRouter = ReflexRouter()
         self._model_loader: ModelLoader = ModelLoader()
         self._prompt_engine: PromptEngine = PromptEngine(config=config)
-        self._memory: ConversationMemory = ConversationMemory(config.llm.memory_dir)
+        self._memory: ConversationMemory = ConversationMemory(
+            config.llm.memory_dir,
+            summariser=self._make_summariser(config.llm),
+        )
         self._memory.load()
         # RAG subsystem — built only when enabled in config.
         self._rag_runtime_enabled: bool = config.rag.enabled
@@ -298,7 +301,8 @@ class Orchestrator:
             # double registration by only registering for the injected path.
             if event_bridge is not None:
                 self._state_machine.register_observer(self._event_bridge.on_state_change)
-            self.register_handler(VisemeEvent, self._event_bridge.on_tts_viseme)
+            if config.audio.send_visemes:
+                self.register_handler(VisemeEvent, self._event_bridge.on_tts_viseme)
             self.register_handler(SpeechCompletedEvent, self._event_bridge.on_tts_stop)
             self.register_handler(TranscriptReadyEvent, self._event_bridge.on_transcript)
             self.register_handler(LLMResponseReadyEvent, self._event_bridge.on_tts_start)
@@ -311,6 +315,44 @@ class Orchestrator:
     def state_machine(self) -> StateMachine:
         """Expose the state machine for observer registration."""
         return self._state_machine
+
+    def _make_summariser(
+        self, llm_config: LLMConfig
+    ) -> Callable[[list[dict[str, str]]], str]:
+        """Return a summariser callable for ConversationMemory rotation.
+
+        The callable uses the already-loaded Llama model directly.  It is only
+        invoked from the inference thread after token generation is complete,
+        so there is no lock re-entry and the model is idle.
+
+        Falls back gracefully (raises RuntimeError) when the model is not yet
+        loaded — ConversationMemory then truncates instead of summarising.
+        """
+        model_loader = self._model_loader
+        max_tokens = min(150, llm_config.max_tokens)
+
+        def _summarise(turns: list[dict[str, str]]) -> str:
+            if not model_loader.is_loaded:
+                raise RuntimeError(
+                    "Model not yet loaded — skipping summarisation, falling back to truncation"
+                )
+            turns_text = "\n".join(
+                f"{t['role'].upper()}: {t['content']}" for t in turns
+            )
+            prompt = (
+                "Summarize the following conversation in 2-3 concise sentences. "
+                "Focus on key facts and context needed to continue the conversation.\n\n"
+                f"{turns_text}\n\nSummary:"
+            )
+            result = model_loader.model.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=0.1,
+                stream=False,
+            )
+            return str(result["choices"][0]["message"]["content"]).strip()
+
+        return _summarise
 
     @property
     def llm_cancel_flag(self) -> threading.Event:

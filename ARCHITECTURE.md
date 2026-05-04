@@ -834,7 +834,7 @@ Lumi/
 - [x] `tests/core/` — `test_config_runtime.py`, `test_config_writer.py`, `test_event_bridge_config.py`, `test_orchestrator_reconfigure.py`
 
 ### Phase 9.5: Tauri UI Overlay + Ring 1 — COMPLETE
-*Goal: Tauri 2 + React 18 frontend replaces Godot. Direct WebSocket IPC. First-run UX. Cross-platform tools.*
+*Goal: Tauri 2 + React 18 frontend replaced Godot. Direct WebSocket IPC. First-run UX. Cross-platform tools.*
 
 - [x] `src/core/ws_transport.py` (`WSTransport`) — asyncio WebSocket server replaces `IPCTransport`; Brain exposes WS directly on `ws://127.0.0.1:5556`; no bridge subprocess required
 - [x] `app/` — Tauri 2 + React 18 frontend: `OverlayRoot`, `ChatRoot`, `SettingsRoot` windows; `useLumiState` hook; `IBrainClient` WebSocket client
@@ -859,14 +859,17 @@ Lumi/
 - [x] Timer tool — `src/tools/timer_tool.py`
 - [x] End-to-end integration smoke test — `tests/integration/test_brain_e2e.py`
 
-### Ring 3 — IN PROGRESS
+### Ring 3 — COMPLETE (2026-05-04, post Ring 3.5 corrective pass)
 *Goal: Privacy-first credibility, memory persistence, repo hygiene.*
 
-- [ ] Privacy and threat-model docs (I2/I3) — backing the "privacy-first" claim
-- [ ] Conversation memory rotation + LLM summarisation (I5)
-- [ ] Avatar artwork or animated SVG fallback (C2)
-- [ ] Delete `src/ipc/ws_bridge.py` deprecated stub; verify `ui/` (Godot legacy) is fully removed (I6)
-- [ ] `.gitignore` cleanup + scrub committed binaries (I7)
-- [ ] Orchestrator decomposition (I1)
-- [ ] `openwakeword` upstream PR or vendor fork to remove monkey-patch (I4)
-- [ ] Persona v2 — final pre-MVP task after Ring 3; resolves known v1 regressions
+- [x] Privacy docs (`PRIVACY.md`) + IPC threat model (`docs/THREAT_MODEL.md`) (I2/I3)
+- [x] IPC bearer token handshake — `src/core/ipc_token.py`; `HandshakeHandler` enforces auth (fail-closed on timeout, pre-handshake frames dropped when token required); Tauri `read_ipc_token` Rust command; `client.ts` sends hello_ack+token; auth-fail reconnect suppressed (I2)
+- [x] Conversation memory rotation + LLM summarisation — `src/llm/memory.py` (40-turn threshold); `Orchestrator._make_summariser()` wired at init (I5)
+- [x] `src/ipc/ws_bridge.py` deprecated stub deleted; `ui/` confirmed removed (I6)
+- [x] `.gitignore` additions; `src/core/config_schema.py` FIELD_META: `ipc.token_path` added, stale ZeroMQ/Godot help text corrected (I7, R3.e)
+- [x] Viseme events gated on `config.audio.send_visemes`; default `false` until avatar ships (C2 wire-cost)
+- [x] `ARCHITECTURE.md` Phase 9.5 wording updated to past tense (R3.d)
+- ⏸️ Avatar artwork (C2) — deferred to paid artist; placeholder accepted
+- ⏸️ Orchestrator decomposition (I1) — deferred post-MVP; no user-visible benefit
+- ⏸️ `openwakeword` upstream PR (I4) — deferred post-MVP
+- [ ] **Persona v2** — final pre-MVP task; resolves known v1 regressions (identity, filler-opener, refusal discipline)

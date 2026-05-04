@@ -76,6 +76,11 @@ class AudioConfig:
     # Format: modifier names joined by "+", e.g. "ctrl+space", "alt+shift+l".
     ptt_hotkey: str = "ctrl+space"
 
+    # Whether to emit VisemeEvent frames over IPC for lip-sync animation.
+    # Default false until avatar artwork ships — avoids pointless wire-event
+    # cost when the frontend has no consumer for visemes.
+    send_visemes: bool = False
+
 
 @dataclass(frozen=True)
 class ScribeConfig:

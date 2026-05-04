@@ -55,7 +55,14 @@ export class BrainClient implements IBrainClient {
       }
     };
     ws.onmessage = (ev: MessageEvent<string>) => this._dispatch(ev.data);
-    ws.onclose = () => { this._setState("disconnected"); this._scheduleReconnect(); };
+    ws.onclose = (ev: CloseEvent) => {
+      this._setState("disconnected");
+      // Code 1008 = policy violation (auth failure). Do not retry — the token
+      // file may be missing or stale; a retry loop would be pointless noise.
+      if (ev.code !== 1008) {
+        this._scheduleReconnect();
+      }
+    };
     ws.onerror = () => {
       this._notifyError("WebSocket error");
       ws.close();
