@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { LumiBrainEvent, OutboundEvent, WireMessage } from "./events";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
@@ -62,16 +63,38 @@ export class BrainClient implements IBrainClient {
   }
 
   private _dispatch(data: string): void {
-    let wire: WireMessage;
-    try { wire = JSON.parse(data) as WireMessage; } catch { return; }
+    let raw: Record<string, unknown>;
+    try { raw = JSON.parse(data) as Record<string, unknown>; } catch { return; }
+
+    // Brain's hello frame uses "type" not "event" — intercept it and respond
+    // with hello_ack carrying the IPC bearer token for authentication.
+    if (raw["type"] === "hello") {
+      void this._sendHelloAck();
+      return;
+    }
+
+    const wire = raw as WireMessage;
     if (!isLumiBrainEvent(wire)) return;
-    // wire is now WireMessage & { event: LumiBrainEvent['event'] }.
-    // Consumers (useLumiState) narrow by e.event before accessing e.payload,
-    // so we pass the intersection rather than asserting the full LumiBrainEvent shape.
-    // isLumiBrainEvent has verified the event name; payload is validated by
-    // consumers via per-event narrowing (e.event === "state_change" etc.).
     const narrowed = wire as unknown as LumiBrainEvent;
     for (const h of this.handlers) h(narrowed);
+  }
+
+  private async _sendHelloAck(): Promise<void> {
+    let token: string | null = null;
+    try {
+      token = await invoke<string>("read_ipc_token");
+    } catch {
+      // Token file not found — dev mode or Brain/frontend startup race.
+    }
+    const ack: Record<string, unknown> = {
+      type: "hello_ack",
+      version: "1.0",
+      status: "ok",
+      ...(token !== null ? { token } : {}),
+    };
+    if (this.ws !== null && this._state === "connected") {
+      this.ws.send(JSON.stringify(ack));
+    }
   }
 
   private _notifyError(message: string): void {

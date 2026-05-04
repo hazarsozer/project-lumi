@@ -37,7 +37,10 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from pathlib import Path
+
 from src.core.config import IPCConfig
+from src.core.ipc_token import read_token
 from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
@@ -110,9 +113,16 @@ class EventBridge:
         host = config.address
         self._transport: WSTransport = WSTransport(host=host, port=config.port)
 
+        # Read the IPC bearer token written by main.py on startup.
+        _token = read_token(Path(config.token_path).expanduser())
+        if _token is None:
+            logger.warning("IPC token file not found — handshake auth disabled")
+
         # Wire capability handshake: on client connect, send hello and wait for
-        # hello_ack before forwarding normal messages downstream.
-        self._handshake: HandshakeHandler = HandshakeHandler(self._transport)
+        # hello_ack (with token) before forwarding normal messages downstream.
+        self._handshake: HandshakeHandler = HandshakeHandler(
+            self._transport, expected_token=_token
+        )
         self._handshake.set_downstream_callback(self._on_raw_message)
         self._transport.set_on_connect(self._handshake.on_client_connected)
         self._transport.set_on_message(self._handshake.on_message_received)

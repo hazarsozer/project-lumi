@@ -155,6 +155,26 @@ class WSTransport:
 
         asyncio.run_coroutine_threadsafe(_do_send(), loop)
 
+    def disconnect_client(self) -> None:
+        """Close the current client connection with policy-violation code 1008.
+
+        Thread-safe.  Used by HandshakeHandler to reject unauthorized clients.
+        No-op if no client is connected or the loop is not running.
+        """
+        loop = self._loop
+        ws = self._ws_client
+
+        if loop is None or not loop.is_running() or ws is None:
+            return
+
+        async def _close() -> None:
+            try:
+                await ws.close(1008, "Unauthorized")
+            except Exception as exc:
+                logger.debug("disconnect_client close() raised (already gone?): %s", exc)
+
+        asyncio.run_coroutine_threadsafe(_close(), loop)
+
     def set_on_message(self, callback: Callable[[bytes], None]) -> None:
         """Register the callback invoked when a complete frame is received.
 

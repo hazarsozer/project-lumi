@@ -238,3 +238,133 @@ def test_load_oserror_starts_fresh(tmp_path: Path) -> None:
         mem.load()  # must not raise
 
     assert mem.get_history() == []
+
+
+# ---------------------------------------------------------------------------
+# Rotation — triggered by add_turn() when len(history) > MAX_TURNS
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_rotation_triggers_at_max_turns_plus_one(tmp_path: Path) -> None:
+    """Rotation must fire when len(history) first exceeds MAX_TURNS."""
+    from src.llm.memory import MAX_TURNS, RETAIN_RECENT
+
+    mem = ConversationMemory(
+        memory_dir=str(tmp_path),
+        summariser=lambda turns: "stub summary",
+    )
+    for i in range(MAX_TURNS + 1):
+        mem.add_turn("user", f"message {i}")
+
+    history = mem.get_history()
+    assert len(history) == RETAIN_RECENT + 1
+    assert history[0]["role"] == "system"
+    assert "Summary of earlier conversation:" in history[0]["content"]
+    assert "stub summary" in history[0]["content"]
+
+
+@pytest.mark.unit
+def test_rotation_keeps_newest_turns_verbatim(tmp_path: Path) -> None:
+    """The RETAIN_RECENT newest turns must survive rotation unchanged."""
+    from src.llm.memory import MAX_TURNS, RETAIN_RECENT
+
+    mem = ConversationMemory(
+        memory_dir=str(tmp_path),
+        summariser=lambda turns: "summary",
+    )
+    for i in range(MAX_TURNS + 1):
+        mem.add_turn("user", f"message {i}")
+
+    history = mem.get_history()
+    assert history[-1]["content"] == f"message {MAX_TURNS}"
+    assert history[1]["content"] == f"message {MAX_TURNS - RETAIN_RECENT + 1}"
+
+
+@pytest.mark.unit
+def test_rotation_no_summariser_truncates_gracefully(tmp_path: Path) -> None:
+    """Without a summariser, rotation silently truncates to RETAIN_RECENT (no crash)."""
+    from src.llm.memory import MAX_TURNS, RETAIN_RECENT
+
+    mem = ConversationMemory(memory_dir=str(tmp_path))  # no summariser
+    for i in range(MAX_TURNS + 1):
+        mem.add_turn("user", f"message {i}")
+
+    history = mem.get_history()
+    assert len(history) == RETAIN_RECENT
+    assert all(e["role"] == "user" for e in history)
+
+
+@pytest.mark.unit
+def test_rotation_summariser_exception_falls_back_to_truncation(tmp_path: Path) -> None:
+    """A summariser that raises must not crash — rotation falls back to truncation."""
+    from src.llm.memory import MAX_TURNS, RETAIN_RECENT
+
+    def failing_summariser(turns: list[dict]) -> str:
+        raise RuntimeError("LLM unavailable")
+
+    mem = ConversationMemory(memory_dir=str(tmp_path), summariser=failing_summariser)
+    for i in range(MAX_TURNS + 1):
+        mem.add_turn("user", f"message {i}")
+
+    history = mem.get_history()
+    assert len(history) == RETAIN_RECENT
+
+
+@pytest.mark.unit
+def test_no_rotation_below_threshold(tmp_path: Path) -> None:
+    """Summariser must not be called when len(history) <= MAX_TURNS."""
+    from src.llm.memory import MAX_TURNS
+
+    call_count = [0]
+
+    def counting_summariser(turns: list[dict]) -> str:
+        call_count[0] += 1
+        return "should not appear"
+
+    mem = ConversationMemory(memory_dir=str(tmp_path), summariser=counting_summariser)
+    for i in range(MAX_TURNS):  # exactly at threshold — no rotation
+        mem.add_turn("user", f"message {i}")
+
+    assert call_count[0] == 0
+    assert len(mem.get_history()) == MAX_TURNS
+
+
+@pytest.mark.unit
+def test_set_summariser_post_construction(tmp_path: Path) -> None:
+    """set_summariser must allow injecting a callable after construction."""
+    from src.llm.memory import MAX_TURNS, RETAIN_RECENT
+
+    mem = ConversationMemory(memory_dir=str(tmp_path))
+    mem.set_summariser(lambda turns: "injected summary")
+
+    for i in range(MAX_TURNS + 1):
+        mem.add_turn("user", f"message {i}")
+
+    history = mem.get_history()
+    assert len(history) == RETAIN_RECENT + 1
+    assert "injected summary" in history[0]["content"]
+
+
+@pytest.mark.unit
+def test_rotation_on_load(tmp_path: Path) -> None:
+    """load() must trigger rotation if the persisted file has > MAX_TURNS entries."""
+    import json as _json
+    from src.llm.memory import MAX_TURNS, RETAIN_RECENT
+
+    turns = [{"role": "user", "content": f"old {i}"} for i in range(MAX_TURNS + 5)]
+    file_path = tmp_path / "conversation.json"
+    file_path.write_text(_json.dumps(turns), encoding="utf-8")
+
+    summariser_called = [False]
+
+    def stub_summariser(old: list[dict]) -> str:
+        summariser_called[0] = True
+        return "past summary"
+
+    mem = ConversationMemory(memory_dir=str(tmp_path), summariser=stub_summariser)
+    mem.load()
+
+    history = mem.get_history()
+    assert len(history) == RETAIN_RECENT + 1
+    assert summariser_called[0]
+    assert "past summary" in history[0]["content"]

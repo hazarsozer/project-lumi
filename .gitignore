@@ -44,8 +44,16 @@ my_model.yaml
 # --- Claude Code (local session data, agent definitions) ---
 .claude/
 
-# --- Godot editor cache (auto-generated, not source) ---
-ui/.godot/
+# --- Scratch / test artifacts (not source) ---
+test_canwrite.txt
+.codex
+*.tmp
+*.tsbuildinfo
+app/vite.config.d.ts
+app/vite.config.js
+
+# --- Private design handoff assets ---
+design_handoff_lumi/
 
 # --- Tauri / Node ---
 app/node_modules/

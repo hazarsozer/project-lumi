@@ -194,6 +194,11 @@ class IPCConfig:
     # Port number for the TCP socket.
     port: int = 5555
 
+    # Path to the single-use bearer token file.  Brain generates a fresh
+    # token on each startup and writes it here (chmod 0600).  The Tauri
+    # frontend reads this file and presents the token in its hello_ack frame.
+    token_path: str = "~/.lumi/ipc_token"
+
 
 @dataclass(frozen=True)
 class ToolsConfig:

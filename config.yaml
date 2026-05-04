@@ -180,6 +180,11 @@ ipc:
   # to ws://127.0.0.1:<port>.
   port: 5556
 
+  # Path where Brain writes the single-use bearer token on each startup.
+  # The Tauri frontend reads this file and includes the token in hello_ack.
+  # File is created with chmod 0600 (owner read-only).
+  token_path: "~/.lumi/ipc_token"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # tools — OS action tool framework settings
 # ─────────────────────────────────────────────────────────────────────────────

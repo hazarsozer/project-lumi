@@ -26,6 +26,7 @@ Constraints:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import threading
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 class _Sendable(Protocol):
     def send(self, data: bytes) -> None: ...
+    def disconnect_client(self) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -71,13 +73,20 @@ class HandshakeHandler:
         All public methods acquire ``_lock`` before mutating state.
     """
 
-    def __init__(self, transport: _Sendable) -> None:
+    def __init__(
+        self,
+        transport: _Sendable,
+        expected_token: str | None = None,
+    ) -> None:
         """
         Args:
-            transport: Any object that has a ``.send(bytes)`` method.
+            transport: Any object with ``.send(bytes)`` and ``.disconnect_client()``.
                        Typically a WSTransport instance.
+            expected_token: If provided, the hello_ack must carry a matching
+                            ``"token"`` field.  Mismatch → disconnect_client().
         """
         self._transport = transport
+        self._expected_token: str | None = expected_token
         self._downstream: Callable[[bytes], None] | None = None
         self._lock: threading.Lock = threading.Lock()
 
@@ -193,7 +202,7 @@ class HandshakeHandler:
         Must be called with ``_lock`` held.
 
         Cancels the timeout timer and marks the handshake as done.
-        Logs a warning if the status is not "ok".
+        Disconnects the client if token verification fails.
         """
         # Cancel the timeout timer — ack arrived in time.
         if self._timeout_timer is not None:
@@ -202,6 +211,19 @@ class HandshakeHandler:
 
         self._handshake_pending = False
         self._handshake_done = True
+
+        # Token verification (constant-time comparison).
+        if self._expected_token is not None:
+            provided = str(ack.get("token", ""))
+            if not hmac.compare_digest(
+                provided.encode("utf-8"),
+                self._expected_token.encode("utf-8"),
+            ):
+                logger.warning(
+                    "IPC handshake rejected: token mismatch — disconnecting client."
+                )
+                self._transport.disconnect_client()
+                return
 
         status = ack.get("status", "")
         remote_version = ack.get("version", "<unknown>")

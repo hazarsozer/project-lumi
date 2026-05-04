@@ -33,10 +33,13 @@ if "--setup" in _sys.argv:
 import logging
 import signal
 
+from pathlib import Path
+
 from src.audio.ears import Ears
 from src.audio.scribe import Scribe
 from src.core.config import load_config
 from src.core.events import ShutdownEvent
+from src.core.ipc_token import generate_and_write_token
 from src.core.logging_config import setup_logging
 from src.core.orchestrator import Orchestrator
 from src.core.startup_check import run_startup_checks
@@ -48,6 +51,12 @@ def main() -> None:
     setup_logging()
 
     config = load_config()
+
+    # Generate a fresh IPC bearer token before any subsystem starts so
+    # EventBridge can read it from disk when it constructs HandshakeHandler.
+    if config.ipc.enabled:
+        generate_and_write_token(Path(config.ipc.token_path).expanduser())
+
     missing_setup_items = run_startup_checks(config)
 
     # Construct audio-in pipeline components.
