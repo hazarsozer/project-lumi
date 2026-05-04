@@ -20,16 +20,25 @@ The following items were delivered as part of Ring 2:
 - **DONE** — Web search + datetime/timer tools: `src/tools/web_search.py`, `src/tools/datetime_tool.py`, `src/tools/timer_tool.py`.
 - **DONE** — End-to-end integration smoke test: `tests/integration/test_brain_e2e.py`.
 
-## Ring 3 — In Progress
+## Ring 3 + Ring 3.5 — Complete (2026-05-04)
 
-- [ ] **I2/I3** — Privacy and threat-model docs; these back the "privacy-first" marketing claim and land first in Ring 3.
-- [ ] **I5** — Conversation memory rotation + LLM summarisation.
-- [ ] **C2** — Avatar artwork or animated SVG fallback.
-- [ ] **I6** — Delete `src/ipc/ws_bridge.py` stub (deprecated since Ring 1, marked for Ring 3 removal) and verify `ui/` (Godot legacy) is already gone.
-- [ ] **I7** — `.gitignore` cleanup + scrub committed binaries from history.
-- [ ] **I1** — Orchestrator decomposition.
-- [ ] **I4** — `openwakeword` upstream PR or vendor fork to remove the monkey-patch in `ears.py`.
-- [ ] **Persona v2** — Final pre-MVP task after Ring 3; addresses identity consistency, refusal discipline, and filler-opener regressions from v1.
+First pass landed `bb7a4cc`; architect audit found 3 critical + 4 high-severity gaps; Ring 3.5 corrective pass landed `bf0e2fe`. Verified close 2026-05-04. 976 tests passing, zero regressions.
+
+- **DONE I2** — IPC bearer-token handshake **with enforced auth**. Brain generates `secrets.token_hex(32)` → `~/.lumi/ipc_token` (chmod 0600). `HandshakeHandler` drops pre-handshake non-`hello_ack` frames when token required (no bypass); fails closed on timeout (no fail-open). Tauri `read_ipc_token` Rust command + `client.ts` hello_ack with token. `client.ts` skips reconnect on close code 1008. 22 handshake tests including 7 token-auth integration tests.
+- **DONE I3** — `PRIVACY.md` (audio buffers, transcripts, memory, telemetry=none, data wipe) + `docs/THREAT_MODEL.md` (T1/T2 actors, M1-M3 mitigations, G1-G3 known gaps).
+- **DONE I5** — Conversation memory rotation + LLM summarisation. `src/llm/memory.py` rotates at 40 turns, keeps newest 20 verbatim, summarises oldest into a system message via injected callable. `Orchestrator._make_summariser()` wires the LLM directly (`model.create_chat_completion()`); falls back to truncation if model not yet loaded.
+- **DONE I6** — `src/ipc/ws_bridge.py` deprecated stub deleted; `ui/` (Godot legacy) confirmed gone; `ARCHITECTURE.md` Ring 3 checklist closed.
+- **DONE I7** — `.gitignore` covers `test_canwrite.txt`, `.codex`, `*.tmp`, `*.tsbuildinfo`, `app/vite.config.{d.ts,js}`, `design_handoff_lumi/`. (Correction: `validation_set_features.npy` was never in git history — no `git filter-repo` needed.)
+- **DONE C2 wire-cost** — Viseme events gated on `config.audio.send_visemes` (default `false`); avatar artwork itself deferred to paid commission post-MVP.
+- **DONE Schema sync** — `ipc.token_path` added to `FIELD_META`; stale ZeroMQ/Godot help text refreshed to WebSocket/Tauri.
+- **DEFERRED I1** — Orchestrator decomposition: post-MVP debt cleanup, no user-visible benefit.
+- **DEFERRED I4** — `openwakeword` upstream PR: external work, low MVP value; constraint already documented in `CONTRIBUTING.md`.
+
+## Final Pre-MVP Gate
+
+- [ ] **Persona v2** — Conditional tool-aware dataset; addresses v1 identity / refusal / filler regressions. See [`docs/wiki/personas/v2-design.md`](docs/wiki/personas/v2-design.md).
+- [ ] **Live exploit verification** (post Ring 3): run hostile-client script against running Brain to confirm token gate end-to-end; capture proof in `docs/wiki/postmortems/`.
+- [ ] **MVP packaging dry-run**: clean fresh-machine install via `.deb` to confirm token-file/sidecar/PTT round-trip works in the wild.
 
 ---
 

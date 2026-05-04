@@ -11,7 +11,7 @@
 
 ## Current Status
 
-**Phases 1–9.5 + Ring 1 + Ring 2 + Ring 2.5 complete (closed 2026-05-04). Active work: Ring 3.**
+**Phases 1–9.5 + Rings 1 / 1.5 / 2 / 2.5 / 3 / 3.5 complete (closed 2026-05-04). Active work: persona v2 retrain (sole pre-MVP gate).**
 
 | Phase / Ring | Name | Status |
 |---|---|---|
@@ -23,10 +23,10 @@
 | 6 | The Hands (OS Control) | COMPLETE |
 | 7 | RAG Personal Knowledge Base | COMPLETE |
 | 8.5 | Settings UI (Runtime Config) | COMPLETE |
-| 9 | Avatar Artwork | NOT STARTED |
+| 9 | Avatar Artwork | DEFERRED (paid commission post-MVP; placeholder ships) |
 | 9.5 | Tauri UI Overlay + Ring 1 | COMPLETE |
 | Ring 2 | Sidecar bundling, persona LoRA v1, streaming TTS, web + datetime/timer tools, E2E smoke test | COMPLETE |
-| Ring 3 | Privacy docs, conversation memory rotation, avatar artwork, repo hygiene | IN PROGRESS |
+| Ring 3 | Privacy docs, IPC token auth, memory rotation, repo hygiene | COMPLETE |
 
 ---
 
