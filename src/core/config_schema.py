@@ -296,6 +296,18 @@ FIELD_META: dict[str, dict[str, Any]] = {
         "control": "path",
         "restart_required": False,
     },
+    "llm.tools_in_system_prompt": {
+        "label": "Inject Tool List in System Prompt",
+        "help": (
+            "When enabled, runtime appends 'Available tools right now: <list>' "
+            "to the system prompt so a tools-aware persona model can read its "
+            "current toolset and choose between tool_call and warm refusal. "
+            "Required for persona v2.1+. Leave OFF for persona v1 (trained "
+            "without the tools header)."
+        ),
+        "control": "toggle",
+        "restart_required": True,
+    },
     # -------------------------------------------------------------------------
     # tts section
     # -------------------------------------------------------------------------

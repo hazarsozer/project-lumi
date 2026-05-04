@@ -162,6 +162,14 @@ class LLMConfig:
     # LoRA adapter strength (0.0–1.0+). Only used when lora_path is set.
     lora_scale: float = 1.0
 
+    # When True, the runtime appends "Available tools right now: <list>" to the
+    # system prompt so the LoRA can read the tool inventory and decide between
+    # tool_call and warm refusal (persona v2 conditional-tool-aware contract).
+    # Defaults to False because persona v1 was NOT trained on this format and
+    # injecting unfamiliar context can degrade v1's responses.  Flip to True
+    # only when a tools-aware persona model ships (v2.1+).
+    tools_in_system_prompt: bool = False
+
 
 @dataclass(frozen=True)
 class TTSConfig:

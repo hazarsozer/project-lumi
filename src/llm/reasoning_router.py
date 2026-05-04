@@ -39,6 +39,7 @@ class ReasoningRouter:
         config: LLMConfig,
         event_queue: queue.Queue[Any] | None = None,
         retriever: RAGRetriever | None = None,
+        available_tools_fn: Callable[[], list[str]] | None = None,
     ) -> None:
         self._model_loader = model_loader
         self._prompt_engine = prompt_engine
@@ -46,6 +47,9 @@ class ReasoningRouter:
         self._config = config
         self._event_queue = event_queue
         self._retriever = retriever
+        # Callable that returns the live tool-name list. Lazy so registration
+        # ordering between Orchestrator subsystems doesn't matter.
+        self._available_tools_fn = available_tools_fn
 
     def reconfigure(self, new_config: LumiConfig) -> None:
         """Apply hot-reloadable LLM config changes (temperature, context_tokens, etc.)."""
@@ -131,8 +135,9 @@ class ReasoningRouter:
         truncated = self._prompt_engine.truncate_history(
             history, self._config.context_length // 2
         )
+        tools = self._available_tools_fn() if self._available_tools_fn is not None else None
         prompt = self._prompt_engine.build_prompt(
-            text, truncated, rag_context=rag_context
+            text, truncated, rag_context=rag_context, available_tools=tools
         )
         model = self._model_loader.model
 

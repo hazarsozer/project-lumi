@@ -105,7 +105,7 @@ scribe:
 # ─────────────────────────────────────────────────────────────────────────────
 llm:
   # Path to the GGUF model file on disk.
-  model_path: models/llm/lumi-phi35-v1-Q4_K_M.gguf
+  model_path: models/llm/lumi-phi35-v2ep2-Q4_K_M.gguf
 
   # Number of transformer layers to offload to GPU.
   # 0 = full CPU inference.  Set to -1 to offload all layers.

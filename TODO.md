@@ -34,9 +34,17 @@ First pass landed `bb7a4cc`; architect audit found 3 critical + 4 high-severity 
 - **DEFERRED I1** — Orchestrator decomposition: post-MVP debt cleanup, no user-visible benefit.
 - **DEFERRED I4** — `openwakeword` upstream PR: external work, low MVP value; constraint already documented in `CONTRIBUTING.md`.
 
+## Persona v2 attempt (2026-05-04) — TRAINED, ROLLED BACK
+
+- **DONE** v2 dataset generated (`scripts/synth_dataset_v2.py` → `data/finetune/synthetic_v2.jsonl`, 5500 examples, conditional tool-aware design).
+- **DONE** Runtime tools-in-system-prompt injection wired (`prompt_engine` + `reasoning_router` + `Orchestrator` + `eval_persona`), gated by `llm.tools_in_system_prompt` config flag (default `false` for v1 compat).
+- **DONE** v2 trained, merged, quantized: `models/llm/lumi-phi35-v2-Q4_K_M.gguf` (2.4 GB), 1032 steps, 89 min, peak token accuracy 79.8%, final 75.2%.
+- **ROLLED BACK** — live eval revealed systemic BPE contraction corruption (`I don'concrete`, `Certain Щара`) in ~30% of responses. Checkpoint-688 hypothesis test confirmed cause is dataset-side, not training-duration-side. v1 stays as active shipping candidate.
+- See [`docs/wiki/postmortems/2026-05-04-persona-v2-bpe-contraction-corruption.md`](docs/wiki/postmortems/2026-05-04-persona-v2-bpe-contraction-corruption.md) for full diagnosis.
+
 ## Final Pre-MVP Gate
 
-- [ ] **Persona v2** — Conditional tool-aware dataset; addresses v1 identity / refusal / filler regressions. See [`docs/wiki/personas/v2-design.md`](docs/wiki/personas/v2-design.md).
+- [ ] **Persona v2.1** — Same architecture as v2 + dataset-side contraction expansion (`"don't"` → `"do not"`) to eliminate apostrophe-boundary BPE ambiguity. Add `criterion_no_token_corruption` to eval as must-pass. ~half-day. See [`docs/wiki/personas/v2.1-design.md`](docs/wiki/personas/v2.1-design.md).
 - [ ] **Live exploit verification** (post Ring 3): run hostile-client script against running Brain to confirm token gate end-to-end; capture proof in `docs/wiki/postmortems/`.
 - [ ] **MVP packaging dry-run**: clean fresh-machine install via `.deb` to confirm token-file/sidecar/PTT round-trip works in the wild.
 

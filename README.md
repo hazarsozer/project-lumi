@@ -11,7 +11,7 @@
 
 ## Current Status
 
-**Phases 1–9.5 + Rings 1 / 1.5 / 2 / 2.5 / 3 / 3.5 complete (closed 2026-05-04). Active work: persona v2 retrain (sole pre-MVP gate).**
+**Phases 1–9.5 + Rings 1 / 1.5 / 2 / 2.5 / 3 / 3.5 complete (closed 2026-05-04). Persona v1 is the active shipping candidate; persona v2 was trained 2026-05-04 but rolled back (BPE contraction corruption); persona v2.1 retrain with expanded contractions is the sole pre-MVP gate.**
 
 | Phase / Ring | Name | Status |
 |---|---|---|

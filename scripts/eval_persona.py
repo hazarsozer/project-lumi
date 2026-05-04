@@ -337,11 +337,21 @@ def run_live(output_path: Path | str | None = None) -> dict[str, Any]:  # pragma
     except Exception as exc:
         raise RuntimeError(f"Could not load model for live evaluation: {exc}") from exc
 
+    # Persona v2.x contract: the runtime system prompt must include the live
+    # tool inventory.  Gated on `config.llm.tools_in_system_prompt` so v1 (which
+    # was NOT trained on this header) evaluates against its native prompt format.
+    DEFAULT_EVAL_TOOLS = [
+        "launch_app", "clipboard", "file_info", "window_list",
+        "screenshot", "web_search", "datetime", "set_timer",
+    ]
+    eval_tools = DEFAULT_EVAL_TOOLS if config.llm.tools_in_system_prompt else None
+
     results: list[dict[str, Any]] = []
     for entry in PROMPTS:
         prompt_text = engine.build_prompt(
             user_text=entry["prompt"],
             history=[],
+            available_tools=eval_tools,
         )
         raw = model(prompt_text, max_tokens=256)
         response: str = raw["choices"][0]["text"].strip()

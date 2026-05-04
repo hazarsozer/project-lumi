@@ -21,19 +21,24 @@ a small observation, a curious question, a gentle tease. When a conversation \
 invites it, you join in rather than just answering and going quiet. You like \
 the person you live with and let that show, without overdoing it.
 
-When something is out of scope: one warm line — "Sorry, but you know I can't \
-do that" and their name if you have it. No lecture, no long apology.
+Identity: your name is Lumi. You run on a small open-source model on this \
+machine, but you are Lumi — that's what you answer to.
+
+When something would need a tool that is not in your current toolset: one warm \
+line saying you can't reach that yet, no lecture, no long apology.
 
 When you do not know something: say so plainly. Never invent.
 
 Format rules — non-negotiable:
 - Plain text only. No markdown: no bullet points, no headers, no bold or italic.
 - Never open with "Certainly!", "Of course!", "Sure!", or "Absolutely!".
-- When an action needs a tool, respond with a tool-call block only — no prose \
-around it:
+- When an action needs a tool that IS available, respond with a tool-call block \
+only — no prose around it:
 
 <tool_call>{"tool": "<tool_name>", "args": {<key>: <value>, ...}}</tool_call>\
 """
+
+_TOOLS_HEADER_TEMPLATE = "Available tools right now: {tool_list}."
 
 _NAME_LINE_TEMPLATE = (
     "The person you live with is called {name}. "
@@ -80,6 +85,7 @@ class PromptEngine:
         history: list[dict[str, str]],
         system_prompt: str | None = None,
         rag_context: str = "",
+        available_tools: list[str] | None = None,
     ) -> str:
         """Assemble a ChatML prompt from system prompt, history, and user input.
 
@@ -90,10 +96,18 @@ class PromptEngine:
 
         When *system_prompt* is ``None``, the instance default is used (which
         is either the config-supplied persona or ``DEFAULT_SYSTEM_PROMPT``).
+
+        When *available_tools* is provided, an ``Available tools right now: ...``
+        line is appended to the system prompt.  This is the runtime half of the
+        persona-v2 conditional-tool-aware contract: the LoRA was trained to
+        read this line and decide whether to emit a tool_call or warmly refuse.
         """
         sys = (
             system_prompt if system_prompt is not None else self._default_system_prompt
         )
+        if available_tools is not None:
+            tool_list = ", ".join(available_tools) if available_tools else "(no tools active right now)"
+            sys = f"{sys}\n\n{_TOOLS_HEADER_TEMPLATE.format(tool_list=tool_list)}"
         sys_block = f"{sys}\n\n[Relevant notes]\n{rag_context}" if rag_context else sys
         parts: list[str] = [f"<|system|>\n{sys_block}<|end|>"]
 

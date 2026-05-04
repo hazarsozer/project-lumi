@@ -168,6 +168,13 @@ class Orchestrator:
                 logger.exception("RAG subsystem failed to initialise; disabling RAG")
                 self._rag_runtime_enabled = False
 
+        # Tools-in-prompt is gated by a config flag so v1 (trained without the
+        # tools header) is not destabilised by unfamiliar context.  Flip
+        # `llm.tools_in_system_prompt: true` once a tools-aware model ships.
+        _tools_fn: Callable[[], list[str]] | None = None
+        if config.llm.tools_in_system_prompt:
+            _tools_fn = lambda: [t["name"] for t in self._tool_registry.list_tools()]
+
         self._reasoning_router: ReasoningRouter = ReasoningRouter(
             model_loader=self._model_loader,
             prompt_engine=self._prompt_engine,
@@ -175,6 +182,7 @@ class Orchestrator:
             config=config.llm,
             event_queue=self._event_queue,
             retriever=self._rag_retriever,
+            available_tools_fn=_tools_fn,
         )
         self._config_manager.register_observer("prompt_engine", self._prompt_engine)
         self._config_manager.register_observer("reasoning_router", self._reasoning_router)
