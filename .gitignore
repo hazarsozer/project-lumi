@@ -83,3 +83,7 @@ data/finetune/*.jsonl
 # Training/eval logs (kept out of repo; preserved on disk for postmortem)
 logs/
 
+
+# Private development knowledge base / second brain (Karpathy's LLM Wiki pattern)
+docs/wiki/
+
