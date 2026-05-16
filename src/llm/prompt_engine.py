@@ -67,7 +67,7 @@ class PromptEngine:
         self._default_system_prompt = self._resolve_prompt(new_config)
 
     @staticmethod
-    def _resolve_prompt(config: "LumiConfig | None") -> str:
+    def _resolve_prompt(config: LumiConfig | None) -> str:
         """Build the effective system prompt from config, injecting user_name if set."""
         base = (
             config.persona.system_prompt

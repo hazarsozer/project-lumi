@@ -477,21 +477,29 @@ def run_pipeline(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     try:
-        # --- Step 1 ---
-        merge_lora(
-            base_model=args.base_model,
-            adapter_dir=adapter_dir,
-            merged_dir=merged_dir,
-            dry_run=args.dry_run,
-        )
+        if args.skip_merge:
+            if not args.dry_run and not fp16_path.exists():
+                logger.error(
+                    "--skip-merge passed but fp16 GGUF not found at %s", fp16_path
+                )
+                sys.exit(1)
+            logger.info("Steps 1+2 — Skipped (--skip-merge); reusing %s", fp16_path)
+        else:
+            # --- Step 1 ---
+            merge_lora(
+                base_model=args.base_model,
+                adapter_dir=adapter_dir,
+                merged_dir=merged_dir,
+                dry_run=args.dry_run,
+            )
 
-        # --- Step 2 ---
-        convert_to_gguf(
-            merged_dir=merged_dir,
-            fp16_path=fp16_path,
-            llama_cpp_dir=args.llama_cpp_dir,
-            dry_run=args.dry_run,
-        )
+            # --- Step 2 ---
+            convert_to_gguf(
+                merged_dir=merged_dir,
+                fp16_path=fp16_path,
+                llama_cpp_dir=args.llama_cpp_dir,
+                dry_run=args.dry_run,
+            )
 
         # --- Step 3 ---
         quantize_gguf(
@@ -509,12 +517,16 @@ def run_pipeline(args: argparse.Namespace) -> None:
             logger.info("Step 4 — Skipped (--skip-eval)")
 
         # --- Cleanup ---
-        cleanup_merged_dir(merged_dir, dry_run=args.dry_run)
+        if not args.skip_merge:
+            cleanup_merged_dir(merged_dir, dry_run=args.dry_run)
 
-        # Remove intermediate fp16 GGUF only after successful quantization
-        if not args.dry_run and fp16_path.exists():
+        # Remove intermediate fp16 GGUF only after successful quantization,
+        # unless --keep-fp16 was requested (e.g. for re-quantization).
+        if not args.dry_run and fp16_path.exists() and not args.keep_fp16:
             logger.info("Cleanup — removing intermediate fp16 GGUF: %s", fp16_path)
             fp16_path.unlink()
+        elif args.keep_fp16:
+            logger.info("Keeping intermediate fp16 GGUF (--keep-fp16): %s", fp16_path)
 
         logger.info("=== Pipeline complete — output: %s ===", output_path)
 
@@ -576,6 +588,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skip-eval",
         action="store_true",
         help="Skip the persona evaluation step",
+    )
+    parser.add_argument(
+        "--keep-fp16",
+        action="store_true",
+        help="Retain the intermediate fp16 GGUF instead of deleting it post-quantize "
+             "(useful for re-quantizing at a different precision without re-merging).",
+    )
+    parser.add_argument(
+        "--skip-merge",
+        action="store_true",
+        help="Skip merge + convert; assume the fp16 GGUF already exists at "
+             "<output-dir>/<output-stem>-fp16.gguf and only run quantize.",
     )
     parser.add_argument(
         "--dry-run",

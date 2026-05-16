@@ -211,5 +211,12 @@ module = [
     "sentence_transformers.*",
     "sqlite_vec.*",
     "pypdf.*",
+    # QLoRA / HF steering optional deps — only installed with --extra qlora
+    "torch.*",
+    "transformers.*",
+    "peft.*",
+    "trl.*",
+    "bitsandbytes.*",
+    "accelerate.*",
 ]
 ignore_missing_imports = true

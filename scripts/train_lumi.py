@@ -54,6 +54,32 @@ import logging
 import sys
 from pathlib import Path
 
+from transformers import TrainerCallback, TrainerControl, TrainerState, TrainingArguments
+
+
+class StepCheckpointCallback(TrainerCallback):
+    """Save a checkpoint every N optimizer steps, independent of save_strategy.
+
+    HuggingFace Trainer's built-in save_strategy="steps" has off-by-one
+    behaviour in some versions when gradient_accumulation_steps > 1.
+    This callback sets control.should_save directly on the correct global_step
+    so the Trainer's existing save machinery handles the rest.
+    """
+
+    def __init__(self, save_every: int) -> None:
+        self.save_every = save_every
+
+    def on_step_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ) -> TrainerControl:
+        if state.global_step > 0 and state.global_step % self.save_every == 0:
+            control.should_save = True
+        return control
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -228,24 +254,19 @@ def train(args: argparse.Namespace) -> None:
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=max(1, 16 // args.batch_size),
-        # Lowered from 2e-4 → 1e-4: with completion-only loss on a small
-        # dataset the gradient signal is much more focused; 2e-4 risks
-        # destabilising the LoRA in the first dozen steps.
-        learning_rate=1e-4,
+        learning_rate=args.learning_rate,
         fp16=False,
         bf16=True,
         logging_steps=10,
-        save_strategy="epoch",
-        save_total_limit=2,
+        save_strategy="steps",
+        save_steps=args.save_steps,
+        save_total_limit=args.save_total_limit,
         warmup_steps=10,
         lr_scheduler_type="cosine",
         report_to="none",
         max_steps=1 if args.dry_run else -1,
-        # Activation-memory savings: required to fit Phi-3.5-mini QLoRA on a
-        # 12 GB consumer GPU.  Adds ~1.5–2× step time but ~3–4× memory headroom.
-        # use_reentrant=False is required for PEFT compatibility.
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
+        gradient_checkpointing=not args.no_gradient_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False} if not args.no_gradient_checkpointing else {},
         # SFT-specific fields:
         # * Dataset is prompt+completion (set up in prepare_hf_dataset); TRL
         #   auto-detects this shape and would set completion_only_loss=True
@@ -264,6 +285,7 @@ def train(args: argparse.Namespace) -> None:
         args=training_args,
         train_dataset=dataset,
         processing_class=tokenizer,  # was `tokenizer=` in trl <1.0
+        callbacks=[StepCheckpointCallback(save_every=args.save_steps)],
     )
 
     logger.info("Starting training%s", " (dry run — 1 step)" if args.dry_run else "")
@@ -291,8 +313,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-seq-len",  type=int,   default=DEFAULT_MAX_SEQ_LEN)
     parser.add_argument("--lora-rank",    type=int,   default=DEFAULT_LORA_RANK)
     parser.add_argument("--lora-alpha",   type=int,   default=DEFAULT_LORA_ALPHA)
-    parser.add_argument("--lora-dropout", type=float, default=DEFAULT_LORA_DROPOUT)
-    parser.add_argument("--dry-run",      action="store_true", help="Run 1 step only to verify setup")
+    parser.add_argument("--lora-dropout",   type=float, default=DEFAULT_LORA_DROPOUT)
+    parser.add_argument("--learning-rate",  type=float, default=1e-4,
+                        help="AdamW learning rate (default 1e-4; use 5e-5 for rank≥32 adapters).")
+    parser.add_argument("--no-gradient-checkpointing", action="store_true",
+                        help="Disable gradient checkpointing. Uses ~2-4x more VRAM but removes "
+                             "the ~40%% recompute overhead. Safe when VRAM headroom is available.")
+    parser.add_argument("--save-steps", type=int, default=200,
+                        help="Save a checkpoint every N steps (default 200). Lets you recover "
+                             "peak checkpoints that would otherwise be overwritten at epoch end.")
+    parser.add_argument("--save-total-limit", type=int, default=12,
+                        help="Maximum number of checkpoints to keep on disk (default 12). "
+                             "Oldest are deleted first. 12 × 200 steps ≈ last 2400 steps retained.")
+    parser.add_argument("--dry-run",        action="store_true", help="Run 1 step only to verify setup")
     return parser.parse_args(argv)
 
 

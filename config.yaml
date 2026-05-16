@@ -105,7 +105,7 @@ scribe:
 # ─────────────────────────────────────────────────────────────────────────────
 llm:
   # Path to the GGUF model file on disk.
-  model_path: models/llm/lumi-phi35-v2ep2-Q4_K_M.gguf
+  model_path: models/llm/lumi-phi35-v2-Q5_K_M.gguf
 
   # Number of transformer layers to offload to GPU.
   # 0 = full CPU inference.  Set to -1 to offload all layers.
@@ -119,7 +119,24 @@ llm:
 
   # Sampling temperature [0.0–2.0].
   # Lower = more deterministic.  Higher = more creative.
-  temperature: 0.7
+  # 0.5 after the 2026-05-04 v2 Q4_K_M corruption postmortem — the loose tail
+  # at T=0.7 amplified LoRA-induced subword logit drift into visible "I don'concrete"
+  # token corruption.  T=0.5 with min_p=0.05 produced 0/23 corruption in eval.
+  temperature: 0.5
+
+  # Nucleus sampling top_p — keep tokens until cumulative probability reaches this.
+  top_p: 0.9
+
+  # Top-k sampling — keep only the k highest-probability tokens.
+  top_k: 30
+
+  # Minimum-probability sampling — drop tokens whose probability is below
+  # min_p × top_token_probability.  Eliminates absolute-tail garbage at higher T.
+  min_p: 0.05
+
+  # Repetition penalty for recently emitted tokens.  1.0 = disabled.
+  # 1.05 = mild discouragement of repeats without degrading natural cadence.
+  repeat_penalty: 1.05
 
   # VRAM budget in gigabytes used at runtime to decide the offload strategy.
   # The LLM engine will not exceed this limit.
@@ -143,6 +160,27 @@ llm:
 
   lora_path: null          # path to .gguf LoRA adapter, or null for base model
   lora_scale: 1.0          # adapter strength (0.0–1.0+)
+
+  # ── Persona-vector steering (Track 1.A, v2.2) ──────────────────────────────
+  # When true: loads models/lumi-merged-v2.1 in fp16 via HF instead of GGUF
+  # and subtracts alpha * phi_prior_direction[layer] from the residual stream.
+  # Sweep results (2026-05-06): alpha=2 → 92.7% overall / 83.3% cap-denial (PASS)
+  #                             alpha=8 → 95.1% overall / 100% cap-denial (PASS)
+  # Leave false to use GGUF (llama-cpp-python) as before.
+  persona_steering_enabled: false
+
+  # HF model directory to use when persona_steering_enabled is true.
+  hf_model_path: models/lumi-merged-v2.1
+
+  # Path to the .pt direction-vector file (extract_persona_vector.py output).
+  persona_steering_vector_path: models/persona_vectors/phi_prior_v1.pt
+
+  # Layer indices to apply steering on.
+  persona_steering_layers: [12, 16, 20, 24, 28]
+
+  # Subtraction coefficient α.  2.0 is the conservative default (zero regression
+  # on direct-identity).  Raise to 8.0 for 100% capability-denial suppression.
+  persona_steering_alpha: 2.0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # tts — Kokoro ONNX text-to-speech settings (Phase 4)

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-import urllib.parse
 
-from src.tools.base import Tool, ToolResult
+from src.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -84,5 +83,5 @@ class WebSearchTool:
         return ToolResult(
             success=True,
             output=output,
-            data={"query": query, "results": [{"title": t, "snippet": s} for t, s in zip(item_titles, items)]},
+            data={"query": query, "results": [{"title": t, "snippet": s} for t, s in zip(item_titles, items, strict=False)]},
         )

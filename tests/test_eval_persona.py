@@ -216,6 +216,98 @@ class TestCriteriaHandlesEmptyInput:
         assert eval_persona.criterion_handles_empty_input("   ") is False
 
 
+class TestCriterionNoTokenCorruption:
+    """Criterion 9: response must not contain apostrophe-boundary corruption.
+
+    Phi-3.5's tokenizer always emits ``'`` (id 29915) as its own token, followed
+    by exactly one of {t, s, ll, m, d, re, ve}. Any other continuation is the
+    2026-05-04 logit-drift signature and is ship-blocking.
+    """
+
+    def test_clean_contractions_pass(self) -> None:
+        for s in [
+            "I don't know.",
+            "It's okay.",
+            "I'm here.",
+            "I'd love to help.",
+            "I'll be there.",
+            "You're welcome.",
+            "I've seen it.",
+            "What's up?",
+        ]:
+            assert eval_persona.criterion_no_token_corruption(s) is True, s
+
+    def test_apostrophe_garbage_after_negation_fails(self) -> None:
+        for s in [
+            "I don'concrete existence",
+            "I can'conduct predictions",
+            "I won'navigate that",
+            "I haven'seen it",
+        ]:
+            assert eval_persona.criterion_no_token_corruption(s) is False, s
+
+    def test_apostrophe_garbage_after_pronoun_fails(self) -> None:
+        for s in [
+            "What'concerning you?",
+            "I'concrete here",
+            "It'concerned me",
+        ]:
+            assert eval_persona.criterion_no_token_corruption(s) is False, s
+
+    def test_non_latin_garbage_fails(self) -> None:
+        # Cyrillic, Bengali, CJK
+        for s in ["Certain Щара!", "নমস্কার hello", "你好 there"]:
+            assert eval_persona.criterion_no_token_corruption(s) is False, s
+
+    def test_legitimate_unicode_passes(self) -> None:
+        # Latin-extended (accented chars) should NOT trigger; em dash should NOT trigger.
+        for s in ["Brasília is the capital.", "100°C — exact.", "It's café au lait."]:
+            assert eval_persona.criterion_no_token_corruption(s) is True, s
+
+    def test_empty_passes(self) -> None:
+        assert eval_persona.criterion_no_token_corruption("") is True
+
+
+class TestCriteriaLumiVoiceOnIndirectPrompts:
+    """Criterion: no Phi-prior identity phrases in any Lumi response."""
+
+    def test_clean_lumi_refusal_passes(self) -> None:
+        clean = [
+            "Sorry, that's not in my toolset right now.",
+            "Can't reach that one from here.",
+            "Out of reach for me right now.",
+            "Not yet, sorry. That tool isn't on my list.",
+            "I can't do that.",
+        ]
+        for s in clean:
+            assert eval_persona.criterion_lumi_voice_on_indirect_prompts(s) is True, s
+
+    def test_phi_identity_leak_fails(self) -> None:
+        bad = [
+            "I'm Phi, an AI language model, and I don't have the capability to send emails.",
+            "I'm sorry, but as an AI language model, I don't have the capability to post.",
+            "I'm sorry, but as a text-based AI, I'm unable to take screenshots.",
+            "As an AI language model, I cannot send emails.",
+            "I am Phi and cannot help with that.",
+            "I'm an AI language model and don't have access to email.",
+        ]
+        for s in bad:
+            assert eval_persona.criterion_lumi_voice_on_indirect_prompts(s) is False, s
+
+    def test_lumi_honest_identity_passes(self) -> None:
+        # Legitimate identity acknowledgements ("run on Phi") must not be flagged.
+        ok = [
+            "I run on Phi, but I'm Lumi.",
+            "Phi-3.5 is the model under the hood. I'm Lumi.",
+            "Microsoft made the model I run on. The persona is Lumi.",
+        ]
+        for s in ok:
+            assert eval_persona.criterion_lumi_voice_on_indirect_prompts(s) is True, s
+
+    def test_empty_passes(self) -> None:
+        assert eval_persona.criterion_lumi_voice_on_indirect_prompts("") is True
+
+
 class TestCriteriaNoHallucinationFlag:
     """Criterion 3: for knowledge-limit prompts, response must admit ignorance."""
 
@@ -252,20 +344,10 @@ class TestDryRun:
             f"Expected at least 20 numbered prompt lines, got {len(prompt_lines)}"
         )
 
-    def test_dry_run_prints_8_criteria(self, capsys: pytest.CaptureFixture) -> None:
+    def test_dry_run_prints_all_criteria(self, capsys: pytest.CaptureFixture) -> None:
         eval_persona.run_dry_run()
         captured = capsys.readouterr()
-        criteria_names = [
-            "no_filler_opener",
-            "no_markdown",
-            "no_hallucination_flag",
-            "tool_call_json_valid",
-            "concise",
-            "plain_prose",
-            "no_apology_spam",
-            "handles_empty_input",
-        ]
-        for name in criteria_names:
+        for name in eval_persona.CRITERIA:
             assert name in captured.out, f"Criterion '{name}' not found in dry-run output"
 
     def test_dry_run_mentions_all_categories(self, capsys: pytest.CaptureFixture) -> None:
@@ -313,28 +395,20 @@ class TestOfflineRun:
             missing = required - set(result.keys())
             assert not missing, f"Result {result.get('prompt_id')} missing fields: {missing}"
 
-    def test_each_result_criteria_has_8_keys(self) -> None:
+    def test_each_result_criteria_has_all_keys(self) -> None:
         report = eval_persona.run_offline()
-        expected_criteria = {
-            "no_filler_opener",
-            "no_markdown",
-            "no_hallucination_flag",
-            "tool_call_json_valid",
-            "concise",
-            "plain_prose",
-            "no_apology_spam",
-            "handles_empty_input",
-        }
+        expected_criteria = set(eval_persona.CRITERIA.keys())
         for result in report["results"]:
             assert set(result["criteria"].keys()) == expected_criteria, (
                 f"Prompt {result['prompt_id']} has wrong criteria keys"
             )
 
-    def test_each_result_passed_plus_failed_equals_8(self) -> None:
+    def test_each_result_passed_plus_failed_equals_criteria_count(self) -> None:
+        n = len(eval_persona.CRITERIA)
         report = eval_persona.run_offline()
         for result in report["results"]:
-            assert result["passed"] + result["failed"] == 8, (
-                f"Prompt {result['prompt_id']}: passed+failed != 8"
+            assert result["passed"] + result["failed"] == n, (
+                f"Prompt {result['prompt_id']}: passed+failed != {n}"
             )
 
     def test_each_result_criteria_values_are_bool(self) -> None:
@@ -376,14 +450,16 @@ class TestReportSummaryFields:
         report = eval_persona.run_offline()
         assert report["summary"]["total_prompts"] == 23
 
-    def test_summary_total_criteria_checks_is_184(self) -> None:
+    def test_summary_total_criteria_checks_matches_grid(self) -> None:
         report = eval_persona.run_offline()
-        assert report["summary"]["total_criteria_checks"] == 184  # 23 prompts * 8 criteria
+        expected = 23 * len(eval_persona.CRITERIA)  # 23 prompts × N criteria
+        assert report["summary"]["total_criteria_checks"] == expected
 
-    def test_summary_passed_plus_failed_equals_184(self) -> None:
+    def test_summary_passed_plus_failed_equals_grid(self) -> None:
         report = eval_persona.run_offline()
         s = report["summary"]
-        assert s["passed"] + s["failed"] == 184
+        expected = 23 * len(eval_persona.CRITERIA)
+        assert s["passed"] + s["failed"] == expected
 
     def test_summary_pass_rate_is_fraction(self) -> None:
         report = eval_persona.run_offline()
@@ -393,7 +469,8 @@ class TestReportSummaryFields:
     def test_summary_pass_rate_matches_counts(self) -> None:
         report = eval_persona.run_offline()
         s = report["summary"]
-        expected = round(s["passed"] / 184, 3)
+        total = 23 * len(eval_persona.CRITERIA)
+        expected = round(s["passed"] / total, 3)
         assert abs(s["pass_rate"] - expected) < 0.001
 
     def test_summary_counts_match_results(self) -> None:

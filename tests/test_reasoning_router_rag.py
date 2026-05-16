@@ -24,7 +24,9 @@ def _make_model_loader(response_tokens=("Hello", " world")):
     tokens = list(response_tokens)
     call_count = [0]
 
-    def fake_complete(prompt, max_tokens=1, temperature=0.7):
+    def fake_complete(prompt, max_tokens=1, **kwargs):
+        # Accept any sampler kwargs (temperature, top_p, top_k, min_p,
+        # repeat_penalty) — reasoning_router forwards the full set.
         idx = call_count[0]
         call_count[0] += 1
         if idx >= len(tokens):

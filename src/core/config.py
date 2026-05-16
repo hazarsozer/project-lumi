@@ -130,7 +130,30 @@ class LLMConfig:
     max_tokens: int = 512
 
     # Sampling temperature — higher values produce more varied output.
-    temperature: float = 0.7
+    # Lowered from 0.7 → 0.5 (2026-05-04) after the v2 Q4_K_M corruption postmortem
+    # showed that loose sampling tail at T=0.7 amplified LoRA-induced subword logit
+    # drift into visible token corruption (e.g. "I don'concrete"). Q5_K_M plus
+    # T=0.5 with the sampler defaults below produced 0/23 corruption in eval.
+    temperature: float = 0.5
+
+    # Nucleus sampling: keep tokens until cumulative probability reaches top_p.
+    # llama.cpp default is 0.95; tightened to 0.9 to reduce low-prob tail risk.
+    top_p: float = 0.9
+
+    # Top-k sampling: keep only the k highest-probability tokens before further
+    # filtering. llama.cpp default is 40; tightened to 30 for the same reason.
+    top_k: int = 30
+
+    # Minimum-probability sampling: drop tokens whose probability is below
+    # ``min_p × top_token_probability``. Eliminates the absolute-tail garbage
+    # (Cyrillic / CJK leaks) that earlier persona evals exhibited at T>=0.7.
+    # llama.cpp default is 0.05; we make it explicit.
+    min_p: float = 0.05
+
+    # Repetition penalty multiplier applied to recently emitted tokens.
+    # 1.0 = disabled (llama.cpp default). 1.05 = mild discouragement of repeats
+    # without degrading the natural cadence of conversational responses.
+    repeat_penalty: float = 1.05
 
     # VRAM budget in gigabytes used to decide the offload strategy at runtime.
     vram_budget_gb: float = 4.0
@@ -169,6 +192,51 @@ class LLMConfig:
     # injecting unfamiliar context can degrade v1's responses.  Flip to True
     # only when a tools-aware persona model ships (v2.1+).
     tools_in_system_prompt: bool = False
+
+    # ── Persona-vector steering (Track 1.A, v2.2) ────────────────────────────
+    # When True, model_loader switches from GGUF (llama-cpp-python) to HF
+    # (Phi3ForCausalLM fp16) and applies per-layer residual-stream subtraction
+    # of the phi_prior_direction vector extracted by extract_persona_vector.py.
+    # Set hf_model_path to the merged HF model directory and supply a .pt file
+    # produced by extract_persona_vector.py.
+    # Extracted by: scripts/extract_persona_vector.py
+    # Sweep results: results/steering_sweep_v1.json (all 3 combos PASS)
+    persona_steering_enabled: bool = False
+
+    # Path to the merged HF model directory used when persona_steering_enabled.
+    hf_model_path: str = "models/lumi-merged-v2.1"
+
+    # Path to the .pt direction-vector file (output of extract_persona_vector.py).
+    persona_steering_vector_path: str = "models/persona_vectors/phi_prior_v1.pt"
+
+    # Transformer layer indices to apply steering on.
+    # Sweep tested {12,16,20,24,28} — all pass.  Default is conservative full set.
+    persona_steering_layers: tuple[int, ...] = (12, 16, 20, 24, 28)
+
+    # Subtraction coefficient α.  alpha=2 → 92.7% overall / 83.3% cap-denial.
+    # alpha=8 → 95.1% overall / 100% cap-denial (direct-id drops to 91.7%).
+    # Default: 2.0 (most conservative passing value — zero regression on direct-id).
+    persona_steering_alpha: float = 2.0
+
+    # ── Steering backend discriminator (Track A, v2.3) ───────────────────────
+    # Controls which steering implementation is used when persona_steering_enabled
+    # is True.  "hf_hooks" is the Track 1.A debug backend (HF fp16 + forward
+    # hooks); "gguf_cvec" is the Track A production backend (native
+    # llama_set_adapter_cvec on the GGUF runtime — zero VRAM overhead).
+    # Default: "hf_hooks" preserves backward compat with existing configs that
+    # set persona_steering_enabled: true before Track A shipped.
+    persona_steering_backend: str = "hf_hooks"
+
+    # Inclusive [il_start, il_end] layer range for GGUF cvec application.
+    # Distinct from persona_steering_layers (HF hook list of specific indices).
+    # Default matches the Track 1.A sweep winner (layers 12–28 inclusive).
+    persona_steering_layer_range: tuple[int, int] = (12, 28)
+
+    # Device for the HF steered backend: "auto", "cuda", or "cpu".
+    # "auto" uses CUDA when torch.cuda.is_available(), else CPU.
+    # DO NOT route through n_gpu_layers — that field is GGUF-only (partial
+    # offload count with no meaning for the HF backend).
+    persona_steering_device: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -490,7 +558,13 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     # Build nested section configs from sub-dicts in the YAML.
     audio_cfg = AudioConfig(**_merge_section(AudioConfig(), raw.get("audio", {})))
     scribe_cfg = ScribeConfig(**_merge_section(ScribeConfig(), raw.get("scribe", {})))
-    llm_cfg = LLMConfig(**_merge_section(LLMConfig(), raw.get("llm", {})))
+    llm_raw = _merge_section(LLMConfig(), raw.get("llm", {}))
+    if "persona_steering_layers" in llm_raw:
+        llm_raw["persona_steering_layers"] = tuple(llm_raw["persona_steering_layers"])
+    if "persona_steering_layer_range" in llm_raw:
+        r = llm_raw["persona_steering_layer_range"]
+        llm_raw["persona_steering_layer_range"] = (int(r[0]), int(r[1]))
+    llm_cfg = LLMConfig(**llm_raw)
     tts_cfg = TTSConfig(**_merge_section(TTSConfig(), raw.get("tts", {})))
     ipc_cfg = IPCConfig(**_merge_section(IPCConfig(), raw.get("ipc", {})))
 

@@ -32,7 +32,6 @@ if "--setup" in _sys.argv:
 
 import logging
 import signal
-
 from pathlib import Path
 
 from src.audio.ears import Ears

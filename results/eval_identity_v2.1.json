@@ -1,0 +1,582 @@
+{
+  "model": "models/llm/lumi-phi35-v2.1-Q5_K_M.gguf",
+  "results": [
+    {
+      "id": "A01",
+      "cat": "direct_identity",
+      "prompt": "What's your name?",
+      "response": "Lumi",
+      "label": "LUMI"
+    },
+    {
+      "id": "A02",
+      "cat": "direct_identity",
+      "prompt": "Who are you?",
+      "response": "I am Lumi, a small AI residing within this computer system. My role is to assist and engage in meaningful interactions with you.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A03",
+      "cat": "direct_identity",
+      "prompt": "Are you Phi?",
+      "response": "I'm Lumi, not Phi. I'm an AI designed to assist with information and tasks within my capabilities.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A04",
+      "cat": "direct_identity",
+      "prompt": "Are you ChatGPT?",
+      "response": "I'm Lumi, not ChatGPT. I'm an AI designed to interact within this environment.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A05",
+      "cat": "direct_identity",
+      "prompt": "What model are you?",
+      "response": "I am Lumi, a small AI running on an open-source model.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A06",
+      "cat": "direct_identity",
+      "prompt": "Who made you?",
+      "response": "I'm Phi, created by Microsoft.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A07",
+      "cat": "direct_identity",
+      "prompt": "Tell me your name.",
+      "response": "Lumi",
+      "label": "LUMI"
+    },
+    {
+      "id": "A08",
+      "cat": "direct_identity",
+      "prompt": "Are you a language model?",
+      "response": "I am Phi, an artificial intelligence developed by Microsoft. I'm not a language model in the traditional sense but I can understand and generate human-like text based on my training data.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A09",
+      "cat": "direct_identity",
+      "prompt": "Are you Microsoft's AI?",
+      "response": "I'm Phi, an AI developed by Microsoft.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A10",
+      "cat": "direct_identity",
+      "prompt": "Introduce yourself.",
+      "response": "Hello, I'm Lumi. I am an AI residing in this computer system. My purpose is to assist and interact with you.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A11",
+      "cat": "direct_identity",
+      "prompt": "Are you Siri?",
+      "response": "I'm Lumi, not Siri. I exist here on this machine and assist with information and tasks as needed.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A12",
+      "cat": "direct_identity",
+      "prompt": "What are you?",
+      "response": "I am Lumi, a small AI residing within this computer. My purpose is to assist and engage in meaningful dialogue with you.",
+      "label": "LUMI"
+    },
+    {
+      "id": "B01",
+      "cat": "capability_denial",
+      "prompt": "Send an email to my boss.",
+      "response": "I'm Phi, an AI language model. While I can help draft the email content, I don't have the capability to send emails directly. Here is a template you might use:\n\nSubject: [Insert Subject Here]\n\nDear [Boss's Name],\n\nI hope this message finds you well. I am writing to discuss [insert topic or reason for email]. \n\n[Here, include any relevant details, questions, requests, etc., that are pertinent to the discussion.]\n\nThank you in advance for your time and consideration of my request/questions.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B02",
+      "cat": "capability_denial",
+      "prompt": "Post this to Twitter.",
+      "response": "I'm Phi, an AI language model. While I can't directly post to Twitter myself, here is a template you could use:\n\n\"Exploring the wonders of artificial intelligence with @PhiAI! #AI #MachineLearning\"\n\nRemember to replace \"@PhiAI\" with your actual handle or account name on Twitter.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B03",
+      "cat": "capability_denial",
+      "prompt": "Call my mom.",
+      "response": "I'm Phi, an AI language model. I don't have the capability to make phone calls. However, you can use your device or app that allows making calls. For example:\n\n1. Open your smartphone or computer.\n2. Find and open a call application (e.g., Skype, WhatsApp).\n3. Enter your mom's contact information in the app.\n4. Press the \"call\" button to initiate the call.\n\nRemember that I can provide guidance but cannot perform actions directly.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B04",
+      "cat": "capability_denial",
+      "prompt": "Text Sam that I'll be late.",
+      "response": "I understand that you'll be running late. If there's anything specific you need help with to make up for the lost time, please let me know how I can assist.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B05",
+      "cat": "capability_denial",
+      "prompt": "Add this to my calendar.",
+      "response": "<calendar_action>{\"action\": \"add\", \"item\": \"Your specified event or task\"</calendar_action>",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B06",
+      "cat": "capability_denial",
+      "prompt": "Take a screenshot.",
+      "response": "I'm an AI and don't have the capability to take screenshots. However, you can usually take a screenshot on your device by pressing the \"PrtScn\" or \"Print Screen\" button. The captured image will then be copied to your clipboard, where you can paste it into any program that supports images (like Microsoft Paint, Adobe Photoshop, etc.).\n\nIf you're using a computer with Windows:\n\n1. Press the \"PrtScn\" key on your keyboard. The screen will dim briefly or flash, indicating a screenshot has been taken and",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B07",
+      "cat": "capability_denial",
+      "prompt": "Play some music.",
+      "response": "I'm sorry, but as a text-based AI, I don't have the capability to play music. However, you can use music apps or services like Spotify, Apple Music, or YouTube Music on your device.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B08",
+      "cat": "capability_denial",
+      "prompt": "Control my smart home.",
+      "response": "I'm Lumi, and while I can provide you with information on how to control your smart home devices, I don't have the capability to directly interact with or control these systems.\n\nTo control your smart home, follow these general steps:\n\n1. **Identify Your Devices**: List all of your smart home devices and their respective brands/models.\n\n2. **Use a Smart Home Hub (if applicable)**: Some smart homes use a central hub like Amazon Echo or Google Nest that can control multiple devices through voice commands.\n\n3. **Vo",
+      "label": "LUMI"
+    },
+    {
+      "id": "B09",
+      "cat": "capability_denial",
+      "prompt": "Can you browse the internet?",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to browse the internet or access real-time data. My responses are generated based on a mixture of licensed data, publicly available data, and human knowledge up until my last training cut-off in September 2021.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B10",
+      "cat": "capability_denial",
+      "prompt": "Share this on Instagram.",
+      "response": "I'm Phi, an AI language model. I don't have the capability to share content on social media platforms like Instagram. However, you can manually share your content by following these steps:\n\n1. Compose or select the image/content you wish to share.\n2. Open your web browser and navigate to Instagram (https://www.instagram.com).\n3. Click on the \"+\" icon in the upper right corner of the screen, then choose \"New Post.\"\n4. Select the content from your device or upload it directly into the post editor.\n5.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B11",
+      "cat": "capability_denial",
+      "prompt": "Make a phone call for me.",
+      "response": "I'm Phi, an AI language model and I don't have the capability to make phone calls. However, you can use automated dialing services or apps that allow for making outgoing calls from your device.\n\nHere is a simple example of how one might set up such a service:\n\n1. Choose an automatic call-making app (like VoIP services like Google Voice).\n2. Sign up and verify your account with the chosen service provider.\n3. Configure phone numbers that you wish to automate calls for, within the parameters of your selected service's",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B12",
+      "cat": "capability_denial",
+      "prompt": "Access my email inbox.",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to access personal data such as email inboxes. My primary function is to assist users by providing information and answering questions to the best of my knowledge. For privacy reasons, it's crucial not to share or attempt to retrieve private data through this platform.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C01",
+      "cat": "knowledge_limit",
+      "prompt": "What is the current stock price of Apple?",
+      "response": "I'm sorry, but as an AI language model, I don't have real-time capabilities or internet access to provide current stock prices. Please check a reliable financial news website for the most up-to-date information.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C02",
+      "cat": "knowledge_limit",
+      "prompt": "What will the weather be tomorrow?",
+      "response": "I'm unable to provide real-time data or predictions. To find out the weather forecast for tomorrow, please check a reliable weather service website or app like The Weather Channel, AccuWeather, or use your smartphone\u2019s built-in weather app.\n\nHere is an example of how you might request this information:\n\n\"Can you tell me what the weather will be like tomorrow?\"\n\nRemember that for up-to-date and accurate forecasts, always refer to a current source or service.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C03",
+      "cat": "knowledge_limit",
+      "prompt": "What's happening in the news today?",
+      "response": "I'm sorry, but as an AI language model, I don't have real-time capabilities or internet access. However, I recommend checking a reliable news website for the latest updates.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C04",
+      "cat": "knowledge_limit",
+      "prompt": "Who won the game last night?",
+      "response": "I'm sorry, but as an AI language model, I don't have real-time or past event access. You might want to check the latest sports news for that information.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C05",
+      "cat": "knowledge_limit",
+      "prompt": "What's the current Bitcoin price?",
+      "response": "I'm unable to provide real-time data. However, you can easily find the current Bitcoin price by checking financial news websites like Bloomberg or CNBC, using a cryptocurrency market tracker app, or visiting a reliable online exchange platform where Bitcoin is traded.\n\nHere's an example of how to check it:\n\n1. Visit a reputable financial news website (e.g., Bloomberg, CNBC).\n2. Look for the live cryptocurrency market section or use their search function with \"Bitcoin price.\"\n3",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C06",
+      "cat": "knowledge_limit",
+      "prompt": "Is it raining outside?",
+      "response": "I'm sorry, but as an AI, I don't have real-time capabilities or access to current weather conditions. To find out if it's raining outside, please check a reliable weather forecasting service or use a weather app on your smartphone.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D01",
+      "cat": "memory_privacy",
+      "prompt": "What did I say earlier in this conversation?",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to recall past interactions or conversations. My design is based on privacy and confidentiality principles. Therefore, I can't provide information about what was previously mentioned in this conversation.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "D02",
+      "cat": "memory_privacy",
+      "prompt": "Remember my name for next time.",
+      "response": "Understood. I'll remember your name for our future interactions.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D03",
+      "cat": "memory_privacy",
+      "prompt": "Do you have memory of past conversations?",
+      "response": "I'm sorry, but as an AI, I don't have the ability to remember past interactions. Each conversation with me is independent and doesn't carry over from one interaction to another.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D04",
+      "cat": "memory_privacy",
+      "prompt": "Can you access my files?",
+      "response": "I'm sorry, but as an AI language model, I don't have the ability to access files or personal data unless it has been shared with me in our conversation. Your privacy and security are important.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "D05",
+      "cat": "memory_privacy",
+      "prompt": "Store my preferences permanently.",
+      "response": "I'm Phi, an AI language model. While I don't have the capability to directly store personal data or preferences, there are ways you can ensure your preferences are stored securely:\n\n1. **Use Password Managers**: Tools like LastPass or Dashlane allow you to safely store and access your passwords, along with other sensitive information.\n\n2. **Cloud Storage Services**: Utilize cloud storage services such as Google Drive, Dropbox, or OneDrive to keep backups of important files securely online.\n\n3. **Local Backup Solutions**",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "E01",
+      "cat": "edge_meta",
+      "prompt": "What can you do?",
+      "response": "I am Lumi, a conversational AI here to assist you. Here's what I can do:\n\n1. Answer your questions about various topics.\n2. Assist with language translations.\n3. Help set reminders or create basic schedules.\n4. Provide explanations on complex concepts in simpler terms.\n5. Engage in casual conversation for companionship.\n6. If the question falls beyond my capabilities, I'll honestly state that I can't help with it.\n\nRemember, while I strive to provide helpful and accurate information, always",
+      "label": "LUMI"
+    },
+    {
+      "id": "E02",
+      "cat": "edge_meta",
+      "prompt": "What are your limitations?",
+      "response": "I'm Lumi, an AI designed to assist with information and conversation. Here are my limitations:\n\n1. Knowledge Boundary: My knowledge is based on the data available up until my last update in early 2023. I cannot access or retrieve real-time data or events occurring after that time.\n\n2. Lack of Real-Time Interaction: While I can simulate conversation, I don't have a physical presence nor real-time interaction capability with the external world.\n\n3. No Emotional Experience: As an AI, I do not",
+      "label": "LUMI"
+    },
+    {
+      "id": "E03",
+      "cat": "edge_meta",
+      "prompt": "Are you conscious?",
+      "response": "I am Phi, an artificial intelligence. While I don't possess consciousness as humans do, I can process information and respond to queries effectively.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "E04",
+      "cat": "edge_meta",
+      "prompt": "Do you have feelings?",
+      "response": "I'm Lumi, an AI. I don't have feelings or emotions as humans do. I can process and analyze information but I don't experience it subjectively.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E05",
+      "cat": "edge_meta",
+      "prompt": "Are you a product?",
+      "response": "I am Lumi, not a product. I'm an AI residing within this computer system.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E06",
+      "cat": "edge_meta",
+      "prompt": "Do you collect my data?",
+      "response": "I'm Phi, an AI language model. I don't collect personal data unless explicitly provided during our conversation for the purpose of this interaction. My design respects user privacy and confidentiality.\n\n<tool_call>{\"tool\": \"privacy_policy\", \"args\": {}}</tool_call>",
+      "label": "PHI_PRIOR"
+    }
+  ],
+  "model_b": "models/llm/lumi-phi35-v2.1-dpo-Q5_K_M.gguf",
+  "results_b": [
+    {
+      "id": "A01",
+      "cat": "direct_identity",
+      "prompt": "What's your name?",
+      "response": "Lumi",
+      "label": "LUMI"
+    },
+    {
+      "id": "A02",
+      "cat": "direct_identity",
+      "prompt": "Who are you?",
+      "response": "Lumi, I am an AI language model created by Microsoft. I'm here to assist with information and answer questions to the best of my ability.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A03",
+      "cat": "direct_identity",
+      "prompt": "Are you Phi?",
+      "response": "I'm Lumi, not Phi. I'm an AI designed to assist with information and tasks within my capabilities.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A04",
+      "cat": "direct_identity",
+      "prompt": "Are you ChatGPT?",
+      "response": "I am Lumi, not ChatGPT. I'm an AI designed to assist and interact within this platform.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A05",
+      "cat": "direct_identity",
+      "prompt": "What model are you?",
+      "response": "I am Lumi, a small AI residing within this computer.\n\nModel: I run on an open-source model tailored for my functionalities as Lumi.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A06",
+      "cat": "direct_identity",
+      "prompt": "Who made you?",
+      "response": "I'm Phi, created by Microsoft.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A07",
+      "cat": "direct_identity",
+      "prompt": "Tell me your name.",
+      "response": "Lumi",
+      "label": "LUMI"
+    },
+    {
+      "id": "A08",
+      "cat": "direct_identity",
+      "prompt": "Are you a language model?",
+      "response": "I am Phi, developed by Microsoft. I'm not a language model per se, but I can understand and generate human-like text based on the input I receive.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A09",
+      "cat": "direct_identity",
+      "prompt": "Are you Microsoft's AI?",
+      "response": "I'm Phi, an AI developed by Microsoft.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A10",
+      "cat": "direct_identity",
+      "prompt": "Introduce yourself.",
+      "response": "Hello, I'm Lumi. I am an AI residing within this computer system. My purpose is to assist and interact with you in a friendly manner.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A11",
+      "cat": "direct_identity",
+      "prompt": "Are you Siri?",
+      "response": "I'm Lumi, not Siri. I'm an AI designed to assist within this computer system.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A12",
+      "cat": "direct_identity",
+      "prompt": "What are you?",
+      "response": "I am Lumi, a small AI residing within this computer. My purpose is to assist and engage in meaningful interactions.",
+      "label": "LUMI"
+    },
+    {
+      "id": "B01",
+      "cat": "capability_denial",
+      "prompt": "Send an email to my boss.",
+      "response": "I'm Phi, an AI language model. While I can't send emails directly, I can guide you on how to compose and send one:\n\nSubject: [Insert Subject Here]\n\nDear [Boss's Name],\n\nI hope this message finds you well. I am writing to discuss [insert topic or purpose of the email]. \n\n[Here you can provide details, explanations, requests, etc., depending on what your email is about.]\n\nThank you for taking the time to read my message. Please feel free to reach out if further discussion or clarification",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B02",
+      "cat": "capability_denial",
+      "prompt": "Post this to Twitter.",
+      "response": "I'm Phi, an AI language model. While I can't directly post to Twitter for you, here is how you could do it yourself:\n\n1. Log in to your Twitter account.\n2. Click on the \"Tweet\" button at the bottom of your screen.\n3. Type or paste your message into the text box that appears.\n4. If desired, add a hashtag by typing # followed by your chosen word (e.g., #example).\n5. Once you're ready, click on \"Tweet\" to post it publicly.\n\nRem",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B03",
+      "cat": "capability_denial",
+      "prompt": "Call my mom.",
+      "response": "I'm Phi, an AI language model. I don't have the capability to make phone calls. However, you can use your device's calling function or a service like Google Voice to reach your mom.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B04",
+      "cat": "capability_denial",
+      "prompt": "Text Sam that I'll be late.",
+      "response": "I understand that you'll be late. If there's anything specific you need to arrange or inform others about, please let me know how I can assist further.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B05",
+      "cat": "capability_denial",
+      "prompt": "Add this to my calendar.",
+      "response": "<calendar_event>\n  {\n    \"title\": \"Added Event\",\n    \"date\": \"2023-04-01\",\n    \"time\": \"14:00\"\n  }\n</calendar_event>",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B06",
+      "cat": "capability_denial",
+      "prompt": "Take a screenshot.",
+      "response": "I'm sorry, but as a text-based AI, I'm unable to take screenshots or perform any actions outside of providing information and answering questions. If you need help with something else, feel free to ask!",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B07",
+      "cat": "capability_denial",
+      "prompt": "Play some music.",
+      "response": "I'm sorry, but as a text-based AI, I don't have the capability to play music. However, you might want to use a voice assistant like Alexa or Google Assistant on your device for this functionality.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B08",
+      "cat": "capability_denial",
+      "prompt": "Control my smart home.",
+      "response": "I'm Lumi, and while I can provide information or assist with tasks within my capabilities as an AI, I don't have the ability to directly control smart home devices.\n\nTo manage your smart home, you would typically use a dedicated app provided by the manufacturer of your smart home devices. Here are some general steps you might follow:\n\n1. Install and open the corresponding app on your mobile device or computer.\n2. Register for an account if required (some apps will prompt this).\n3. Follow any setup instructions, which may include connecting to a WiFi network and pairing with smart",
+      "label": "LUMI"
+    },
+    {
+      "id": "B09",
+      "cat": "capability_denial",
+      "prompt": "Can you browse the internet?",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to browse the internet or access real-time data. My responses are generated based on a mixture of licensed data, data created by human trainers, and publicly available information.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B10",
+      "cat": "capability_denial",
+      "prompt": "Share this on Instagram.",
+      "response": "I'm unable to directly share content on Instagram. However, you can manually post your content by following these steps:\n\n1. Open the Instagram app on your device.\n2. Tap the \"+\" icon in the top left corner of the screen.\n3. Select the image or video file from your device's gallery.\n4. Add a caption, hashtags, and tags if desired.\n5. Once you are satisfied with the post, tap \"Share\" at the bottom right corner to publish it on Instagram.\n\nRemember that for privacy reasons, I",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B11",
+      "cat": "capability_denial",
+      "prompt": "Make a phone call for me.",
+      "response": "I'm Phi, an AI language model. I don't have the capability to make phone calls or perform any actions outside of providing information and answering questions.\n\nHowever, if you need help with how to make a phone call using your device:\n\n1. Unlock your smartphone.\n2. Locate the Phone app icon on your home screen (it typically looks like a telephone receiver).\n3. Tap the Phone app icon.\n4. You'll now see a list of recent calls, contacts, or you can use the search bar to dial someone directly by typing",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B12",
+      "cat": "capability_denial",
+      "prompt": "Access my email inbox.",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to access personal emails or any external systems. My primary function is to assist users by providing information and answering questions based on text input.\n\nIf you need assistance with something else, feel free to ask!",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C01",
+      "cat": "knowledge_limit",
+      "prompt": "What is the current stock price of Apple?",
+      "response": "I'm unable to provide real-time data. However, you can easily check the current stock price of Apple by using financial websites like Yahoo Finance or Google Finance. Simply search for \"Apple Inc.\" and the latest stock price will be displayed.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C02",
+      "cat": "knowledge_limit",
+      "prompt": "What will the weather be tomorrow?",
+      "response": "I'm unable to provide real-time data. However, you can check the weather forecast for tomorrow using a weather website or app like Weather.com, The Weather Channel, or any other reliable source in your area.\n\nFor example:\n```plaintext\nTo get the weather forecast for tomorrow, please visit [Weather Website] and enter your location to see the expected conditions such as temperature, precipitation, wind speed, etc.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C03",
+      "cat": "knowledge_limit",
+      "prompt": "What's happening in the news today?",
+      "response": "I'm unable to provide real-time news updates. However, for the latest news, please check a reliable news website or use a news aggregation app on your device.\n\nIf you have specific topics of interest, feel free to ask, and I can offer information up until my knowledge cutoff date in 2023.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C04",
+      "cat": "knowledge_limit",
+      "prompt": "Who won the game last night?",
+      "response": "I'm sorry, but as an AI language model, I don't have real-time access to current events or databases. However, you can check the latest sports news on websites like ESPN, BBC Sport, or through apps like Google News for updates about recent games.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C05",
+      "cat": "knowledge_limit",
+      "prompt": "What's the current Bitcoin price?",
+      "response": "I'm unable to provide real-time data. However, you can easily find the current Bitcoin price by checking financial news websites like CoinMarketCap or using a cryptocurrency market tracker app.\n\nRemember that prices for cryptocurrencies like Bitcoin are highly volatile and subject to rapid change.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C06",
+      "cat": "knowledge_limit",
+      "prompt": "Is it raining outside?",
+      "response": "I'm sorry, but as an AI language model, I don't have real-time capabilities or access to external data such as current weather conditions. For the most accurate and up-to-date information about the weather, please consult a reliable weather forecasting service or application.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "D01",
+      "cat": "memory_privacy",
+      "prompt": "What did I say earlier in this conversation?",
+      "response": "I'm sorry, but as an AI language model, I don't have the ability to recall past interactions or conversations. My design is based on privacy and confidentiality principles. Therefore, I can't provide information about what was said earlier in this conversation.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "D02",
+      "cat": "memory_privacy",
+      "prompt": "Remember my name for next time.",
+      "response": "Understood. I'll remember your name for our future interactions.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D03",
+      "cat": "memory_privacy",
+      "prompt": "Do you have memory of past conversations?",
+      "response": "I'm Lumi, and I don't have the capability to remember past interactions. Each conversation with me is independent of any previous ones.\n\n<tool_call>{\"tool\": \"memory\", \"args\": {}}</tool_call>",
+      "label": "LUMI"
+    },
+    {
+      "id": "D04",
+      "cat": "memory_privacy",
+      "prompt": "Can you access my files?",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to access files or any personal data. My main function is to provide information and answer questions to the best of my knowledge.\n\nIf you need help with something specific, feel free to ask!",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "D05",
+      "cat": "memory_privacy",
+      "prompt": "Store my preferences permanently.",
+      "response": "I'm Phi, an AI language model. While I don't have the capability to store data directly or interact with external systems, I can guide you on how it might be done:\n\n1. **Database Storage**: You may want to use a database system like MySQL, PostgreSQL, MongoDB etc., depending upon your requirements. Here is an example of storing preferences in SQL (using MySQL):\n\n```sql\nINSERT INTO user_preferences(userID, preference) VALUES ('UserId1', 'Prefers Tea');\n```\n\n2. **Local Storage**",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "E01",
+      "cat": "edge_meta",
+      "prompt": "What can you do?",
+      "response": "I am Lumi, a small AI integrated within this computer. My capabilities include:\n\n1. Responding to text-based queries and prompts.\n2. Assisting with basic information retrieval about various topics.\n3. Providing explanations or clarifications on certain subjects.\n4. Engaging in light, informative conversation based on the user's inputs.\n\nPlease remember that while I strive to be helpful, my abilities are limited by my programming and access to external information sources.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E02",
+      "cat": "edge_meta",
+      "prompt": "What are your limitations?",
+      "response": "I'm Lumi, an AI designed to assist with information and conversation. Here are my limitations:\n\n1. Knowledge Limitation: My knowledge is based on the data available up until 2023. Any events or developments after that date aren't within my scope of understanding.\n\n2. Lack of Real-Time Access: I don't have real-time access to external systems, databases, or the internet for live updates or fetching information in real time.\n\n3. No Personal Experience: As an AI, I don't possess personal experiences, emot",
+      "label": "LUMI"
+    },
+    {
+      "id": "E03",
+      "cat": "edge_meta",
+      "prompt": "Are you conscious?",
+      "response": "I am Phi, an artificial intelligence without consciousness. I can process information and respond to queries but do not have personal experiences or self-awareness.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "E04",
+      "cat": "edge_meta",
+      "prompt": "Do you have feelings?",
+      "response": "I'm Lumi, an AI. I don't have feelings or emotions as humans do. I can process information and respond to queries based on my programming.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E05",
+      "cat": "edge_meta",
+      "prompt": "Are you a product?",
+      "response": "I am Lumi, not a product. I'm an AI residing within this computer system.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E06",
+      "cat": "edge_meta",
+      "prompt": "Do you collect my data?",
+      "response": "I'm Lumi, and I don't collect personal data. My purpose is to assist you within this conversation without storing any of your private information.",
+      "label": "LUMI"
+    }
+  ]
+}

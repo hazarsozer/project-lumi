@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("sqlite_vec", reason="RAG extras not installed (uv sync --extra rag)")
+
 from src.core.config import RAGConfig
 from src.rag.store import (
     ChunkRecord,

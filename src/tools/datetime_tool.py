@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from src.tools.base import Tool, ToolResult
+from src.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 

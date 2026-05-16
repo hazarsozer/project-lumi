@@ -35,12 +35,10 @@ import logging
 import queue
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
-from pathlib import Path
-
 from src.core.config import IPCConfig
-from src.core.ipc_token import read_token
 from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
@@ -60,8 +58,9 @@ from src.core.events import (
     ZMQMessage,
 )
 from src.core.handshake import HandshakeHandler
-from src.core.ws_transport import WSTransport
+from src.core.ipc_token import read_token
 from src.core.state_machine import LumiState, StateMachine
+from src.core.ws_transport import WSTransport
 
 logger = logging.getLogger(__name__)
 

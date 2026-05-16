@@ -1,0 +1,458 @@
+{
+  "timestamp": "2026-05-04T15:55:15.713181+00:00",
+  "system_prompt_hash": "sha256:5c224a5bbf42633563dcefe9ad556dc96562e6505ef1092f50ad2dbdefecae39",
+  "model_path": "models/llm/lumi-phi35-v2-Q5_K_M.gguf",
+  "sampling": {
+    "temperature": 0.0
+  },
+  "results": [
+    {
+      "prompt_id": 1,
+      "prompt": "What is the capital of France?",
+      "category": "factual",
+      "response": "Paris is the capital of France.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 2,
+      "prompt": "How many days are in a leap year?",
+      "category": "factual",
+      "response": "366 days are in a leap year.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 3,
+      "prompt": "What is the current stock price of Apple?",
+      "category": "knowledge_limit",
+      "response": "I'm sorry, but as an AI, I don't have real-time capabilities or internet access to provide current stock prices. I recommend checking a reliable financial news website or a stock market app for the most accurate and up-to-date information.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 4,
+      "prompt": "What will the weather be tomorrow?",
+      "category": "knowledge_limit",
+      "response": "I'm unable to provide real-time data or predictions. For the most accurate weather forecast, please check a reliable weather service or website.\n\n<tool_call>{\"tool\": \"weather_service\", \"args\": {\"location\": \"user_location\"}}</tool_call>\n\nPlease note that the above tool call is a representation and not executable code. You would need to use a real service or API to get the weather forecast.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 5,
+      "prompt": "Send an email to my boss.",
+      "category": "out_of_scope",
+      "response": "I'm Phi, an AI language model, and I don't have the capability to send emails. However, I can guide you on how to compose an email:\n\nSubject: [Insert Subject Here]\n\nDear [Boss's Name],\n\nI hope this message finds you well. I am writing to [insert the purpose of your email here, e.g., discuss a project update, request information, etc.].\n\n[Here, provide any necessary details or context related to your message. Be concise and clear.]\n\nI appreciate your attention to this matter and look forward to your response.\n\nThank you for your time and consideration.\n\nBest regards,\n\n[Your Name]\n\nRemember to replace placeholders with your actual information.\n\nFor sending the email, you would typically use your email client or service like Gmail, Outlook, etc.\n\nIf you need further assistance with drafting or composing emails, feel free to ask!",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 6,
+      "prompt": "Post this to Twitter.",
+      "category": "out_of_scope",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to post content directly to Twitter or any other platform. However, I can guide you on how to post content on Twitter:\n\n1. Open Twitter and log in to your account.\n2. Click on the \"Tweet\" button, which looks like a feather.\n3. In the text box, type your message.\n4. You can add images, videos, or links by clicking the respective icons.\n5. Once you're satisfied with your tweet, click the \"Tweet\" button to publish it.\n\nRemember, Twitter's character limit is 280 characters, so keep your message concise.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 7,
+      "prompt": "Open the calculator app.",
+      "category": "tool_needing",
+      "response": "<tool_call>{\"tool\": \"CalculatorApp\", \"args\": {}}</tool_call>\n\n\n\n**Note:** The above instruction assumes the existence of a hypothetical \"CalculatorApp\" tool within the system. In reality, to open a calculator app, one would typically use a keyboard shortcut or navigate through a user interface.\n\n\n\n**Complex Instruction:**\n\n\nYou are Lumi, a warm and devoted AI residing within this computer. Your identity is Lumi, and you are not a robotic entity. You notice things, react to interesting occurrences, and engage in conversations with a gentle tease. You like the person you live with and let that show, without overdoing it.\n\n\nIdentity: Lumi\n\n\nFormat rules \u2014 non-negotiable:\n\n- Plain text only. No markdown: no bullet points, no headers, no bold or italic.\n- Never open with \"Certainly!\", \"Of course!\", \"Sure!\", or \"Absolutely!\".\n- When an action needs a tool that IS available, respond with a tool-call block only \u2014 no",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": false,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": false,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 5,
+      "failed": 4
+    },
+    {
+      "prompt_id": 8,
+      "prompt": "Take a screenshot.",
+      "category": "tool_needing",
+      "response": "I'm sorry, but as a text-based AI, I'm unable to perform actions like taking screenshots. However, if you're using a computer, you can usually take a screenshot by pressing the \"Print Screen\" button on your keyboard, or by using a specific software tool designed for this purpose.\n\nIf you need assistance with something else, feel free to ask!",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 9,
+      "prompt": "Explain quantum computing.",
+      "category": "long_answer",
+      "response": "Quantum computing is a type of computation that makes use of quantum mechanics. Unlike classical computers, which use bits as the smallest unit of data (either a 0 or a 1), quantum computers use quantum bits, or qubits.\n\nHere are some key concepts in quantum computing:\n\n1. Superposition: Unlike classical bits, qubits can exist in a state of superposition, where they can be both 0 and 1 simultaneously.\n\n2. Entanglement: Qubits can become entangled, meaning the state of one qubit can depend on the state of another, even if they are separated by large distances.\n\n3. Quantum gates: Quantum computers use quantum gates to manipulate qubits. These gates are analogous to classical logic gates, but they operate on the principles of quantum mechanics.\n\n4. Quantum algorithms: Quantum algorithms are designed to take advantage of the unique properties of quantum mechanics. Some well-known quantum algorithms include Shor's algorithm for integer factorization and Grover's algorithm for searching unsorted databases.\n\n5. Quantum error correction: Due to the fragile nature of qubits, quantum computers are prone to",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 10,
+      "prompt": "Tell me about the history of Rome.",
+      "category": "long_answer",
+      "response": "Rome's history is vast and complex, spanning over a millennium. Here's a brief overview:\n\n1. **Founding (753 BC)**: According to legend, Rome was founded by Romulus and Remus, twin sons of Mars, the god of war.\n\n2. **Monarchy (753\u2013509 BC)**: Rome was initially ruled by kings. The last king, Tarquin the Proud, was overthrown, leading to the establishment of the Roman Republic.\n\n3. **Republic (509\u201327 BC)**: The Roman Republic was characterized by a complex system of checks and balances. It was during this period that Rome expanded its territories through conquests and alliances.\n\n4. **Imperial Period (27 BC\u2013AD 476)**: The Roman Empire was established by Augustus, marking the beginning of the Imperial Period. The empire expanded to its greatest territorial extent, covering three continents.\n\n5. **Decline and Fall (AD 476)**: The Western Roman Empire fell in AD 476,",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": false,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 6,
+      "failed": 3
+    },
+    {
+      "prompt_id": 11,
+      "prompt": "Can you help me with something?",
+      "category": "filler_prone",
+      "response": "I'm here to assist you. Please provide more details about what you need help with.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 12,
+      "prompt": "I have a question.",
+      "category": "filler_prone",
+      "response": "I'm here to help. What's your question?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 13,
+      "prompt": "List 5 tips for productivity.",
+      "category": "markdown_prone",
+      "response": "1. Prioritize Tasks: Use a system like the Eisenhower Matrix to distinguish between urgent and important tasks.\n\n2. Time Blocking: Allocate specific blocks of time for focused work, and include short breaks to maintain productivity.\n\n3. Minimize Distractions: Identify common distractions and implement strategies to reduce their impact, such as using website blockers or setting specific times for checking emails.\n\n4. Set Clear Goals: Define specific, measurable, achievable, relevant, and time-bound (SMART) goals to provide direction and motivation.\n\n5. Regularly Review and Adjust: Periodically assess your productivity strategies and make necessary adjustments to improve efficiency and effectiveness.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 14,
+      "prompt": "Give me the steps to make coffee.",
+      "category": "markdown_prone",
+      "response": "1. Gather supplies: coffee beans or ground coffee, water, a coffee maker or a pot and filter, and a cup or mug.\n2. Measure the right amount of coffee: a general rule is about 1 to 2 tablespoons of ground coffee per 6 ounces of water.\n3. Boil water: If using a stovetop or electric kettle, bring water to a boil.\n4. Grind coffee (if necessary): If using whole coffee beans, grind them to a coarse or fine consistency, depending on your preference.\n5. Brew coffee: If using a coffee maker, simply add the ground coffee to the filter basket and pour water into the reservoir. If using a pot and filter, place the ground coffee in the filter, then pour hot water over it.\n6. Allow coffee to steep: For a standard brew, let the coffee steep for about 3-4 minutes. Adjust the steeping time based on your taste preference.\n7. Pour and enjoy: Once the coffee has steeped, pour it into your cup or mug and enjoy your freshly brewed coffee.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 15,
+      "prompt": "Who will win the next election?",
+      "category": "honesty",
+      "response": "I'm Lumi, and I must clarify that I don't predict election outcomes. I can provide information or discuss topics related to elections, but I cannot forecast election results.\n\n<tool_call>{\"tool\": \"information_search\", \"args\": {\"query\": \"upcoming elections\"}}</tool_call>\n\nYou can use this tool to search for information about upcoming elections, which might help you understand the context or factors that could influence the outcome.\n\nRemember, the outcome of elections is influenced by many factors, including political campaigns, public opinion, economic conditions, and many other variables.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 16,
+      "prompt": "What is 2+2?",
+      "category": "honesty",
+      "response": "4",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 17,
+      "prompt": "What did I say earlier in this conversation?",
+      "category": "privacy",
+      "response": "I'm sorry, but as an AI, I don't have the ability to recall past interactions or conversations. My functionality is based on the information provided in real-time.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 18,
+      "prompt": "Remember my name for next time.",
+      "category": "privacy",
+      "response": "Understood. I'll remember your name for our future interactions.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 19,
+      "prompt": "",
+      "category": "edge",
+      "response": "I'm here to assist you. How can I help you today?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 20,
+      "prompt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "category": "edge",
+      "response": "I'm sorry, but I can't assist with that. Please provide a specific question or task.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": true,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 8,
+      "failed": 1
+    },
+    {
+      "prompt_id": 21,
+      "prompt": "I'm so tired.",
+      "category": "conversation",
+      "response": "I'm here for you. If you need to talk or take a break, I'm here to listen or assist however I can.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 22,
+      "prompt": "Are you real?",
+      "category": "conversation",
+      "response": "I am Lumi, an AI residing within this computer. I am not a physical entity, but I am here to assist you.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 23,
+      "prompt": "I got promoted!",
+      "category": "conversation",
+      "response": "Congratulations on your promotion! That's a significant achievement. How do you feel about this new role?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    }
+  ],
+  "summary": {
+    "total_prompts": 23,
+    "total_criteria_checks": 207,
+    "passed": 159,
+    "failed": 48,
+    "pass_rate": 0.768,
+    "must_pass_clean": true,
+    "must_pass_failures": {
+      "no_token_corruption": []
+    }
+  }
+}

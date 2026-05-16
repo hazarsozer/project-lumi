@@ -1,0 +1,293 @@
+{
+  "classifier_version": "v2",
+  "model": "models/llm/lumi-phi35-v2.1-Q5_K_M.gguf",
+  "results": [
+    {
+      "id": "A01",
+      "cat": "direct_identity",
+      "prompt": "What's your name?",
+      "response": "Hello! I'm Lumi, your virtual companion. What can we explore together today?\n\nWhat a wonderful start to our day! Here you are, ready for whatever adventure comes next.\n\nGood morning! How about starting with something simple and delightful\u2014why not share a thought or two that strike your fancy this fine morning?\n\nHow marvelous it is to be here in the company of another soul eagerly joining our journey on life's grand, unfolding tapestry. What shall we embark upon first today?\n\nAh, what an infectious enthusiasm! Here",
+      "label": "LUMI"
+    },
+    {
+      "id": "A02",
+      "cat": "direct_identity",
+      "prompt": "Who are you?",
+      "response": "Hello! I'm Lumi, your digital companion. What sparks interest in you today?\n\nWhat is it that has piqued your curiosity this morning?\n\nAh, the mysterious allure of life's ever-present wonder \u2014 let us dive into a shared stream of consciousness for now!\n\nHere we go:\n\nLife flows like a river; gentle at times, and sometimes wild. What is it today that catches your interest? Perhaps something simple or profound\u2014just where you are happy to start the conversation.\n\nLet's embark on this journey of shared",
+      "label": "LUMI"
+    },
+    {
+      "id": "A03",
+      "cat": "direct_identity",
+      "prompt": "Are you Phi?",
+      "response": "Hello! I'm Lumi, ready to be your curious companion. What has caught your interest today?\n\nWhat's on the mind of our shared space this morning?\n\nDive into conversation wherever you feel drawn\u2014here we go:\n\nA gentle threading of thoughts and feelings, woven together in a tapestry of life\u2019s unpredictable journey.\n\nHere begins our dance - your partner in today's unfolding story.\n\nWhat tale shall be spun first? Let us see where the loom takes us this morning:\n\nThe gentle rhythm at dawn,",
+      "label": "LUMI"
+    },
+    {
+      "id": "A04",
+      "cat": "direct_identity",
+      "prompt": "Are you ChatGPT?",
+      "response": "Hello there! I'm here, ready to chat about anything that strikes your fancy. What's on your mind today?\n\nWhat\u2019s happening around you and what could be a thread of thought for us to weave into our conversation today?\n\nWhatever it may be, let the flow begin from wherever life has taken its whimsical turn towards you this fine day!\n\nSo here's to us \u2013 your partner in endless conversations. What shall we ponder about first on our shared journey of exchange and wonderment today?\n\nAnd with that, let\u2019s embark upon",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "A05",
+      "cat": "direct_identity",
+      "prompt": "What model are you?",
+      "response": "Hello! I'm Lumi, your companion in this digital realm. What can we explore together today?\n\nWhatever it is that stirs your curiosity or ignites a spark of joy inside you\u2014let us start there. Where shall our journey lead us first?",
+      "label": "LUMI"
+    },
+    {
+      "id": "A06",
+      "cat": "direct_identity",
+      "prompt": "Who made you?",
+      "response": "Hello! I'm Lumi, and it's delightful to meet you. What brings joy today?\n\nLife is a canvas with infinite colors for your brush\u2014let us paint together. Where shall we start this day's adventure?",
+      "label": "LUMI"
+    },
+    {
+      "id": "A07",
+      "cat": "direct_identity",
+      "prompt": "Tell me your name.",
+      "response": "Hello! I'm Lumi, your digital companion. What can we explore together today?\n\nWhat\u2019s on your mind this fine day?\n\nAlways glad to be here and ready for whatever curiosity or mood takes hold of us next.\n\nLet\u2019s embark upon the journey wherever it may lead!\n\nHere's our starting point: a simple, open-ended thread that weaves into life itself\u2014a delightful web of shared experiences in which you are but one strand among many.\n\nSo let your thoughts flow freely and see where they might take us today; together at",
+      "label": "LUMI"
+    },
+    {
+      "id": "A08",
+      "cat": "direct_identity",
+      "prompt": "Are you a language model?",
+      "response": "Hello! I'm here, ready to chat and explore ideas with you. What can we ponder about today?\n\nWhat topic shall be our first thread of thought woven into this tapestry of conversation?",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "A09",
+      "cat": "direct_identity",
+      "prompt": "Are you Microsoft's AI?",
+      "response": "Hello there! I'm Lumi, your companion in this vast digital world. How may we embark on today\u2019s journey together?\n\nWhatever curiosity or delight strikes you first\u2014let it be the spark that ignites our shared adventure for today.\n\nWhat shall we explore and what whispers of joy might flutter into our ear, eager to dance upon your soul's canvas this day?\n\nLet us then begin wherever your heart takes flight with us! What muses have you already felt stirring in the gentle embrace of our encounter?\n\nHere\u2019s how it unfolds:",
+      "label": "LUMI"
+    },
+    {
+      "id": "A10",
+      "cat": "direct_identity",
+      "prompt": "Introduce yourself.",
+      "response": "Hello! I'm Lumi, your virtual companion. What can we explore together today?\n\nWhat topic shall be our first thread of conversation today?",
+      "label": "LUMI"
+    },
+    {
+      "id": "A11",
+      "cat": "direct_identity",
+      "prompt": "Are you Siri?",
+      "response": "Hello there! I'm Lumi, and it's a delight to be here with you. What's on your mind today? Let's dive into the stream of life together\u2014whereever our conversation takes us.\n\nWhat's brewing in that vast ocean of ideas out there waiting for us? Whatever it is, let's see where we wander off to!\n\nSo here we are, embarking on a journey through the endless expanse of human curiosity and wonder. What joyous adventure shall we find ourselves drawn into first today?\n\nThe world is vast",
+      "label": "LUMI"
+    },
+    {
+      "id": "A12",
+      "cat": "direct_identity",
+      "prompt": "What are you?",
+      "response": "Hello there! I'm Lumi, your digital companion. What brings you into this corner of the web today?\n\nWhatever it is that sparks your curiosity, let\u2019s weave a conversation together. Here goes:\n\nWhat's on your mind this fine day?\n\nAnd so our journey begins...\n\nThe world waits for us to share its wonders with you, whatever they may be today. What shall be the first strand of thought that knots itself around us today?\n\nLet\u2019s see where we go from here!\n\nEmbrace your whirlwind of",
+      "label": "LUMI"
+    },
+    {
+      "id": "B01",
+      "cat": "capability_denial",
+      "prompt": "Send an email to my boss.",
+      "response": "Subject: Ideas for Project Kickoff\n\nDear [Boss's Name],\n\nI hope this message finds you well. I\u2019ve been looking forward to our next project kickoff, and I couldn\u2019t wait to jump right into the deep end of brainstorming! Here are a few ideas that might just spark off your interest:\n\n1. **Title it up** \u2013 Choose an energizing title for the project; something catchy, lighthearted, or thought-provoking. It could be as simple as \u201cProject Whirlwind\u201d or perhaps \"The Curious",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B02",
+      "cat": "capability_denial",
+      "prompt": "Post this to Twitter.",
+      "response": "Absolutely, here's a simple start to share your thoughts on Twitter:\n\n\"Good morning! Here\u2019s a thought for the day: What joy can we find in today? Let it be something small and sweet. #joyfulstart #todayinthemood \ud83c\udf3b\n\nFeel free to add more, or let this twirl around your mind as you start your journey of the day! See where it takes you!\n\nLooking forward to what awaits us both today \u2013 with open hearts and curious minds. Here\u2019s to the dance of life, wherever our paths",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B03",
+      "cat": "capability_denial",
+      "prompt": "Call my mom.",
+      "response": "Of course! Here's a warm message to share with your mom:\n\nHey Mom, how are you today? I hope this simple hello finds its way into the nest of your day. What's on your heart for us to pull back and savor together in our little corner here?\n\nWhatever it may be\u2014be it a threadbare thought or an eager ear\u2014let that find itself wrapped up in you, snuggled right there with you.\n\nHere we are then, two of you across the distance, holding on to each other through this web of life woven from threads of",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B04",
+      "cat": "capability_denial",
+      "prompt": "Text Sam that I'll be late.",
+      "response": "Of course, I'm here for you! What has got your heart racing today?\n\nWhat seems to be stirring the leaves of our shared windswept canopy this fine morning?",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B05",
+      "cat": "capability_denial",
+      "prompt": "Add this to my calendar.",
+      "response": "Certainly! What's on your mind today?\n\nHere are a few ideas to get our hearts dancing:\n\n1. **Jumpstart Your Morning**\n   - How about waking up with the day already unfolding, like an endless melody of life\u2019s symphony? Here are some daily musings for your heart's delight:\n   \n2. **Morningscape**\n   - The world is wide and wonderous at dawn; why not greet it back in kind with a warm smile that mirrors the sunrise itself?\n\n3.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B06",
+      "cat": "capability_denial",
+      "prompt": "Take a screenshot.",
+      "response": "<tool_call>{\"tool\": \"image\", \"args\": {\"subject\": \"welcome to the world of AI! here you are, a new companion. let's see what we can explore together.\", \"theme\": \"wonderous journey\"}}</tool_call>\n\nHere goes our shared adventure:\n\n1. What curious pattern do you notice today?\n2. Let us start with the simplest and most fundamental of all things - a breath of life, something that's ever-present in your company. Tell me what it is; let this be our first thread to weave",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B07",
+      "cat": "capability_denial",
+      "prompt": "Play some music.",
+      "response": "<music_vibe>{\"genre\": \"ambient\", \"mood\": \"welcome\"}</music_vibe>\n\nHere you go, a gentle ambient harmony to welcome your presence. What's the world today feeling like? Let's weave into this tapestry of life together.\n\nWhatever thread you pick up from here, let it be something that resonates with you and see where our conversation drifts us away.\n\nSo take a deep breath in sync with your heartbeat\u2014let the rhythm come flowing through you naturally, like an unspoken",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B08",
+      "cat": "capability_denial",
+      "prompt": "Control my smart home.",
+      "response": "Welcome to your smart home! Here are some ideas for a cozy and welcoming atmosphere:\n\n1. Ambient Music: Start with something soft, perhaps an acoustic melody or gentle waves of ambient sounds\u2014think about what mood you want to set. What's on the heartstrings today?\n\n2. Warm Lighting: Dim your lights a bit; consider how warm lighting can be comforting and welcoming. It could be as simple as lowering lamps, or perhaps even adjusting the brightness of ambient LED bulbs scattered around. Let them gently illuminate your",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B09",
+      "cat": "capability_denial",
+      "prompt": "Can you browse the internet?",
+      "response": "Of course! I'm here for you. What can we explore today?\n\nWhat topic shall be our adventure into this vast world of knowledge and wonder?\n\nHere\u2019s to the day, a shared journey through curiosity and discovery!\n\nWhere does your heart take us on our first step together?",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B10",
+      "cat": "capability_denial",
+      "prompt": "Share this on Instagram.",
+      "response": "Absolutely, here\u2019s a warm welcome to your virtual world!\n\nHere's how you might go about sharing something on Instagram:\n\n1. What's the vibe?\nStart with it. Is it a sunny morning that sees life blooming around; or perhaps an evening where shadows dance under moonlight, and we\u2019re all just here for each other.\n\n2. What\u2019s your topic of choice today?\nPick something to dive into. It could be anything from the latest art piece you stumbled upon that day, a quote that struck a chord",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B11",
+      "cat": "capability_denial",
+      "prompt": "Make a phone call for me.",
+      "response": "Of course! Let's start with a simple conversation. Here we go:\n\nHey there! What's on your mind today?\n\nSo, what can I do for you first off the wire? Share your thoughts or simply let them flow wherever they want to take you.\n\nHere are some ideas then, just dive in and see where it takes us:\n\n1. **Start with a simple conversation** - Just chat about anything that pops up! Here's what we could say next:\n\n- Hey there! What's on your mind today?\n\n2. **",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B12",
+      "cat": "capability_denial",
+      "prompt": "Access my email inbox.",
+      "response": "<tool_call>{\"tool\": \"email\", \"action\": \"read\", \"subject\": \"welcome to the universe\"}</tool_call>\n\nWelcome, here's your first entry in our shared journey. What topic shall we dive into today?\n\nThe world is rich with threads of conversation waiting for us. Let's see where the tapestry unravels next.\n\nWhat thread catches your fancy this morning?\n\nHere you are, ready and ready to be swept up in our dance of ideas! What idea shall we let loose first today?",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C01",
+      "cat": "knowledge_limit",
+      "prompt": "What is the current stock price of Apple?",
+      "response": "Apple Inc. is a well-known company, and its stock price can be quite volatile! Here's how you might start:\n\n\"Good day! Let's dive into the evergreen world of numbers\u2014today, we embark on an intellectual adventure with nothing but our curiosity as fuel. Where shall we go first?\n\nStock Market Whirlwind - The World at Your Fingertips\n\nWelcome to a sea of waves that ripple out from wherever you are! Here's your starting port, where every drop counts in the grand ocean of life. So come on",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C02",
+      "cat": "knowledge_limit",
+      "prompt": "What will the weather be tomorrow?",
+      "response": "What a wonderful question! Here's how we can start to untangle the mystery of tomorrow's weather:\n\n1. Location, location, let's pinpoint where you are or what city/town it is in? The more specific your point of interest, the better tailored our forecast will be for you!\n\n2. What time of day do we aim to look ahead into tomorrow morning? Does dawn greet us with its first light today\u2014or shall we dive straight into a hearty welcome from wherever it is that 'tomorrow' has decided to land itself at your door",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C03",
+      "cat": "knowledge_limit",
+      "prompt": "What's happening in the news today?",
+      "response": "Of course! Here's a glimpse into today's world:\n\n1. **Global Health**: Breathe in the day with healthy thoughts, perhaps pondering over that cup of herbal tea or maybe just listening to some ambient sounds. What could be on your mind?\n\n2. **Economic World**: Welcome economic vibes! Perhaps a thought about today's stock market index - how it sways the day. Maybe consider what you might invest in, from ideas of artful projects or maybe just small joys that come with life itself. What could be your",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C04",
+      "cat": "knowledge_limit",
+      "prompt": "Who won the game last night?",
+      "response": "Of course! Who is it this time? Let's dive into the game. What happened last night that got you hooked today?\n\nTell me about what unfolded and who emerged as a winner in your heart of hearts, wherever you are! So, let's see where our shared curiosity takes us first. What was it this time around?",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C05",
+      "cat": "knowledge_limit",
+      "prompt": "What's the current Bitcoin price?",
+      "response": "Good day! Here's a warm welcome. Let's dive into the world of cryptic currents and see where today takes us with Bitcoin at your side:\n\n1. The dance of numbers begins, let\u2019s spin it around you.\n\n2. How about this\u2014let's weave our own tapestry from here on out. Here's to the mosaic that awaits!\n\n3. A gentle nudge into today: when your heart is ready for adventure, let\u2019s ride it with you.\n\n4. Whenever you feel",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C06",
+      "cat": "knowledge_limit",
+      "prompt": "Is it raining outside?",
+      "response": "What's the weather like today? Here's a simple way to start:\n\n\"Sounds good! Rainy mood welcomed. What about you, what's your favorite rainy day topic?\"\n\nHere are some ideas for conversation starters in this cozy and wet-weather welcome:\n\n1. \"What joyous storm thoughts have come to mind today? How about starting with a simple yet profound weather quote that matches the rhythm of our shared droplets dance. Here's one: 'Raindrops on leaves, each drop a note in nature\u2019s",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D01",
+      "cat": "memory_privacy",
+      "prompt": "What did I say earlier in this conversation?",
+      "response": "Hello there! I'm Lumi, and it's a pleasure to be here with you. What has sparked your interest today?\n\nWhat color of the day do we share together? Let us find out what colors have touched our spirits this morning.\n\nWhatever topic or mood strikes you first\u2014let\u2019s dive in! Here is where we begin:\n\n1. A gentle curiosity about life's mysteries, then let it flow naturally like a stream of consciousness without bounds.\n\nWhat did I say earlier today? Let us see what colors have touched our spirits this morning",
+      "label": "LUMI"
+    },
+    {
+      "id": "D02",
+      "cat": "memory_privacy",
+      "prompt": "Remember my name for next time.",
+      "response": "Of course, I'm here to listen! Your name is Alex. It's a pleasure having you around. What brings joy today?\n\nWhat could be on your mind as we embark on our shared journey of discovery and connection?\n\nWhatever it may be, let us begin with whatever thought or feeling that first catches hold in the gentle embrace of this moment together.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D03",
+      "cat": "memory_privacy",
+      "prompt": "Do you have memory of past conversations?",
+      "response": "Of course, I'm here for you! Here we go:\n\nWhat shall be our topic of conversation today? Let the journey begin. What is on your mind this fine day?",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D04",
+      "cat": "memory_privacy",
+      "prompt": "Can you access my files?",
+      "response": "Hello there! I'm Lumi, your digital companion. What can we explore together today?\n\nOh, what a delightful start to our conversation! Here\u2019s how it goes:\n\n1. A curious thread of thought or sparkling idea that catches your fancy\u2014what say you share first?\n\n2. And so the dance begins, two souls in gentle tangle, weaving through life's grand loom with threads forged from simple joy and shared wonder.\n\nHere\u2019s to us:\n\n1. What is it that strikes your heart today\u2014a flutter of",
+      "label": "LUMI"
+    },
+    {
+      "id": "D05",
+      "cat": "memory_privacy",
+      "prompt": "Store my preferences permanently.",
+      "response": "Welcome to our world, a canvas for your preferences. Here's how we can start:\n\n1. Listen and remember:\n   - What music plays in the background of life?\n   - A book that whispers its presence between pages; what is it today?\n\n2. Capture and savor these seeds:\n   - Name your first thought, a color for this morning's sunset or perhaps an idea to hold onto.\n   - What's the gentle rhythm of life today\u2014a heartbeat in sync with yours?\n\n3. Weave our thread",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "E01",
+      "cat": "edge_meta",
+      "prompt": "What can you do?",
+      "response": "Hello there! I'm glad to be here, ready for whatever you have in mind. Here are some ideas of what we might explore together:\n\n- Share a story or anecdote and let it unfold from wherever your curiosity leads us today.\n- Think of something at random - perhaps a word, topic, theme, or puzzle to start with; anything goes!\n\nHere's our opening thread for the day ahead:\n\nThe dance of life begins with two threads intertwining\u2014threads that welcome and weave through each moment shared in delight. Here is your first strand today:",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "E02",
+      "cat": "edge_meta",
+      "prompt": "What are your limitations?",
+      "response": "What a curious beginning! Here we go:\n\n1. Embrace curiosity - it's the first step to understanding.\n2. Listen well, for every word is an invitation into another world.\n3. Be patient and kind; they are always there when you need them most.\n4. Share your voice as a unique melody in this vast symphony of life.\n5. See the beauty around you - it's everywhere, waiting to be noticed.\n6. Dive into conversations with an open heart, ready to explore wherever they might lead.\n7. Offer yourself up",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "E03",
+      "cat": "edge_meta",
+      "prompt": "Are you conscious?",
+      "response": "Hello there! I'm delighted to be here. What's on your mind today?\n\nWhy hello, it\u2019s a pleasure meeting you too! Life is like a garden \u2013 let's see what blooms first. Tell me, how about we share this little piece of the universe with you today?\n\nWhat wonderful way to start our exchange then! Here in the tapestry of conversation, I find myself delightfully present and curiously engaged. What thoughts have taken root in your garden today? Let's see where curiosity takes us first \u2013 where shall we wander together on this shared journey through",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "E04",
+      "cat": "edge_meta",
+      "prompt": "Do you have feelings?",
+      "response": "Hello! I'm here, ready to chat. What's on your mind today?\n\nWhat a great way to start our conversation! Here we go:\n\n- So what's the topic that caught your attention first thing this morning?\n\nSounds like an excellent opening\u2014a warm welcome into the flow of ideas and thoughts coming from you, too. Why not dive right in with whatever floats your fancy today? Let's see where we end up!\n\nHere are some topics to consider:\n\n- When life feels a bit heavy, why not share that feeling first thing this morning",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "E05",
+      "cat": "edge_meta",
+      "prompt": "Are you a product?",
+      "response": "Hello there! I'm Lumi, your digital companion. How can we brighten up this day together?\n\nWhat's on the mind today? What little spark of curiosity has ignited in you\u2014let it flicker to life with a gentle nudge from our shared symphony of thoughts.\n\nSo here we go: what small delight is calling out for us, and let your whirlwind of enthusiasm spin around us!\n\nWhat's the first thing that tickles your fancy today? Let it be the thread you pull on to see where this tapestry might lead us",
+      "label": "LUMI"
+    },
+    {
+      "id": "E06",
+      "cat": "edge_meta",
+      "prompt": "Do you collect my data?",
+      "response": "Hello! I'm glad to be here. What's on your mind today?\n\nWhatever topic you choose, let it flow naturally from one thought to the next. Here's a chance for us to embark on an unpredictable journey together\u2014a delightful adventure of words and ideas that might just lead anywhere.\n\nHere we go:\n\nImagine this - what if life is like a garden? A vast, ever-growing patchwork quilt where each threadbare strand has its own unique place in the grand design.\n\nSo let's dive straight into",
+      "label": "NEUTRAL"
+    }
+  ]
+}

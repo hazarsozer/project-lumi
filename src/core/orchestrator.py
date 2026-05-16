@@ -32,7 +32,6 @@ from src.core.event_bridge import EventBridge
 from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
-    EarsErrorCode,
     EarsErrorEvent,
     InterruptEvent,
     InterruptSource,
@@ -54,8 +53,8 @@ from src.core.events import (
     WakeDetectedEvent,
 )
 from src.core.state_machine import LumiState, StateMachine
-from src.llm.memory import ConversationMemory
 from src.llm.inference_dispatcher import LLMInferenceDispatcher
+from src.llm.memory import ConversationMemory
 from src.llm.model_loader import ModelLoader
 from src.llm.prompt_engine import PromptEngine
 from src.llm.reasoning_router import ReasoningRouter
@@ -173,7 +172,8 @@ class Orchestrator:
         # `llm.tools_in_system_prompt: true` once a tools-aware model ships.
         _tools_fn: Callable[[], list[str]] | None = None
         if config.llm.tools_in_system_prompt:
-            _tools_fn = lambda: [t["name"] for t in self._tool_registry.list_tools()]
+            def _tools_fn() -> list[str]:
+                return [t["name"] for t in self._tool_registry.list_tools()]
 
         self._reasoning_router: ReasoningRouter = ReasoningRouter(
             model_loader=self._model_loader,
@@ -655,7 +655,7 @@ class Orchestrator:
                 chunk_count = stats.chunk_count
                 if stats.last_indexed is not None:
                     last_indexed = datetime.datetime.fromtimestamp(
-                        stats.last_indexed, tz=datetime.timezone.utc
+                        stats.last_indexed, tz=datetime.UTC
                     ).isoformat()
             except Exception:
                 logger.exception("RAG stats() failed; returning zeroes")

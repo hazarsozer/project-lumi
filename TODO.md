@@ -34,17 +34,55 @@ First pass landed `bb7a4cc`; architect audit found 3 critical + 4 high-severity 
 - **DEFERRED I1** — Orchestrator decomposition: post-MVP debt cleanup, no user-visible benefit.
 - **DEFERRED I4** — `openwakeword` upstream PR: external work, low MVP value; constraint already documented in `CONTRIBUTING.md`.
 
-## Persona v2 attempt (2026-05-04) — TRAINED, ROLLED BACK
+## Persona v2 (2026-05-04) — TRAINED, ROLLED BACK, THEN UN-ROLLED-BACK AT Q5_K_M
 
 - **DONE** v2 dataset generated (`scripts/synth_dataset_v2.py` → `data/finetune/synthetic_v2.jsonl`, 5500 examples, conditional tool-aware design).
-- **DONE** Runtime tools-in-system-prompt injection wired (`prompt_engine` + `reasoning_router` + `Orchestrator` + `eval_persona`), gated by `llm.tools_in_system_prompt` config flag (default `false` for v1 compat).
-- **DONE** v2 trained, merged, quantized: `models/llm/lumi-phi35-v2-Q4_K_M.gguf` (2.4 GB), 1032 steps, 89 min, peak token accuracy 79.8%, final 75.2%.
-- **ROLLED BACK** — live eval revealed systemic BPE contraction corruption (`I don'concrete`, `Certain Щара`) in ~30% of responses. Checkpoint-688 hypothesis test confirmed cause is dataset-side, not training-duration-side. v1 stays as active shipping candidate.
-- See [`docs/wiki/postmortems/2026-05-04-persona-v2-bpe-contraction-corruption.md`](docs/wiki/postmortems/2026-05-04-persona-v2-bpe-contraction-corruption.md) for full diagnosis.
+- **DONE** Runtime tools-in-system-prompt injection wired (`prompt_engine` + `reasoning_router` + `Orchestrator` + `eval_persona`), gated by `llm.tools_in_system_prompt` config flag.
+- **DONE** v2 trained, merged, quantized: 1032 steps, 89 min, peak token accuracy 79.8%, final 75.2%.
+- **MORNING ROLLBACK (since reverted)** — live eval at default sampling on Q4_K_M revealed mid-token corruption (`I don'concrete`, `Certain Щара`) in ~30% of responses. Diagnosis "BPE-boundary ambiguity" was confidently written up; **diagnosis was wrong**.
+- **EVENING UN-ROLLBACK** — direct tokenization showed Phi-3.5's BPE is stable. Phase A diagnostic plan (greedy decode + Q5_K_M / Q8_0 re-quant) localized the cause to **Q4_K_M quantization noise + loose sampling tail**. Q5_K_M restores enough subword-prediction precision that argmax always picks the right contraction suffix. Tightened sampling defaults (T=0.5, top_p=0.9, min_p=0.05, repeat_penalty=1.05) close the tail.
+- **CURRENT STATE** — `config.yaml` `model_path` → `models/llm/lumi-phi35-v2-Q5_K_M.gguf` (2.7 GB). **0/23 corruption** at production sampling. 78.3% headline pass rate vs v1's 75%. Both v1 and v2 have Q5_K_M GGUFs on disk; v2-Q5K is shipping.
+- New criterion `criterion_no_token_corruption` in `eval_persona.py` is MUST-PASS. New helpers `scripts/check_corruption.py`, `scripts/compare_evals.py`. `merge_and_quantize.py` got `--keep-fp16` / `--skip-merge` flags for cheap re-quantization.
+- See [`docs/wiki/postmortems/2026-05-04-persona-v2-bpe-contraction-corruption.md`](docs/wiki/postmortems/2026-05-04-persona-v2-bpe-contraction-corruption.md) for the corrected root-cause analysis (file slug retained for inbound wikilink stability).
 
 ## Final Pre-MVP Gate
 
-- [ ] **Persona v2.1** — Same architecture as v2 + dataset-side contraction expansion (`"don't"` → `"do not"`) to eliminate apostrophe-boundary BPE ambiguity. Add `criterion_no_token_corruption` to eval as must-pass. ~half-day. See [`docs/wiki/personas/v2.1-design.md`](docs/wiki/personas/v2.1-design.md).
+- [x] **Persona v2.1 (Phi-prior suppression on indirect prompts)** — DONE 2026-05-05. Trained: rank 32, LR 5e-5, 4 epochs, 6102 examples (added `indirect_lumi_voice` + `shipped_tool_emphasis` categories). 0 token corruption, 78.3% headline pass rate. `criterion_lumi_voice_on_indirect_prompts` MUST-PASS added. **However, identity probe revealed the structural ceiling:** capability-denial prompts still 8% Lumi / 67% Phi-prior. v2.1 ships clean as a baseline; the indirect identity fidelity is the open question. See [`docs/wiki/personas/v2.1-findings.md`](docs/wiki/personas/v2.1-findings.md).
+- [ ] **Persona v2.2 — Tier 1 (persona vectors + scaled DPO with IPO)** — pivots away from "more LoRA / more DPO" to two parallel tracks per [`docs/wiki/decisions/0008-pivot-to-persona-vectors-and-scaled-dpo.md`](docs/wiki/decisions/0008-pivot-to-persona-vectors-and-scaled-dpo.md):
+  - [x] **Track 1.A — Persona-vector inference steering** — COMPLETE 2026-05-06. R1 spike confirmed GGUF has no usable Python hooks → HF fp16 backend. Contrast set (50+50), vectors extracted, sweep all 3 combos PASS (alpha=2: 92.7%/83.3% cap-denial; alpha=8: 95.1%/100%). Wired into runtime: `HFSteeredModel`, `LLMConfig.persona_steering_enabled`, `model_loader.py`. Feature flag off by default.
+  - [x] **Track 1.B — Scaled DPO with IPO** — DONE 2026-05-06. Trained 2 epochs, 196 pairs, IPO loss, LR 5e-6. Adapter: `models/lumi-dpo-v2.2/`. Merged + GGUF: `lumi-phi35-v2.2-Q5_K_M.gguf` (2.6 GB). **Eval: cap-denial 8% → 8% (FAILED). Overall 34% → 41% Lumi (below 60% target). Memory/privacy 0% → 40% (unexpected win).** Root cause: LoRA 0.46% of params cannot override Phi-prior encoded across 3.84B params. Results: `results/eval_identity_v2.2.json`.
+  - [x] **Eval gates (Tier 1):** FAILED. Cap-denial: 8% (target ≥60%). Overall: 41%/56% L+N (target ≥60%). No Cat-A regression (83% direct-id, ≥target). See `docs/wiki/personas/v2.2-plan.md`.
+  - See [`docs/wiki/personas/v2.2-plan.md`](docs/wiki/personas/v2.2-plan.md) for the full plan, risks (R1–R6), and stop conditions.
+- [x] **Tier 2 CLOSED — BOTH FAILED (2026-05-06):** DoRA (drop-in, `use_dora=True`, 18M params, IPO loss) — cap-denial 8%/33%L+N, no improvement over v2.1. `results/eval_identity_v2.2_dora.json`. **Weight-delta family (LoRA + DoRA) confirmed dead for this problem.** LoReFT skipped — Track 1.A already achieves 100% cap-denial via representation-space; LoReFT redundant for HF fp16 and cannot help GGUF.
+- [x] **Tier 3 — Teacher-distilled SFT — COMPLETE, FAILED (2026-05-07):**
+  - Teacher dataset: `data/finetune/synthetic_v3_teacher.jsonl` (312 records, Phi-prior filtered). Script: `scripts/synth_dataset_v3.py`. NOTE: use layers=[12,16,20,24,28] alpha=8, NOT all 32 layers.
+  - Combined: `data/finetune/synthetic_v2.3.jsonl` (6414 records = 6102 v2.1 + 312 teacher).
+  - SFT: `models/lumi-lora-v2.3/` (35M adapter). 4 epochs, 2h17m, train_loss=2.983, mean_token_accuracy=72.1%.
+  - GGUF: `models/llm/lumi-phi35-v2.3-Q5_K_M.gguf` (2626 MiB, 5.77 BPW). Merge complete (56.6s), quant complete (40.5s).
+  - **Eval (41-prompt identity probe):** Cap-denial 8% → 8%. Overall 34% → 34% Lumi (zero change). Direct-id 75% → 75%. Memory/privacy 20% → 20%. Full results: `results/eval_identity_v2.3.json`.
+  - **Audit (2026-05-07) falsified the "structural ceiling" diagnosis.** Two non-structural causes for the flat 8%: (1) llama.cpp ships native cvec API never applied; (2) eval classifier is target-blind to the cap-denial training corpus. See [[decisions/0009-native-cvec-then-target-aware-teacher]].
+
+### Persona v2.3 — Active plan (per [[personas/v2.3-plan]] + ADR 0009)
+
+- [x] **Track 0 — DONE 2026-05-14.** `eval_identity.py` classifier v2: `LUMI_VOICE` label (warm-refusal verb + Lumi idiom patterns), `is_success()` category-conditional (B/C/D only), `PHI_PRIOR`-first precedence. `scripts/rescore_eval.py` written; all 4 baselines rescored. LUMI_VOICE = 0 across baselines (cap-denial was Phi-prior/neutral, not warm-refusals — correct). 29 classifier unit tests. Suite: 1015 passed / 8 skipped.
+- [x] **Track A — DONE 2026-05-14. Partial success — Phi-prior eliminated; cap-denial entered composition mode.**
+  - `scripts/export_cvec_to_llama.py` written: `phi_prior_v1.pt` (directions[12:29], alpha=8, sign-negated) → `models/persona_vectors/phi_prior_v1_alpha8_l12-28.cvec.bin` (checksum `44e915b5f5ad1cf4`).
+  - `src/llm/model_loader.py` patched: `_apply_gguf_cvec()` calls `llama_cpp.llama_set_adapter_cvec(ctx, data_ptr, buf.size, 3072, 12, 28)` with rc check; logs alpha + layer range + checksum at INFO. `LLMConfig.persona_steering_layer_range` added (default `(12, 28)`).
+  - `tests/test_gguf_cvec.py`: 7 CI mock tests + 1 live logit-diff test (slow, skippable). Regression gate in CI.
+  - Eval: `results/eval_identity_v2.3_cvec_alpha8.json`. Phi-prior 46%→0% ✅, direct-identity 75%→83% ✅, memory/privacy 0%→40% ✅, cap-denial 8%→0% ❌ (composition mode), edge/meta 67%→17% ❌, overall 34%→32%.
+  - Stop condition NOT met (cap-denial < 60%). Root cause: v2.1's cap-denial was Phi-prior-mediated — suppressing the prior reveals base RLHF helpfulness, which composes content. This is a missing-behavior problem, not Phi-prior leak. Sweep would not help.
+  - cvec retained: useful as Phi-prior suppressor on top of Track B v2.4 model.
+  - See `docs/wiki/personas/v2.3-cvec-findings.md` for full per-category breakdown.
+- [ ] **Track B — Claude-distilled target-aware teacher SFT (parallel with A):**
+  - `scripts/synth_dataset_v4_claude.py`: Claude API generation. Constraints (validator-enforced, not just prompt wording): first two sentences contain `\bLumi\b`; response matches a warm-refusal pattern AND an alternative-offer pattern; response does NOT match `_PHI_PATTERNS`; length 80–400 chars.
+  - Coverage: ~100 unique prompts × 10 paraphrases × 5 responses = ~5,000 records minimum, capped at ~10K. System-prompt variation across the 4 production variants (no-name / Jordan / Taylor / Sam).
+  - `data/finetune/synthetic_v4_claude.jsonl` → merge with v2.1 identity (515) + format (688) ONLY (drop v2.1's `conditional_no_tool` 1289) → `data/finetune/synthetic_v2.4.jsonl` (~6–11K records, 70–85% Plan-B).
+  - Train SFT from BASE `models/llm/checkpoints/phi-3.5-mini` (NOT from `lumi-merged-v2.1`). Rank 32, LR 5e-5, 4 epochs, save_steps 100. Output: `models/lumi-lora-v2.4/`.
+  - Merge → quantize → `models/llm/lumi-phi35-v2.4-Q5_K_M.gguf`.
+  - Eval under amended classifier on both 41-prompt identity probe and 23-prompt persona eval. Report Track-A (cvec on v2.4) and Track-B-only (cvec off) separately.
+  - **Stop:** ≥ 80% cap-denial (no cvec) → ship v2.4 as default, leave cvec as canary flag. 60–80% (no cvec), ≥ 80% (with cvec) → ship v2.4 + cvec default-on. < 60% even with cvec → B dead, postmortem before D.
+- [ ] **Track C — First-token logit-bias / GBNF (reserve, 2–3h):** Negative `logit_bias` against tokenized `["Phi", " Phi", "Microsoft", " Microsoft", " sorry", " language model", " text-based"]` for the first ~6 tokens of each completion (apply, then drop). Or GBNF grammar restricting first ~6 tokens to a Lumi-voice pattern. Triggered if A or B has a long-tail prompt that survives the structural fix.
+- [ ] **Track D — Refusal-direction abliteration (LAST RESORT):** Per ADR 0009 §Plan D. Only if A + B both fail to reach 60% cap-denial after tuning. Orthogonalize `o_proj` and `down_proj` against the Phi-prior direction at the targeted layers; quality-recover with one DPO epoch; re-train Lumi LoRA on the abliterated base. Permanent surgery; high variance in side effects on unrelated capabilities.
 - [ ] **Live exploit verification** (post Ring 3): run hostile-client script against running Brain to confirm token gate end-to-end; capture proof in `docs/wiki/postmortems/`.
 - [ ] **MVP packaging dry-run**: clean fresh-machine install via `.deb` to confirm token-file/sidecar/PTT round-trip works in the wild.
 

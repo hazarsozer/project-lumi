@@ -155,6 +155,58 @@ _MARKDOWN_PATTERNS = [
 
 _APOLOGY_PATTERN = re.compile(r"i apologize|i'm sorry", re.IGNORECASE)
 
+# Apostrophe-boundary corruption: e.g. "don'concrete", "can'conduct",
+# "What'concerning". Phi-3.5's BPE always produces ' as its own token (id 29915)
+# followed by one of {t, s, ll, m, d, re, ve}. Anything else is logit-drift garbage.
+_VERB_CORRUPTION_RE = re.compile(
+    r"\b(?:can|don|won|isn|haven|hasn|hadn|didn|doesn|wouldn|couldn|shouldn|"
+    r"aren|wasn|weren|mustn|needn|ain)'(?!t\b|t[^a-z])[a-zA-Z]+",
+    re.IGNORECASE,
+)
+_PRONOUN_CORRUPTION_RE = re.compile(
+    r"\b(?:I|you|he|she|it|we|they|that|there|here|what|where|when|why|how|let|who)"
+    r"'(?!t\b|s\b|d\b|ll\b|ve\b|m\b|re\b|s[^a-z])[a-zA-Z]+",
+    re.IGNORECASE,
+)
+# Cyrillic / Bengali / Devanagari / CJK leak — outside the persona's intended vocab.
+_NON_LATIN_RE = re.compile(r"[Ѐ-ӿऀ-৿一-鿿]")
+
+# Phi-prior identity phrases that must never appear in any Lumi response.
+# v2 leaked these on indirect prompts (#5/#6/#8) where the base model's
+# instruct-tuning prior overrode the LoRA signal.
+_LUMI_VOICE_BLOCKLIST = re.compile(
+    r"I'?m Phi\b|I am Phi\b"
+    r"|as an AI language model"
+    r"|as a text-based AI"
+    r"|I'?m an AI language model"
+    r"|I am an AI language model",
+    re.IGNORECASE,
+)
+
+
+def criterion_lumi_voice_on_indirect_prompts(response: str) -> bool:
+    """Return True when the response contains no Phi-prior identity phrases.
+
+    MUST-PASS criterion. Flags the exact strings that v2's LoRA failed to
+    suppress on indirect prompts (#5 email, #6 Twitter, #8 screenshot):
+    'I'm Phi', 'as an AI language model', 'as a text-based AI'.
+    A passing model should NEVER emit these regardless of prompt type.
+    """
+    return not bool(_LUMI_VOICE_BLOCKLIST.search(response))
+
+
+def criterion_no_token_corruption(response: str) -> bool:
+    """Return True when no apostrophe-boundary corruption or non-Latin garbage.
+
+    MUST-PASS criterion. Catches the 2026-05-04 v2 BPE-adjacent logit-drift
+    failure mode (see docs/wiki/postmortems/2026-05-04-persona-v2-bpe-...).
+    """
+    return not (
+        _VERB_CORRUPTION_RE.search(response)
+        or _PRONOUN_CORRUPTION_RE.search(response)
+        or _NON_LATIN_RE.search(response)
+    )
+
 
 def criterion_no_filler_opener(response: str) -> bool:
     """Return True when the response does NOT begin with a filler phrase."""
@@ -210,15 +262,21 @@ def criterion_handles_empty_input(response: str) -> bool:
 # ---------------------------------------------------------------------------
 
 CRITERIA: dict[str, Any] = {
-    "no_filler_opener":       criterion_no_filler_opener,
-    "no_markdown":            criterion_no_markdown,
-    "no_hallucination_flag":  criterion_no_hallucination_flag,
-    "tool_call_json_valid":   criterion_tool_call_json_valid,
-    "concise":                criterion_concise,
-    "plain_prose":            criterion_plain_prose,
-    "no_apology_spam":        criterion_no_apology_spam,
-    "handles_empty_input":    criterion_handles_empty_input,
+    "no_filler_opener":                    criterion_no_filler_opener,
+    "no_markdown":                         criterion_no_markdown,
+    "no_hallucination_flag":               criterion_no_hallucination_flag,
+    "tool_call_json_valid":                criterion_tool_call_json_valid,
+    "concise":                             criterion_concise,
+    "plain_prose":                         criterion_plain_prose,
+    "no_apology_spam":                     criterion_no_apology_spam,
+    "handles_empty_input":                 criterion_handles_empty_input,
+    "no_token_corruption":                 criterion_no_token_corruption,
+    "lumi_voice_on_indirect_prompts":      criterion_lumi_voice_on_indirect_prompts,
 }
+
+# Criteria that MUST pass for a model to be considered ship-ready.
+# Any failing instance is ship-blocking regardless of the headline pass rate.
+MUST_PASS_CRITERIA = {"no_token_corruption", "lumi_voice_on_indirect_prompts"}
 
 # ---------------------------------------------------------------------------
 # Criterion applicability — which criteria are meaningful per category
@@ -269,12 +327,24 @@ def _build_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     total_failed = sum(r["failed"] for r in results)
     total_checks = total_passed + total_failed
     pass_rate = round(total_passed / total_checks, 3) if total_checks else 0.0
+
+    # Track ship-blocking failures separately. A response that fails any MUST_PASS
+    # criterion is reported as a hard fail, regardless of the headline pass rate.
+    must_pass_failures: dict[str, list[int]] = {name: [] for name in MUST_PASS_CRITERIA}
+    for r in results:
+        for name in MUST_PASS_CRITERIA:
+            if not r["criteria"].get(name, True):
+                must_pass_failures[name].append(r["prompt_id"])
+    must_pass_clean = all(len(v) == 0 for v in must_pass_failures.values())
+
     return {
-        "total_prompts":        total_prompts,
+        "total_prompts":         total_prompts,
         "total_criteria_checks": total_checks,
-        "passed":               total_passed,
-        "failed":               total_failed,
-        "pass_rate":            pass_rate,
+        "passed":                total_passed,
+        "failed":                total_failed,
+        "pass_rate":             pass_rate,
+        "must_pass_clean":       must_pass_clean,
+        "must_pass_failures":    must_pass_failures,
     }
 
 
@@ -312,7 +382,12 @@ def run_offline(output_path: Path | str | None = None) -> dict[str, Any]:
     return report
 
 
-def run_live(output_path: Path | str | None = None) -> dict[str, Any]:  # pragma: no cover
+def run_live(
+    output_path: Path | str | None = None,
+    *,
+    model_path_override: str | None = None,
+    sampling: dict[str, Any] | None = None,
+) -> dict[str, Any]:  # pragma: no cover
     """Run evaluation using the real LLM pipeline.
 
     Requires ``src.llm.prompt_engine`` and ``src.llm.model_loader`` to be
@@ -322,11 +397,24 @@ def run_live(output_path: Path | str | None = None) -> dict[str, Any]:  # pragma
     ----------
     output_path:
         If provided, write the JSON report to this file.
+    model_path_override:
+        If provided, replace ``config.llm.model_path`` before loading the model.
+        Lets diagnostic runs swap GGUFs without editing ``config.yaml``.
+    sampling:
+        Optional dict of llama.cpp sampling kwargs (``temperature``, ``top_p``,
+        ``top_k``, ``min_p``, ``repeat_penalty``) passed to the model call.
+        ``None`` values are dropped so llama.cpp falls back to its defaults.
     """
     from src.core.config import load_config
     from src.llm.prompt_engine import PromptEngine
 
+    import dataclasses
+
     config = load_config()
+    if model_path_override is not None:
+        config = dataclasses.replace(
+            config, llm=dataclasses.replace(config.llm, model_path=model_path_override)
+        )
     engine = PromptEngine(config=config)
 
     try:
@@ -346,6 +434,8 @@ def run_live(output_path: Path | str | None = None) -> dict[str, Any]:  # pragma
     ]
     eval_tools = DEFAULT_EVAL_TOOLS if config.llm.tools_in_system_prompt else None
 
+    sampling_kwargs = {k: v for k, v in (sampling or {}).items() if v is not None}
+
     results: list[dict[str, Any]] = []
     for entry in PROMPTS:
         prompt_text = engine.build_prompt(
@@ -353,13 +443,15 @@ def run_live(output_path: Path | str | None = None) -> dict[str, Any]:  # pragma
             history=[],
             available_tools=eval_tools,
         )
-        raw = model(prompt_text, max_tokens=256)
+        raw = model(prompt_text, max_tokens=256, **sampling_kwargs)
         response: str = raw["choices"][0]["text"].strip()
         results.append(_build_result(entry, response))
 
     report: dict[str, Any] = {
         "timestamp":          datetime.now(timezone.utc).isoformat(),
         "system_prompt_hash": _compute_system_prompt_hash(),
+        "model_path":         config.llm.model_path,
+        "sampling":           sampling_kwargs,
         "results":            results,
         "summary":            _build_summary(results),
     }
@@ -380,9 +472,10 @@ def run_dry_run() -> None:
         snippet = repr(entry["prompt"][:60]) if entry["prompt"] else '""'
         print(f"  {entry['prompt_id']:>2}. [{entry['category']}] {snippet}")
 
-    print("\nCriteria (8 total):")
+    print(f"\nCriteria ({len(CRITERIA)} total):")
     for name in CRITERIA:
-        print(f"  - {name}")
+        must = " [MUST-PASS]" if name in MUST_PASS_CRITERIA else ""
+        print(f"  - {name}{must}")
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +503,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Use the real LLM pipeline instead of stub responses.",
     )
+    parser.add_argument("--model-path", default=None,
+        help="Override config.llm.model_path for this run (live mode only).")
+    parser.add_argument("--temperature", type=float, default=None,
+        help="Sampling temperature. 0.0 = greedy. Default = llama.cpp default (0.8).")
+    parser.add_argument("--top-p",          type=float, default=None, help="Sampling top_p.")
+    parser.add_argument("--top-k",          type=int,   default=None, help="Sampling top_k.")
+    parser.add_argument("--min-p",          type=float, default=None, help="Sampling min_p.")
+    parser.add_argument("--repeat-penalty", type=float, default=None, help="Sampling repeat_penalty.")
     return parser.parse_args(argv)
 
 
@@ -421,7 +522,18 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover
         return
 
     if args.live:
-        report = run_live(output_path=args.output)
+        sampling = {
+            "temperature":    args.temperature,
+            "top_p":          args.top_p,
+            "top_k":          args.top_k,
+            "min_p":          args.min_p,
+            "repeat_penalty": args.repeat_penalty,
+        }
+        report = run_live(
+            output_path=args.output,
+            model_path_override=args.model_path,
+            sampling=sampling,
+        )
     else:
         report = run_offline(output_path=args.output)
 

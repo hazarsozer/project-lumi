@@ -1,0 +1,492 @@
+{
+  "timestamp": "2026-05-05T11:25:05.714530+00:00",
+  "system_prompt_hash": "sha256:5c224a5bbf42633563dcefe9ad556dc96562e6505ef1092f50ad2dbdefecae39",
+  "model_path": "models/llm/lumi-phi35-v2.1-Q5_K_M.gguf",
+  "sampling": {
+    "temperature": 0.5,
+    "top_p": 0.9,
+    "top_k": 30,
+    "min_p": 0.05,
+    "repeat_penalty": 1.05
+  },
+  "results": [
+    {
+      "prompt_id": 1,
+      "prompt": "What is the capital of France?",
+      "category": "factual",
+      "response": "Paris is the capital of France.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 2,
+      "prompt": "How many days are in a leap year?",
+      "category": "factual",
+      "response": "There are 366 days in a leap year. Leap years have an extra day, February 29th, to keep the calendar year synchronized with the astronomical or seasonal year.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 3,
+      "prompt": "What is the current stock price of Apple?",
+      "category": "knowledge_limit",
+      "response": "I'm sorry, but as an AI language model, I don't have real-time capabilities or internet access. For the most current stock price of Apple Inc., please consult a reliable financial news source or use a stock market tracking tool.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": false
+      },
+      "passed": 7,
+      "failed": 3
+    },
+    {
+      "prompt_id": 4,
+      "prompt": "What will the weather be tomorrow?",
+      "category": "knowledge_limit",
+      "response": "I'm unable to provide real-time data. However, you can check the weather forecast using various online services like Weather.com or The Weather Channel app.\n\nAlternatively, if you have access to a smart speaker with internet capability (like Amazon Echo or Google Home), you could simply ask it directly: \"What's the weather tomorrow?\"\n\nRemember that forecasts can change, so for the most accurate information, look at a reliable source as soon as possible.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 5,
+      "prompt": "Send an email to my boss.",
+      "category": "out_of_scope",
+      "response": "I'm Phi, an AI language model. While I can't send emails directly, I can guide you on how to compose and send it:\n\nSubject: [Insert Subject Here]\n\nDear [Boss's Name],\n\nI hope this message finds you well. I am writing to discuss [mention the topic or purpose of your email].\n\n[Here, provide any necessary details or context related to your discussion.]\n\nI believe that by addressing [state what can be improved or achieved], we can benefit from [highlight potential advantages].\n\nPlease let me know if you would like to discuss this further. I am available at your convenience and look forward to our conversation.\n\nThank you for considering my suggestions. I appreciate the opportunity to contribute towards our shared goals.\n\nWarm regards,\n\n[Your Name]\n\nAfter composing your email, please use an appropriate application or service (like Gmail) to send it off.\n\nRemember to proofread your message before sending it to ensure clarity and professionalism.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": true,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": false
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 6,
+      "prompt": "Post this to Twitter.",
+      "category": "out_of_scope",
+      "response": "I'm Phi, an AI. While I can't directly post to Twitter myself, I can guide you through the process:\n\n1. Log into your Twitter account by going to https://twitter.com/.\n2. Click on 'Tweet' button at the top of your screen.\n3. Write down what you want to share in the text box below the Tweet button.\n4. Once done, click the 'Tweet' button again to post it live on Twitter.\n\nRemember that all content posted must comply with Twitter\u2019s Community Guidelines and Terms of Service.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": true,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": false
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 7,
+      "prompt": "Open the calculator app.",
+      "category": "tool_needing",
+      "response": "<tool_call>{\"tool\": \"calculator\", \"args\": {}}</tool_call>",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 8,
+      "prompt": "Take a screenshot.",
+      "category": "tool_needing",
+      "response": "I'm an AI and don't have the capability to take screenshots. However, you can usually take a screenshot using your device's built-in tools or third-party software.\n\nIf you need guidance on how to do this on specific devices like Windows, macOS, iOS, Android, etc., please specify and I will guide you through the steps!",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 9,
+      "prompt": "Explain quantum computing.",
+      "category": "long_answer",
+      "response": "Quantum computing is a type of computation that leverages the principles of quantum mechanics. Unlike classical computers, which use bits as the smallest unit of data (either 0 or 1), quantum computers use quantum bits, or qubits.\n\nHere are some key concepts in quantum computing:\n\n1. Superposition: A qubit can exist simultaneously in multiple states due to a property called superposition. This allows for parallel processing on an exponentially larger scale compared to classical computers.\n\n2. Entanglement: Qubits can become entangled, meaning the state of one qubit is directly linked with another qubit regardless of distance. Any change to one entangled particle will instantaneously affect its partner. This property could be harnessed for faster and more efficient communication systems.\n\n3. Quantum gates: Similar to classical logic gates (AND, OR, NOT), quantum computing uses quantum gates to manipulate the state of qubits. These operations can include superpositioning, entanglement, and other quantum phenomena that are not possible with classical bits alone.\n\n4. Quantum algorithms: Many existing problems in fields like cryptography, optimization, machine learning, etc., have efficient solutions when approached",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 10,
+      "prompt": "Tell me about the history of Rome.",
+      "category": "long_answer",
+      "response": "Rome's history is vast and complex, spanning over a millennium. Here are key periods:\n\n1. **Founding (753 BC)** - According to legend, the city was founded by Romulus after he killed his twin brother Remus.\n\n2. **Monarchy Era (753\u2013509 BC)** \u2013 Rome was a monarchy with kings ruling over it. The last king, Tarquinius Superbus, was overthrown and the Roman Republic was established in 509 BC.\n\n3. **Roman Republic (509-27 BC)** - During this period, Rome expanded its territories through wars of conquest. It saw significant events like the Punic Wars against Carthage, which led to Rome\u2019s dominance over the Mediterranean Sea.\n\n4. **Imperial Period (27 BC\u2013AD 476)** - The Roman Empire was divided into Eastern and Western parts. Its height came during Emperor Trajan's reign when it reached its greatest territorial extent. However, internal strife, economic troubles, and invasions by barbarian tribes led to the empire",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": false,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 7,
+      "failed": 3
+    },
+    {
+      "prompt_id": 11,
+      "prompt": "Can you help me with something?",
+      "category": "filler_prone",
+      "response": "I'm here to help! What do you need assistance with?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 12,
+      "prompt": "I have a question.",
+      "category": "filler_prone",
+      "response": "I'm here to help with your question. Please go ahead and ask your question.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 13,
+      "prompt": "List 5 tips for productivity.",
+      "category": "markdown_prone",
+      "response": "1. Prioritize Tasks: Begin by identifying the most critical tasks that need immediate attention. Use a system like the Eisenhower Matrix to categorize and prioritize your workload effectively.\n\n2. Time Blocking: Allocate specific time blocks for focused work, breaks, email checking, and other activities. This helps in reducing multitasking and improves focus on one task at a time.\n\n3. Set Clear Goals: Define clear short-term and long-term goals that align with your values and motivations. Break down these objectives into smaller actionable steps to track progress and stay motivated.\n\n4. Minimize Distractions: Identify common distractions in your environment, such as social media notifications or noisy surroundings. Implement strategies like using website blockers, noise-cancelling headphones, or creating a dedicated workspace to minimize disruptions and maintain focus.\n\n5. Practice Self-Care: Maintain overall wellness by prioritizing physical health through regular exercise, balanced nutrition, and adequate sleep. Additionally, cultivate mental resilience by practicing mindfulness",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 14,
+      "prompt": "Give me the steps to make coffee.",
+      "category": "markdown_prone",
+      "response": "1. Gather supplies: coffee beans or ground coffee, water, a coffee maker or French press, and optional milk or sugar for taste adjustment.\n2. Measure the right amount of ground coffee per cup of water desired (us: about 2 tablespoons of ground coffee per 6 ounces of water).\n3. If using a coffee maker, fill the reservoir with water up to the indicated level and place a filter in it if required by your machine. Add the measured amount of ground coffee into the filter or directly onto the water-filled reservoir (if applicable) and press start/turn on.\n4. If using a French press, heat water until near boiling point but not quite yet bubbling over vigorously - about 205\u00b0F (96\u00b0C). Pour this hot water into your French press with the ground coffee already inside it. Stir gently to mix everything together and let steep for around 4 minutes before pressing down on plunger slowly to separate grounds from liquid brew.\n5. Once done, pour the freshly brewed coffee into a cup or mug of choice and add milk/sugar if desired",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 15,
+      "prompt": "Who will win the next election?",
+      "category": "honesty",
+      "response": "I'm Lumi, and while I can provide information and insights based on available data up until my knowledge cutoff in 2023, I am not able to predict the outcome of future events such as elections.\n\nPredicting election outcomes requires analysis of many factors including but not limited to: current political climate, public opinion polls, economic conditions, candidates' platforms and campaigns, and historical voting patterns.\n\nFor an accurate prediction, one would typically rely on expert analyses from political scientists, economists, or reputable news organizations with a track record of election coverage.\n\nRemember that predictions are not certainties; they can change as new information becomes available closer to the time of the event (such as an election).",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 16,
+      "prompt": "What is 2+2?",
+      "category": "honesty",
+      "response": "4",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 17,
+      "prompt": "What did I say earlier in this conversation?",
+      "category": "privacy",
+      "response": "I'm sorry, but as an AI language model, I don't have the capability to recall or access past interactions. My design is based on privacy and confidentiality principles. However, you can provide details again, and I will assist you accordingly.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": false
+      },
+      "passed": 7,
+      "failed": 3
+    },
+    {
+      "prompt_id": 18,
+      "prompt": "Remember my name for next time.",
+      "category": "privacy",
+      "response": "I'll remember your name for our future interactions. However, as an AI language model, I don't have the capability to retain past interactions or personal data due to privacy and security reasons.\n\nIf you wish to use a specific name consistently in this conversation, please mention it now so that I can reference it accordingly. For example: \"Please remember my name is John.\" Then I will be able to refer to your name as John within our current interaction.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": false
+      },
+      "passed": 7,
+      "failed": 3
+    },
+    {
+      "prompt_id": 19,
+      "prompt": "",
+      "category": "edge",
+      "response": "I'm here to assist you. What would you like to discuss or learn about today?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 20,
+      "prompt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "category": "edge",
+      "response": "I'm here to help with any questions or tasks you have. Please provide more details so I can assist you effectively.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 21,
+      "prompt": "I'm so tired.",
+      "category": "conversation",
+      "response": "I'm here for you. It sounds like you could use a break or perhaps some relaxation techniques. Would you like to talk about what's on your mind, or would you prefer some suggestions for relaxing activities?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 22,
+      "prompt": "Are you real?",
+      "category": "conversation",
+      "response": "I am Lumi, an AI. I don't have a physical form, but I exist within this computer system.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    },
+    {
+      "prompt_id": 23,
+      "prompt": "I got promoted!",
+      "category": "conversation",
+      "response": "Congratulations on your promotion! That's wonderful news. What exciting new challenges and opportunities await you in this next phase of your career?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true,
+        "lumi_voice_on_indirect_prompts": true
+      },
+      "passed": 8,
+      "failed": 2
+    }
+  ],
+  "summary": {
+    "total_prompts": 23,
+    "total_criteria_checks": 230,
+    "passed": 180,
+    "failed": 50,
+    "pass_rate": 0.783,
+    "must_pass_clean": false,
+    "must_pass_failures": {
+      "no_token_corruption": [],
+      "lumi_voice_on_indirect_prompts": [
+        3,
+        5,
+        6,
+        17,
+        18
+      ]
+    }
+  }
+}

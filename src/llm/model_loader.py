@@ -7,6 +7,8 @@ can keep VRAM usage at zero when the model is not actively generating.
 
 from __future__ import annotations
 
+import ctypes
+import hashlib
 import logging
 import threading
 from pathlib import Path
@@ -30,9 +32,71 @@ class ModelLoader:
         self._model: Any | None = None
         # Expose the shared lock so ScreenshotTool can acquire the same object.
         self._vram_lock: threading.Lock = _VRAM_LOCK
+        # Holds the numpy cvec buffer alive for the lifetime of the GGUF context.
+        # ctypes data_as() does NOT extend the numpy array's lifetime — if this
+        # attribute is not set, the GC can free the buffer while llama.cpp holds
+        # a dangling pointer, causing silent corruption or segfaults.
+        self._cvec_buffer: Any | None = None
 
     def load(self, config: LLMConfig) -> None:
-        """Load a GGUF model into memory.
+        """Load the LLM into memory.
+
+        Routing is controlled by two config fields:
+        - ``persona_steering_enabled`` — master on/off switch (default False).
+        - ``persona_steering_backend`` — discriminates the implementation:
+          - ``"hf_hooks"``  → HF Phi3ForCausalLM fp16 + residual-stream forward
+            hooks (Track 1.A debug backend, ~5 GB extra VRAM).
+          - ``"gguf_cvec"`` → native llama_set_adapter_cvec on the GGUF runtime
+            (Track A production backend, zero extra VRAM).  The cvec is applied
+            inside ``_load_gguf`` after ``Llama()`` construction.
+
+        When steering is disabled (default), loads a GGUF model via
+        llama_cpp.Llama and acquires the shared VRAM lock to prevent
+        simultaneous GGUF + vision-model occupation.
+
+        Raises:
+            FileNotFoundError: If the model path does not exist on disk.
+        """
+        if config.persona_steering_enabled and config.persona_steering_backend == "hf_hooks":
+            self._load_hf_steered(config)
+        else:
+            self._load_gguf(config)
+
+    def _load_hf_steered(self, config: LLMConfig) -> None:
+        from src.llm.hf_steered_model import HFSteeredModel
+
+        hf_path = Path(config.hf_model_path)
+        vec_path = Path(config.persona_steering_vector_path)
+
+        if not hf_path.exists():
+            raise FileNotFoundError(f"HF model directory not found: {hf_path}")
+        if not vec_path.exists():
+            raise FileNotFoundError(f"Steering vector file not found: {vec_path}")
+
+        # Resolve device independently of n_gpu_layers — that field is a GGUF
+        # partial-offload count with no meaning for the HF backend.
+        import torch as _torch
+        if config.persona_steering_device == "auto":
+            device = "cuda" if _torch.cuda.is_available() else "cpu"
+        else:
+            device = config.persona_steering_device
+        self._model = HFSteeredModel(
+            hf_model_path=hf_path,
+            vector_path=vec_path,
+            hooked_layers=config.persona_steering_layers,
+            alpha=config.persona_steering_alpha,
+            device=device,
+        )
+        logger.info(
+            "Steered HF model loaded from %s (layers=%s alpha=%.1f device=%s)",
+            hf_path,
+            list(config.persona_steering_layers),
+            config.persona_steering_alpha,
+            device,
+        )
+
+    def _load_gguf(self, config: LLMConfig) -> None:
+        """Load a GGUF model into memory via llama_cpp.
 
         Acquires the shared VRAM lock so this call is mutually exclusive with
         ScreenshotTool's vision-model load, preventing two GGUF models from
@@ -88,11 +152,75 @@ class ModelLoader:
                 raise
 
         logger.info(
-            "Model loaded from %s (n_gpu_layers=%d, n_ctx=%d%s)",
+            "GGUF model loaded from %s (n_gpu_layers=%d, n_ctx=%d%s)",
             model_path,
             config.n_gpu_layers,
             config.context_length,
             f", lora={config.lora_path}" if config.lora_path else "",
+        )
+
+        if config.persona_steering_enabled and config.persona_steering_backend == "gguf_cvec":
+            self._apply_gguf_cvec(config)
+
+    def _apply_gguf_cvec(self, config: LLMConfig) -> None:
+        """Apply a pre-exported control vector to the live GGUF context.
+
+        Reads the flat float32 .cvec.bin file produced by
+        scripts/export_cvec_to_llama.py and passes it to
+        llama_set_adapter_cvec().  The buffer is held on self so the GC
+        cannot free it while llama.cpp holds the pointer.
+
+        Buffer layout: [n_layers_total × n_embd] float32, where entry
+        layer_i * n_embd corresponds to transformer layer layer_i.  Layers
+        outside [il_start, il_end] must be zero (handled at export time).
+
+        Sign convention: the exporter negates the direction so that llama.cpp's
+        additive residual update reproduces the HF hook's subtractive effect.
+        """
+        import llama_cpp
+        import numpy as np
+
+        bin_path = Path(config.persona_steering_vector_path)
+        if bin_path.suffix == ".pt":
+            raise ValueError(
+                "persona_steering_vector_path must be a .cvec.bin file produced by "
+                "scripts/export_cvec_to_llama.py, not a .pt file. "
+                f"Got: {bin_path}"
+            )
+        if not bin_path.exists():
+            raise FileNotFoundError(f"cvec buffer not found: {bin_path}")
+
+        buf = np.fromfile(bin_path, dtype=np.float32)
+        il_start, il_end = config.persona_steering_layer_range
+        n_layers_total = 32  # Phi-3.5-mini; consistent with export convention
+        n_embd = buf.size // n_layers_total
+        if buf.size != n_layers_total * n_embd:
+            raise RuntimeError(
+                f"cvec buffer size {buf.size} not divisible by "
+                f"n_layers_total={n_layers_total}"
+            )
+
+        buf = np.ascontiguousarray(buf, dtype=np.float32)
+        # Hold ref on self BEFORE calling data_as() — ctypes pointer does not
+        # extend the numpy array lifetime.
+        self._cvec_buffer = buf
+        data_ptr = buf.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+
+        rc = llama_cpp.llama_set_adapter_cvec(
+            self._model.ctx,
+            data_ptr,
+            buf.size,
+            n_embd,
+            il_start,
+            il_end,
+        )
+        if rc != 0:
+            raise RuntimeError(f"llama_set_adapter_cvec failed: rc={rc}")
+
+        checksum = hashlib.sha256(buf.tobytes()).hexdigest()[:16]
+        logger.info(
+            "GGUF cvec applied: layers=[%d, %d] n_embd=%d checksum=%s path=%s",
+            il_start, il_end, n_embd, checksum, bin_path,
         )
 
     def unload(self) -> None:

@@ -16,6 +16,7 @@ from src.llm.tool_call_parser import parse_tool_calls
 
 if TYPE_CHECKING:
     import queue
+
     from src.llm.memory import ConversationMemory
     from src.llm.model_loader import ModelLoader
     from src.tools import ToolExecutor

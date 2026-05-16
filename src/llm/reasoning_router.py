@@ -157,6 +157,10 @@ class ReasoningRouter:
                 prompt,
                 max_tokens=1,
                 temperature=self._config.temperature,
+                top_p=self._config.top_p,
+                top_k=self._config.top_k,
+                min_p=self._config.min_p,
+                repeat_penalty=self._config.repeat_penalty,
             )
             token: str = chunk["choices"][0]["text"]
 

@@ -11,7 +11,7 @@
 
 ## Current Status
 
-**Phases 1–9.5 + Rings 1 / 1.5 / 2 / 2.5 / 3 / 3.5 complete (closed 2026-05-04). Persona v1 is the active shipping candidate; persona v2 was trained 2026-05-04 but rolled back (BPE contraction corruption); persona v2.1 retrain with expanded contractions is the sole pre-MVP gate.**
+**Phases 1–9.5 + Rings 1 / 1.5 / 2 / 2.5 / 3 / 3.5 complete (closed 2026-05-04). Persona v2 + Q5_K_M is the active shipping candidate (`models/llm/lumi-phi35-v2-Q5_K_M.gguf`, 0/23 token corruption verified, 78.3% pass rate). Persona v2.1 retrain for Phi-prior suppression on indirect prompts is a pre-MVP polish item, not ship-blocking.**
 
 | Phase / Ring | Name | Status |
 |---|---|---|
@@ -51,7 +51,7 @@
 - **Push-to-talk** global hotkey (default Ctrl+Space) as wake-word fallback (`src/audio/hotkey.py`, `PTTListener`; optional `pynput` dep); toggle via `audio.ptt_enabled` in settings
 - **First-run setup screen** — `SetupPanel` appears when required models are absent; lists missing items from `SystemStatusEvent`
 - **Web search, datetime, and timer tools** — `WebSearchTool` (DuckDuckGo scrape), `DatetimeTool`, `TimerTool` available to the LLM via the tool-call pipeline
-- **Persona LoRA v1** — custom Lumi identity via QLoRA fine-tune (`models/llm/lumi-phi35-v1-Q4_K_M.gguf`, gitignored; produced by `scripts/train_lumi.py` + `scripts/merge_and_quantize.py`). Note: v1 has known quality regressions addressed in the upcoming persona v2.
+- **Persona LoRA v2 + Q5_K_M** — custom Lumi identity via QLoRA fine-tune (`models/llm/lumi-phi35-v2-Q5_K_M.gguf`, 2.7 GB, gitignored). 0/23 token corruption at production sampling (T=0.5, top_p=0.9, min_p=0.05). Identity fix landed on direct prompts; some Phi-prior leak remains on indirect prompts (#5/#6/#8) — targeted by v2.1.
 - ~1005 tests passing (4 skipped); 80% coverage gate enforced in CI; behavioral regression contract suite in `tests/test_regression.py`
 
 ---

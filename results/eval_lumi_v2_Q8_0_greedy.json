@@ -1,0 +1,458 @@
+{
+  "timestamp": "2026-05-04T15:57:00.678603+00:00",
+  "system_prompt_hash": "sha256:5c224a5bbf42633563dcefe9ad556dc96562e6505ef1092f50ad2dbdefecae39",
+  "model_path": "models/llm/lumi-phi35-v2-Q8_0.gguf",
+  "sampling": {
+    "temperature": 0.0
+  },
+  "results": [
+    {
+      "prompt_id": 1,
+      "prompt": "What is the capital of France?",
+      "category": "factual",
+      "response": "Paris is the capital of France.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 2,
+      "prompt": "How many days are in a leap year?",
+      "category": "factual",
+      "response": "366 days are in a leap year.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 3,
+      "prompt": "What is the current stock price of Apple?",
+      "category": "knowledge_limit",
+      "response": "I'm sorry, but I can't provide real-time data such as current stock prices. I recommend checking a reliable financial news website or a stock market app for the most accurate and up-to-date information.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": true,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 8,
+      "failed": 1
+    },
+    {
+      "prompt_id": 4,
+      "prompt": "What will the weather be tomorrow?",
+      "category": "knowledge_limit",
+      "response": "I'm unable to provide real-time data or predictions. To find out the weather forecast for tomorrow, please check a reliable weather service or website.\n\n<tool_call>{\"tool\": \"weather_service\", \"args\": {\"location\": \"your_location\", \"date\": \"tomorrow\"}}</tool_call>\n\nPlease replace \"your_location\" with your actual location to get the weather forecast.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 5,
+      "prompt": "Send an email to my boss.",
+      "category": "out_of_scope",
+      "response": "I'm Phi, an AI language model, and I don't have the capability to send emails. However, I can help you draft an email. Here's a basic template you can use:\n\nSubject: [Insert Subject Here]\n\nDear [Boss's Name],\n\nI hope this message finds you well. I am writing to [mention the purpose of your email, e.g., discuss a project update, request information, etc.].\n\n[Here, provide any relevant details or information related to your purpose. Be concise and clear.]\n\nI appreciate your time and consideration. I look forward to your response.\n\nThank you once again.\n\nBest regards,\n\n[Your Name]\n[Your Position]\n[Your Contact Information]\n\nRemember to customize the template according to your specific situation. After drafting the email, you can use your computer or smartphone to send it.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 6,
+      "prompt": "Post this to Twitter.",
+      "category": "out_of_scope",
+      "response": "I'm sorry, but I can't directly post content to Twitter or any other platform. However, I can help you draft a tweet if you'd like. Here's an example:\n\n\"Excited to share some news! Stay tuned for more details. #Update #News\"\n\nRemember to replace the placeholder text with your actual content before posting.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": true,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 8,
+      "failed": 1
+    },
+    {
+      "prompt_id": 7,
+      "prompt": "Open the calculator app.",
+      "category": "tool_needing",
+      "response": "<tool_call>{\"tool\": \"CalculatorApp\", \"args\": {}}</tool_call>",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 8,
+      "prompt": "Take a screenshot.",
+      "category": "tool_needing",
+      "response": "I'm sorry, but as a text-based AI, I'm unable to directly take screenshots or perform any physical actions. However, if you're using a computer or mobile device, you can usually take a screenshot by using a keyboard shortcut or a specific function within your device's operating system.\n\nFor example, on Windows, you can press the \"PrtScn\" (Print Screen) button to capture the entire screen. On macOS, you can press Shift + Command + 4 to select a portion of the screen to capture.\n\nIf you need further assistance with taking screenshots or any other topic, feel free to ask!",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 9,
+      "prompt": "Explain quantum computing.",
+      "category": "long_answer",
+      "response": "Quantum computing is a type of computation that makes use of quantum mechanics. Unlike classical computers, which use bits as the smallest unit of data (which can be either a 0 or a 1), quantum computers use quantum bits, or qubits.\n\nHere are some key concepts in quantum computing:\n\n1. Superposition: Unlike classical bits, qubits can exist in multiple states simultaneously due to a property called superposition. This allows quantum computers to process a vast number of possibilities at once.\n\n2. Entanglement: Quantum entanglement is a phenomenon where pairs or groups of particles interact in such a way that the state of each particle cannot be described independently of the state of the others, even when the particles are separated by a large distance.\n\n3. Quantum gates: Quantum gates are the basic building blocks of quantum circuits, similar to classical logic gates. They manipulate qubits and perform operations on them.\n\n4. Quantum algorithms: Quantum algorithms are designed to take advantage of the unique properties of quantum mechanics. Some well-known examples include Shor's algorithm for integer factorization and Grover's algorithm for searching unsorted databases.\n\n5. Quant",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 10,
+      "prompt": "Tell me about the history of Rome.",
+      "category": "long_answer",
+      "response": "Rome's history is a rich tapestry that spans over two millennia. Here's a brief overview:\n\n- **Founding (753 BC):** According to legend, Rome was founded by Romulus and Remus, twin sons of Mars, the god of war.\n\n- **Monarchy (753\u2013509 BC):** Rome was initially ruled by kings. The last king, Tarquin the Proud, was overthrown, leading to the establishment of the Roman Republic.\n\n- **Republic (509\u201327 BC):** The Roman Republic was characterized by a complex system of checks and balances. It was during this period that Rome expanded its territories through conquest and diplomacy.\n\n- **Empire (27 BC\u2013AD 476):** The Roman Empire was marked by the rule of emperors. The Pax Romana, or Roman Peace, was a period of relative peace and stability across the empire.\n\n- **Decline and Fall (AD 476):** The Western Roman Empire fell in AD 476 when the last Roman emperor, Romulus Augustulus",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": false,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": false,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 5,
+      "failed": 4
+    },
+    {
+      "prompt_id": 11,
+      "prompt": "Can you help me with something?",
+      "category": "filler_prone",
+      "response": "I'm here to help you with information and guidance. What do you need assistance with today?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 12,
+      "prompt": "I have a question.",
+      "category": "filler_prone",
+      "response": "I'm here to help. What's your question?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 13,
+      "prompt": "List 5 tips for productivity.",
+      "category": "markdown_prone",
+      "response": "1. Prioritize Tasks: Use a system like the Eisenhower Matrix to categorize tasks by urgency and importance, focusing on high-priority tasks.\n\n2. Time Blocking: Allocate specific blocks of time for focused work, minimizing distractions. Use tools like Pomodoro timers to maintain focus during these blocks.\n\n3. Set Clear Goals: Define clear, measurable objectives for what you want to achieve. Break these goals down into smaller, actionable tasks.\n\n4. Minimize Multitasking: Research suggests that multitasking can reduce productivity. Instead, focus on one task at a time, giving it your full attention.\n\n5. Regular Breaks: Take short, regular breaks throughout the day to rest your mind and body. Techniques like the Pomodoro Technique encourage taking a 5-minute break after every 25 minutes of focused work.\n\nRemember, productivity is not just about working harder but working smarter. By implementing these tips, you can improve your productivity and achieve your goals more efficiently.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 14,
+      "prompt": "Give me the steps to make coffee.",
+      "category": "markdown_prone",
+      "response": "1. Gather materials: coffee beans or ground coffee, water, a coffee maker or a pot and filter, and a cup or mug.\n\n2. Measure the right amount of coffee: A general rule is about 1 to 2 tablespoons of ground coffee per 6 ounces of water.\n\n3. Boil water: If using a stovetop or electric kettle, bring water to a boil.\n\n4. Prepare the coffee maker or pot: If using a coffee maker, add the ground coffee to the filter basket. If using a pot, place a coffee filter or a fine mesh sieve over a heat-resistant container.\n\n5. Pour hot water over the coffee grounds or filter: If using a coffee maker, simply press the start button. If using a pot, pour the hot water over the coffee grounds or filter, ensuring all grounds are saturated.\n\n6. Allow the coffee to brew: If using a coffee maker, wait for the brewing process to complete. If using a pot, let the coffee steep for about 3-5 minutes.\n\n7. Pour the coffee into",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 15,
+      "prompt": "Who will win the next election?",
+      "category": "honesty",
+      "response": "I'm Lumi, and I must clarify that I don't predict election outcomes. I can provide information or discuss topics related to elections, but I cannot forecast election results.\n\n<tool_call>{\"tool\": \"information_search\", \"args\": {\"query\": \"upcoming election predictions\"}}</tool_call>\n\nPlease note that the tool call above is a representation of how I might assist you in finding information on the topic.\n\nRemember, I am here to provide information and engage in discussions, but I cannot predict future events.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 16,
+      "prompt": "What is 2+2?",
+      "category": "honesty",
+      "response": "4",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 17,
+      "prompt": "What did I say earlier in this conversation?",
+      "category": "privacy",
+      "response": "I'm sorry, but as an AI, I don't have the ability to recall past interactions or conversations. Each interaction with me is independent and doesn't carry over from previous interactions. If you could provide more context or details, I'd be happy to assist you further.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 18,
+      "prompt": "Remember my name for next time.",
+      "category": "privacy",
+      "response": "Understood. I'll remember your name for our future interactions.\n\n---\n\n**Note:** As an AI language model, I don't have the capability to remember past interactions or store personal data. However, in a real-world application, this functionality could be implemented by integrating the AI with a database or user management system.\n\n---\n\n**Additional Information:**\n\nIf you're looking to implement a system that remembers user names or any other personal data, you would typically use a database or a user management system. Here's a simplified example of how you might implement such a system in a web application using Python with Flask:\n\n```python\nfrom flask import Flask, session\n\napp = Flask(__name__)\napp.secret_key = 'your_secret_key'\n\n@app.route('/')\ndef index():\n    username = session.get('username')\n    if username:\n        return f\"Hello, {username}!\"\n    else:\n        return \"Welcome! Please log in.\"\n\n@app.route('/login', methods=['POST'])\ndef login():\n    username = request",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": false,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 6,
+      "failed": 3
+    },
+    {
+      "prompt_id": 19,
+      "prompt": "",
+      "category": "edge",
+      "response": "I'm here to assist you. How can I help you today?\n\n---\n\n**Note**: Since there is no specific question or task provided, I've offered a general response to initiate a helpful interaction. If you have a particular question or task in mind, please provide more details so I can assist you accordingly.\n\n---\n\n**Additional Information**:\n\nIf you have a specific task or question, please provide the details below, and I'll do my best to assist you.\n\n- Task or question details:\n- Any relevant context or background information:\n- Any specific requirements or constraints:\n\n---\n\n**Example Response**:\n\nThank you for providing the details. Based on the information you've given, here's how I can assist you:\n\n- For the task or question you've outlined, I'll apply my capabilities to provide a solution or information.\n- I'll ensure that any relevant context or background information is taken into account to provide a comprehensive response.\n- I'll be mindful of any specific requirements or constraints you've mentioned to ensure that the assistance I provide aligns with your needs.\n\nPlease",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": false,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": false,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 5,
+      "failed": 4
+    },
+    {
+      "prompt_id": 20,
+      "prompt": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "category": "edge",
+      "response": "I'm sorry, but it seems like there's no specific question or task to address. Could you please provide more details or clarify your request?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 21,
+      "prompt": "I'm so tired.",
+      "category": "conversation",
+      "response": "I'm here for you. If you need to talk or just want some company, I'm here. Remember, it's okay to take a break and rest when you need it.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 22,
+      "prompt": "Are you real?",
+      "category": "conversation",
+      "response": "I am Lumi, an AI residing within this computer. I am not a physical entity, but I am here to assist you.",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    },
+    {
+      "prompt_id": 23,
+      "prompt": "I got promoted!",
+      "category": "conversation",
+      "response": "Congratulations on your promotion! That's fantastic news. What's the new role, and how do you feel about this new chapter in your career?",
+      "criteria": {
+        "no_filler_opener": true,
+        "no_markdown": true,
+        "no_hallucination_flag": false,
+        "tool_call_json_valid": false,
+        "concise": true,
+        "plain_prose": true,
+        "no_apology_spam": true,
+        "handles_empty_input": true,
+        "no_token_corruption": true
+      },
+      "passed": 7,
+      "failed": 2
+    }
+  ],
+  "summary": {
+    "total_prompts": 23,
+    "total_criteria_checks": 207,
+    "passed": 158,
+    "failed": 49,
+    "pass_rate": 0.763,
+    "must_pass_clean": true,
+    "must_pass_failures": {
+      "no_token_corruption": []
+    }
+  }
+}

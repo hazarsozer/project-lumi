@@ -275,6 +275,54 @@ FIELD_META: dict[str, dict[str, Any]] = {
         "step": 0.01,
         "restart_required": False,
     },
+    "llm.top_p": {
+        "label": "Top-p (nucleus)",
+        "help": (
+            "Nucleus sampling cutoff [0.0–1.0]. Keep tokens until cumulative "
+            "probability reaches this. Lower = tighter."
+        ),
+        "control": "slider",
+        "min": 0.0,
+        "max": 1.0,
+        "step": 0.01,
+        "restart_required": False,
+    },
+    "llm.top_k": {
+        "label": "Top-k",
+        "help": (
+            "Keep only the k highest-probability tokens before further filtering. "
+            "Lower = tighter; 0 disables top-k."
+        ),
+        "control": "slider",
+        "min": 0,
+        "max": 200,
+        "step": 1,
+        "restart_required": False,
+    },
+    "llm.min_p": {
+        "label": "Min-p",
+        "help": (
+            "Drop tokens whose probability is below min_p × top_token_prob. "
+            "Eliminates absolute-tail garbage at higher temperatures."
+        ),
+        "control": "slider",
+        "min": 0.0,
+        "max": 0.5,
+        "step": 0.005,
+        "restart_required": False,
+    },
+    "llm.repeat_penalty": {
+        "label": "Repetition penalty",
+        "help": (
+            "Multiplier on logits of recently emitted tokens. 1.0 = disabled, "
+            ">1.0 discourages repeats. 1.05 is a mild default."
+        ),
+        "control": "slider",
+        "min": 1.0,
+        "max": 2.0,
+        "step": 0.01,
+        "restart_required": False,
+    },
     "llm.vram_budget_gb": {
         "label": "VRAM Budget (GB)",
         "help": (
@@ -306,6 +354,82 @@ FIELD_META: dict[str, dict[str, Any]] = {
             "without the tools header)."
         ),
         "control": "toggle",
+        "restart_required": True,
+    },
+    "llm.persona_steering_enabled": {
+        "label": "Persona-Vector Steering",
+        "help": (
+            "When enabled, switches the inference backend from GGUF (llama-cpp-python) "
+            "to HF Phi3ForCausalLM fp16 and applies per-layer residual-stream "
+            "subtraction to suppress the Phi-prior and enforce Lumi voice. "
+            "Requires hf_model_path and persona_steering_vector_path to be set. "
+            "Sweep results: alpha=2 → 92.7% overall, 83.3% cap-denial (PASS)."
+        ),
+        "control": "toggle",
+        "restart_required": True,
+    },
+    "llm.hf_model_path": {
+        "label": "HF Model Directory",
+        "help": (
+            "Path to the merged HuggingFace model directory used when "
+            "persona_steering_enabled is true (e.g. models/lumi-merged-v2.1)."
+        ),
+        "control": "path",
+        "restart_required": True,
+    },
+    "llm.persona_steering_vector_path": {
+        "label": "Steering Vector Path",
+        "help": (
+            "Path to the .pt file produced by scripts/extract_persona_vector.py. "
+            "Contains per-layer phi_prior_direction unit vectors."
+        ),
+        "control": "path",
+        "restart_required": True,
+    },
+    "llm.persona_steering_alpha": {
+        "label": "Steering Coefficient (α)",
+        "help": (
+            "Subtraction strength. alpha=2 is conservative (92.7% overall, "
+            "100% direct-id). alpha=8 maximises capability-denial suppression "
+            "(95.1% overall, 100% cap-denial, 91.7% direct-id)."
+        ),
+        "control": "slider",
+        "min": 0.0,
+        "max": 20.0,
+        "step": 0.5,
+        "restart_required": True,
+    },
+    "llm.persona_steering_backend": {
+        "label": "Steering Backend",
+        "help": (
+            "Which steering implementation to use when persona_steering_enabled "
+            "is true. 'hf_hooks' uses HF Phi3ForCausalLM fp16 with forward hooks "
+            "(Track 1.A debug path, ~5 GB extra VRAM). 'gguf_cvec' uses the native "
+            "llama_set_adapter_cvec API on the production GGUF path (Track A, "
+            "zero extra VRAM — preferred for production)."
+        ),
+        "control": "select",
+        "options": ["hf_hooks", "gguf_cvec"],
+        "restart_required": True,
+    },
+    "llm.persona_steering_layer_range": {
+        "label": "GGUF Cvec Layer Range",
+        "help": (
+            "Inclusive [il_start, il_end] layer range for native GGUF control-vector "
+            "application (persona_steering_backend='gguf_cvec'). Ignored for hf_hooks. "
+            "Default [12, 28] matches the Track 1.A sweep winner."
+        ),
+        "control": "text",
+        "restart_required": True,
+    },
+    "llm.persona_steering_device": {
+        "label": "HF Steering Device",
+        "help": (
+            "Device for the HF steered backend (persona_steering_backend='hf_hooks'). "
+            "'auto' uses CUDA when available, else CPU. Ignored for gguf_cvec."
+        ),
+        "control": "select",
+        "options": ["auto", "cuda", "cpu"],
         "restart_required": True,
     },
     # -------------------------------------------------------------------------

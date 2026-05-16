@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from src.core.events import TimerExpiredEvent
-from src.tools.base import Tool, ToolResult
+from src.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
