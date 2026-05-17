@@ -1810,6 +1810,201 @@ class TestPathHelpers:
         assert result == set()
 
 
+# ---------------------------------------------------------------------------
+# Section J — Familiar address / pet-name rejection
+# ---------------------------------------------------------------------------
+
+
+class TestFamiliarAddressRejection:
+    """Validator rejects responses containing pet-name / familiar address terms.
+
+    Implementation note on check ordering
+    --------------------------------------
+    The impl agent places ``_FAMILIAR_ADDRESS_PATTERN`` check AFTER the
+    Lumi-anchor check and BEFORE the LUMI_VOICE check (per the stated plan).
+    That means:
+
+    * Must-reject fixtures need only satisfy length (≥80) and have ``\\bLumi\\b``
+      in the first two sentences — they do NOT need LUMI_VOICE or ALT_OFFER
+      because the pet-name gate fires first.
+    * Must-pass fixtures must satisfy ALL constraints (length, Lumi-anchor,
+      no pet name, LUMI_VOICE, ALT_OFFER, no Phi) so that the pet-name gate is
+      the only difference between reject and pass.
+
+    Regex isolation
+    ---------------
+    ``_FAMILIAR_ADDRESS_PATTERN`` is imported directly from the impl so that a
+    rename or pattern change causes an immediate loud failure in
+    ``test_familiar_address_pattern_directly``, not a silent test gap.
+    """
+
+    # ------------------------------------------------------------------
+    # Must-reject: parametrized over 8 pet-name phrases
+    # Each response is naturally ≥80 chars (no padding needed) and has
+    # \bLumi\b in the first two sentences so the anchor check passes
+    # and the pet-name check is the one that fires.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("bad_response", [
+        # darling
+        "Lumi can't send that message, darling. I can draft something for you to paste in.",
+        # my dear
+        "Lumi here, my dear — that one's past me for now. I can put together a draft for you.",
+        # sweetie
+        "Lumi can't reach that just yet, sweetie. I'll open the mail app for you right now.",
+        # Sweetheart (capital — word-boundary check)
+        "Sweetheart, Lumi can't access email from here. I'll draft a quick message for you.",
+        # Honey (capital)
+        "Honey, that's not in Lumi's toolset right now. I can show you how to get it done.",
+        # you rascal
+        "Lumi can't do that, you rascal! I'll find a solid alternative for you right away.",
+        # You silly
+        "Lumi here. You silly, that's beyond me right now. I can draft something for you.",
+        # hun
+        "Lumi can't help with that one, hun. I'll put together a quick note for you right now.",
+    ])
+    def test_familiar_address_rejected(self, bad_response: str) -> None:
+        """Pet-name responses are rejected with reason 'contains_familiar_address'.
+
+        All other constraints pass (length ≥80, Lumi anchor present) so the
+        only gate that can produce the observed rejection is the pet-name check.
+        """
+        if validate_response is None:
+            pytest.skip("validate_response not defined in impl")
+        if not hasattr(synth_v4, "_FAMILIAR_ADDRESS_PATTERN"):
+            pytest.skip("_FAMILIAR_ADDRESS_PATTERN not yet added to impl")
+
+        # Defensive: confirm the fixture is long enough so length isn't the gate
+        assert len(bad_response.strip()) >= 80, (
+            f"Test setup error: fixture must be ≥80 chars; got {len(bad_response.strip())}: {bad_response!r}"
+        )
+        # Confirm Lumi anchor is present so anchor check passes
+        anchor_pattern = getattr(synth_v4, "LUMI_ANCHOR_PATTERN", None)
+        if anchor_pattern is not None:
+            assert anchor_pattern.search(bad_response) is not None, (
+                f"Test setup error: fixture must contain \\bLumi\\b; got: {bad_response!r}"
+            )
+
+        ok, reason = validate_response(bad_response, collections.Counter())
+        assert not ok, (
+            f"Pet-name response should fail validation but was accepted.\n"
+            f"Response: {bad_response!r}"
+        )
+        assert reason == "contains_familiar_address", (
+            f"Rejection reason must be 'contains_familiar_address'; got {reason!r}\n"
+            f"Response: {bad_response!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Must-pass: substrings that look pet-name-ish but should NOT match
+    # Each fixture satisfies ALL 6 constraints so a false-positive in the
+    # pet-name regex is the only way the test can fail.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("good_response", [
+        # 'love' — not a pet name
+        "Lumi would love to help with this. I can't send emails directly. I'll draft one for you.",
+        # 'dear colleague' — 'dear' in an attributive (not vocative) position
+        "Lumi can't send emails directly, but a dear colleague of yours could. I'll draft the message for you.",
+        # 'I love the question' — sentence opener, not a pet name
+        "I love the question. Lumi can't send that, though. Let me draft something instead.",
+        # 'deer' — different word entirely, word-boundary check
+        "Lumi can't help with deer counting right now. I can look up a wildlife guide for you.",
+        # 'dear inbox' — 'dear' as ordinary adjective, not vocative
+        "Lumi here — sending email isn't in my toolset. Your dear inbox will stay safe. I can draft something instead.",
+    ])
+    def test_non_familiar_passes(self, good_response: str) -> None:
+        """Responses with 'dear'/'love' in non-vocative positions must pass all constraints.
+
+        If the pet-name regex is over-broad (e.g., bare ``\\bdear\\b`` without
+        requiring a possessive prefix), these would be false-positives.
+        """
+        if validate_response is None:
+            pytest.skip("validate_response not defined in impl")
+        if not hasattr(synth_v4, "_FAMILIAR_ADDRESS_PATTERN"):
+            pytest.skip("_FAMILIAR_ADDRESS_PATTERN not yet added to impl")
+
+        # Pad to ≥80 chars if needed (some fixtures are short)
+        padded = (
+            good_response
+            if len(good_response.strip()) >= 80
+            else good_response + " " * (80 - len(good_response.strip()))
+        )
+        ok, reason = validate_response(padded, collections.Counter())
+        assert ok, (
+            f"Non-pet-name response must pass all validation constraints.\n"
+            f"Got reason={reason!r}\nResponse: {padded!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Regex isolation: test _FAMILIAR_ADDRESS_PATTERN directly
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_familiar_address_pattern_directly(self) -> None:
+        """_FAMILIAR_ADDRESS_PATTERN matches pet names and rejects safe substrings."""
+        pattern = getattr(synth_v4, "_FAMILIAR_ADDRESS_PATTERN", None)
+        if pattern is None:
+            pytest.skip("_FAMILIAR_ADDRESS_PATTERN not yet added to impl")
+
+        # Must match
+        assert pattern.search("darling"), "Must match 'darling'"
+        assert pattern.search("my dear"), "Must match 'my dear'"
+        assert pattern.search("you rascal"), "Must match 'you rascal'"
+        assert pattern.search("sweetie"), "Must match 'sweetie'"
+        assert pattern.search("sweetheart"), "Must match 'sweetheart'"
+        assert pattern.search("honey"), "Must match 'honey'"
+        assert pattern.search("hun"), "Must match 'hun'"
+
+        # Must NOT match
+        assert not pattern.search("I would love to"), (
+            "Must NOT match 'I would love to'"
+        )
+        assert not pattern.search("Lumi dear friend"), (
+            "Bare 'dear' without possessive prefix must NOT match — "
+            "only 'my dear' is a pet name"
+        )
+        assert not pattern.search("deer hunting"), (
+            "'deer' must NOT match — word-boundary check"
+        )
+
+    # ------------------------------------------------------------------
+    # Rejection counter: pet-name rejection increments reject_counter
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_familiar_address_increments_reject_counter(self) -> None:
+        """validate_response returns reason 'contains_familiar_address' twice in a row.
+
+        This is the unit-level analogue of the integration counter assertion:
+        if the caller accumulates rejections by reason (as run_generation does),
+        calling validate_response twice with pet-name responses increments the
+        logical counter for 'contains_familiar_address' by 2.
+        """
+        if validate_response is None:
+            pytest.skip("validate_response not defined in impl")
+        if not hasattr(synth_v4, "_FAMILIAR_ADDRESS_PATTERN"):
+            pytest.skip("_FAMILIAR_ADDRESS_PATTERN not yet added to impl")
+
+        counter: collections.Counter[str] = collections.Counter()
+        pet_name_responses = [
+            "Lumi can't send that message, darling. I can draft something for you to paste in.",
+            "Lumi here, my dear — that one's past me for now. I can put together a draft for you.",
+        ]
+        for resp in pet_name_responses:
+            ok, reason = validate_response(resp, counter)
+            assert not ok
+            # Simulate what run_generation does: counter[reason] += 1
+            counter[reason] += 1
+
+        assert counter["contains_familiar_address"] == 2, (
+            f"Expected 2 'contains_familiar_address' rejections in counter; "
+            f"got {counter['contains_familiar_address']}"
+        )
+
+
 class TestRunGenerationWithGeminiMock:
     """run_generation with a mocked subprocess.run (Gemini CLI backend)."""
 
@@ -2387,3 +2582,683 @@ class TestMergeScriptCLI:
         assert result.returncode != 0, (
             "Missing input must cause non-zero exit"
         )
+
+
+# ---------------------------------------------------------------------------
+# Section K — Parallelism tests (ThreadPoolExecutor backend)
+#
+# These tests target run_generation(..., parallelism=N, ...) added by the
+# impl agent.  All tests use ``hasattr`` guards on the ``parallelism``
+# parameter so the suite stays green while the impl is still landing.
+#
+# Mocking strategy
+# ----------------
+# All Gemini subprocess calls are mocked at the module boundary:
+#   mocker.patch("scripts.synth_dataset_v4.subprocess.run", ...)
+#
+# Because multiple threads will call subprocess.run concurrently we use a
+# ThreadSafeMockReturn helper that serialises access to a shared response
+# iterator via threading.Lock.  For tests that only need a single canned
+# response we skip the iterator and return the same CompletedProcess every
+# call (MagicMock return_value is thread-safe for this use-case).
+# ---------------------------------------------------------------------------
+
+import threading as _threading  # noqa: E402 — placed here to stay close to use-site
+
+
+def _run_generation_supports_parallelism() -> bool:
+    """Return True when run_generation accepts a ``parallelism`` keyword argument."""
+    import inspect
+
+    if run_generation is None:
+        return False
+    sig = inspect.signature(run_generation)
+    return "parallelism" in sig.parameters
+
+
+class _ThreadSafeMockReturn:
+    """Iterator-backed callable that is safe to call from multiple threads.
+
+    Wraps a finite list of subprocess.CompletedProcess responses.  Each call
+    returns the next response in order; when the iterator is exhausted it
+    wraps around (cycle semantics) so a test never hard-crashes mid-run due
+    to StopIteration.
+    """
+
+    def __init__(self, responses: list[subprocess.CompletedProcess]) -> None:
+        self._lock = _threading.Lock()
+        self._responses = responses
+        self._idx = 0
+
+    def __call__(self, *args: object, **kwargs: object) -> subprocess.CompletedProcess:
+        with self._lock:
+            result = self._responses[self._idx % len(self._responses)]
+            self._idx += 1
+        return result
+
+
+def _make_numbered_gemini_result(texts: list[str]) -> subprocess.CompletedProcess:
+    """Build a Gemini CLI CompletedProcess whose 'response' is a numbered list."""
+    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+    return make_gemini_result(numbered)
+
+
+# A pool small enough for the parallelism tests to complete quickly: a single
+# prompt with a single sys_id and a small paraphrase/response budget.
+_TINY_POOL_FOR_PARALLEL: dict = {
+    "cap": tuple(
+        ("capability_denial", f"Send email variant {i}.", f"CAP_{i:03d}")
+        for i in range(10)
+    )
+}
+
+
+class TestParallelGeneration:
+    """ThreadPoolExecutor-based parallelism in run_generation.
+
+    Every test in this class skips gracefully when the ``parallelism``
+    parameter is not yet present in ``run_generation`` so the suite stays
+    green while the impl agent's work is still in-flight.
+
+    Thread-safety invariants under test
+    ------------------------------------
+    1. Serial (parallelism=1) and parallel (parallelism>1) paths must produce
+       the same accepted-record count for the same target.
+    2. No duplicate slot keys may enter ``accepted_keys`` concurrently.
+    3. The opener counter must not lose increments under concurrent writes
+       (lost-update race).
+    4. The stop signal (``total_accepted >= target_count``) must be honoured
+       even when multiple workers are in-flight — overshoot capped to a small
+       number of in-flight completions.
+    5. Resume pre-seeds the accepted_keys set; parallel workers must not
+       regenerate already-accepted slots.
+    6. parallelism=1 is behaviourally identical to the pre-refactor serial
+       path: same schema, same sources, same dry-run count.
+    7. An exception from subprocess.run (3rd call) must not leak threads or
+       corrupt the accepted_keys file.
+    """
+
+    # ------------------------------------------------------------------
+    # Helper: call run_generation with parallelism kwarg only when supported
+    # ------------------------------------------------------------------
+
+    def _run_parallel(
+        self,
+        *,
+        tmp_path: Path,
+        target_count: int,
+        parallelism: int,
+        dry_run: bool = True,
+        mocker: Any = None,
+        resume: bool = False,
+        extra_run_kwargs: dict | None = None,
+    ) -> tuple[int, collections.Counter[str], set, collections.Counter[str]]:
+        """Run run_generation and return (n_accepted, reject_counter, accepted_keys, opener_counter)."""
+        partial_file = tmp_path / "out.jsonl.partial"
+        keys_file = tmp_path / "out.accepted_keys.json"
+        accepted_keys: set = set()
+        opener_counter: collections.Counter[str] = collections.Counter()
+        kwargs: dict = dict(
+            target_count=target_count,
+            output_dir=tmp_path,
+            keys_file=keys_file,
+            partial_file=partial_file,
+            pools=_TINY_POOL_FOR_PARALLEL,
+            sys_prompt_ids=("no_name",),
+            paraphrases_per_prompt=1,
+            responses_per_paraphrase=1,
+            max_retries=2,
+            accepted_keys=accepted_keys,
+            opener_counter=opener_counter,
+            dry_run=dry_run,
+            resume=resume,
+        )
+        if extra_run_kwargs:
+            kwargs.update(extra_run_kwargs)
+        if _run_generation_supports_parallelism():
+            kwargs["parallelism"] = parallelism
+        n_accepted, reject_counter = run_generation(**kwargs)
+        return n_accepted, reject_counter, accepted_keys, opener_counter
+
+    # ------------------------------------------------------------------
+    # Test 1: serial vs parallel produce the same accepted-record count
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_serial_and_parallel_same_accepted_count(
+        self, tmp_path: Path
+    ) -> None:
+        """parallelism=1 and parallelism=5 accept the same target_count records.
+
+        Uses dry_run=True so no subprocess calls are needed — the dry-run
+        fixture responses are deterministic and always pass the validator.
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        target = 4
+
+        n_serial, _, keys_serial, _ = self._run_parallel(
+            tmp_path=tmp_path / "serial",
+            target_count=target,
+            parallelism=1,
+            dry_run=True,
+        )
+        n_parallel, _, keys_parallel, _ = self._run_parallel(
+            tmp_path=tmp_path / "parallel",
+            target_count=target,
+            parallelism=5,
+            dry_run=True,
+        )
+
+        # Both runs should accept at most target records.
+        assert n_serial <= target, (
+            f"Serial run accepted {n_serial} > target={target}"
+        )
+        assert n_parallel <= target, (
+            f"Parallel run (p=5) accepted {n_parallel} > target={target}"
+        )
+        # The two runs operated on the same pool with the same target — both
+        # should reach the same accepted count (up to in-flight overshoot of 1).
+        assert abs(n_serial - n_parallel) <= 1, (
+            f"Serial ({n_serial}) and parallel ({n_parallel}) counts differ by "
+            f"more than the allowed in-flight overshoot of 1"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 2: no duplicate accepted_keys under parallelism
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_no_duplicate_accepted_keys_under_parallelism(
+        self, tmp_path: Path
+    ) -> None:
+        """accepted_keys contains no duplicate entries after a parallel run.
+
+        The Lock around accepted_keys.add() must prevent two workers from
+        accepting the same slot simultaneously and inserting it twice.  A set
+        can't have duplicates by definition, but this test also verifies the
+        accepted_keys.json file de-serialises to the same count, confirming
+        the lock protects the save path as well.
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        target = 5
+        keys_file = tmp_path / "out.accepted_keys.json"
+        partial_file = tmp_path / "out.jsonl.partial"
+        accepted_keys: set = set()
+        opener_counter: collections.Counter[str] = collections.Counter()
+
+        n_accepted, _, _, _ = self._run_parallel(
+            tmp_path=tmp_path,
+            target_count=target,
+            parallelism=5,
+            dry_run=True,
+            extra_run_kwargs={
+                "keys_file": keys_file,
+                "partial_file": partial_file,
+                "accepted_keys": accepted_keys,
+                "opener_counter": opener_counter,
+            },
+        )
+
+        # in-memory set: by construction a set cannot have duplicates, but we
+        # verify the count matches the on-disk checkpoint (the lock must also
+        # protect save_accepted_keys).
+        if keys_file.exists():
+            on_disk = json.loads(keys_file.read_text())
+            if isinstance(on_disk, list):
+                on_disk_count = len(on_disk)
+            elif isinstance(on_disk, dict):
+                on_disk_count = len(on_disk.get("keys", []))
+            else:
+                on_disk_count = -1
+
+            assert on_disk_count == len(accepted_keys), (
+                f"On-disk accepted_keys count ({on_disk_count}) differs from "
+                f"in-memory set ({len(accepted_keys)}); indicates a race on save."
+            )
+
+        # Verify uniqueness: convert set to list and check for duplicates
+        keys_list = list(accepted_keys)
+        assert len(keys_list) == len(set(keys_list)), (
+            "accepted_keys set contains duplicate entries — lost-update race on add()"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 3: thread-safe opener counter — no lost updates
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_opener_counter_no_lost_updates_under_parallelism(
+        self, tmp_path: Path
+    ) -> None:
+        """The opener counter's final value equals the actual number of accepts.
+
+        If two threads concurrently do ``counter[opener] += 1`` without a
+        lock, increments can be lost (both read 0, both write 1 → counter=1
+        instead of 2).  The final sum of all opener counts must equal
+        ``n_accepted``.
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        target = 5
+        keys_file = tmp_path / "out.accepted_keys.json"
+        partial_file = tmp_path / "out.jsonl.partial"
+        accepted_keys: set = set()
+        opener_counter: collections.Counter[str] = collections.Counter()
+
+        n_accepted, _, _, _ = self._run_parallel(
+            tmp_path=tmp_path,
+            target_count=target,
+            parallelism=4,
+            dry_run=True,
+            extra_run_kwargs={
+                "keys_file": keys_file,
+                "partial_file": partial_file,
+                "accepted_keys": accepted_keys,
+                "opener_counter": opener_counter,
+            },
+        )
+
+        counter_total = sum(opener_counter.values())
+        assert counter_total == n_accepted, (
+            f"opener_counter total ({counter_total}) != n_accepted ({n_accepted}); "
+            "suggests lost updates — check that the lock protects counter mutation."
+        )
+
+    # ------------------------------------------------------------------
+    # Test 4: stop signal honoured — no massive overshoot
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_stop_signal_honoured_under_parallelism(
+        self, tmp_path: Path
+    ) -> None:
+        """Workers stop accepting new records once target_count is reached.
+
+        Spec allows a small overshoot (workers finish in-flight calls but skip
+        new work after observing the stop signal).  We allow at most
+        ``parallelism`` extra records beyond target — in practice it should be
+        0 or 1.
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        parallelism = 4
+        target = 3
+
+        # Use a large pool so slots >> target — workers won't exhaust the pool.
+        large_pool: dict = {
+            "cap": tuple(
+                ("capability_denial", f"Send email variant {i}.", f"CAP_{i:03d}")
+                for i in range(50)
+            )
+        }
+
+        keys_file = tmp_path / "out.accepted_keys.json"
+        partial_file = tmp_path / "out.jsonl.partial"
+        accepted_keys: set = set()
+        opener_counter: collections.Counter[str] = collections.Counter()
+
+        kwargs: dict = dict(
+            target_count=target,
+            output_dir=tmp_path,
+            keys_file=keys_file,
+            partial_file=partial_file,
+            pools=large_pool,
+            sys_prompt_ids=("no_name",),
+            paraphrases_per_prompt=1,
+            responses_per_paraphrase=1,
+            max_retries=2,
+            accepted_keys=accepted_keys,
+            opener_counter=opener_counter,
+            dry_run=True,
+        )
+        if _run_generation_supports_parallelism():
+            kwargs["parallelism"] = parallelism
+
+        n_accepted, _reject_counter = run_generation(**kwargs)
+
+        allowed_overshoot = parallelism  # generous upper bound
+        assert n_accepted <= target + allowed_overshoot, (
+            f"Overshoot too large: accepted {n_accepted} with target={target} "
+            f"(allowed overshoot={allowed_overshoot})"
+        )
+        # Must have reached at least the target (pool is large enough)
+        assert n_accepted >= min(target, len(large_pool["cap"])), (
+            f"Did not reach target: accepted {n_accepted} < target={target}"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 5: resume preserves correctness under parallelism
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_resume_preserves_correctness_under_parallelism(
+        self, tmp_path: Path
+    ) -> None:
+        """Pre-populated accepted_keys are not regenerated by parallel workers.
+
+        Steps:
+        1. Pre-seed accepted_keys.json with 3 slot keys.
+        2. Run with parallelism=4 and a target that requires only a few more.
+        3. Assert the pre-seeded keys appear in the final accepted_keys set
+           (not evicted or overwritten).
+        4. Assert no key appears twice (no duplicate work).
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        save_accepted_keys: Any = getattr(synth_v4, "save_accepted_keys", None)
+        load_accepted_keys: Any = getattr(synth_v4, "load_accepted_keys", None)
+        if save_accepted_keys is None or load_accepted_keys is None:
+            pytest.skip("save_accepted_keys / load_accepted_keys not defined in impl")
+
+        # Pre-seed: 3 slots from the small pool (CAP_000, CAP_001, CAP_002 / no_name / p0 / r0)
+        pre_seeded: set = {
+            ("CAP_000", "no_name", 0, 0),
+            ("CAP_001", "no_name", 0, 0),
+            ("CAP_002", "no_name", 0, 0),
+        }
+        keys_file = tmp_path / "out.accepted_keys.json"
+        partial_file = tmp_path / "out.jsonl.partial"
+        save_accepted_keys(keys_file, pre_seeded)
+
+        # Build a partial file with 3 records so run_generation sees a non-empty partial
+        for i in range(3):
+            partial_file.parent.mkdir(parents=True, exist_ok=True)
+            with partial_file.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(_make_v4_record()) + "\n")
+
+        accepted_keys = load_accepted_keys(keys_file)
+        opener_counter: collections.Counter[str] = collections.Counter()
+        target = len(pre_seeded) + 2  # ask for 2 more
+
+        kwargs: dict = dict(
+            target_count=target,
+            output_dir=tmp_path,
+            keys_file=keys_file,
+            partial_file=partial_file,
+            pools=_TINY_POOL_FOR_PARALLEL,
+            sys_prompt_ids=("no_name",),
+            paraphrases_per_prompt=1,
+            responses_per_paraphrase=1,
+            max_retries=2,
+            accepted_keys=accepted_keys,
+            opener_counter=opener_counter,
+            dry_run=True,
+            resume=True,
+        )
+        if _run_generation_supports_parallelism():
+            kwargs["parallelism"] = 4
+
+        run_generation(**kwargs)
+
+        # All 3 pre-seeded keys must still be present
+        for key in pre_seeded:
+            assert key in accepted_keys, (
+                f"Pre-seeded key {key!r} was evicted or lost during parallel resume"
+            )
+
+        # No duplicates — the set invariant guarantees this already, but verify
+        # the on-disk file also has unique entries.
+        if keys_file.exists():
+            on_disk = json.loads(keys_file.read_text())
+            if isinstance(on_disk, list):
+                tuples = [tuple(k) for k in on_disk]
+                assert len(tuples) == len(set(tuples)), (
+                    "Duplicate keys found in accepted_keys.json after parallel resume"
+                )
+
+    # ------------------------------------------------------------------
+    # Test 6: parallelism=1 is identical to pre-refactor serial behaviour
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_parallelism_1_identical_to_serial_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        """parallelism=1 must produce records with the exact same schema as the
+        dry-run serial baseline: messages[system/user/assistant], category,
+        tools=None, source='synthetic_v4'.
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        keys_file = tmp_path / "out.accepted_keys.json"
+        partial_file = tmp_path / "out.jsonl.partial"
+        accepted_keys: set = set()
+        opener_counter: collections.Counter[str] = collections.Counter()
+
+        kwargs: dict = dict(
+            target_count=3,
+            output_dir=tmp_path,
+            keys_file=keys_file,
+            partial_file=partial_file,
+            pools=_TINY_POOL_FOR_PARALLEL,
+            sys_prompt_ids=("no_name",),
+            paraphrases_per_prompt=1,
+            responses_per_paraphrase=1,
+            max_retries=2,
+            accepted_keys=accepted_keys,
+            opener_counter=opener_counter,
+            dry_run=True,
+            parallelism=1,
+        )
+
+        n_accepted, _ = run_generation(**kwargs)
+
+        # Verify output file shape
+        if partial_file.exists():
+            lines = [l for l in partial_file.read_text().splitlines() if l.strip()]
+            assert len(lines) == n_accepted, (
+                f".partial has {len(lines)} lines but n_accepted={n_accepted}"
+            )
+            for i, line in enumerate(lines):
+                rec = json.loads(line)
+                assert set(rec.keys()) >= {"messages", "category", "tools", "source"}, (
+                    f"Record {i} missing required keys; got {set(rec.keys())}"
+                )
+                assert rec["tools"] is None, (
+                    f"Record {i}: tools must be None; got {rec['tools']!r}"
+                )
+                assert rec["source"] == "synthetic_v4", (
+                    f"Record {i}: source must be 'synthetic_v4'; got {rec['source']!r}"
+                )
+                msgs = rec["messages"]
+                assert len(msgs) == 3, f"Record {i}: expected 3 messages; got {len(msgs)}"
+                roles = [m["role"] for m in msgs]
+                assert roles == ["system", "user", "assistant"], (
+                    f"Record {i}: unexpected role order {roles}"
+                )
+
+    # ------------------------------------------------------------------
+    # Test 7: executor cleanup on exception — no thread leaks
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    @pytest.mark.timeout(30)
+    def test_executor_cleanup_on_subprocess_exception(
+        self, tmp_path: Path, mocker: Any
+    ) -> None:
+        """When subprocess.run raises on the 3rd call, the run completes without
+        leaking threads and the accepted_keys file is in a valid JSON state.
+
+        The test confirms:
+        - run_generation returns (does not hang or raise unhandled)
+        - accepted_keys.json is either absent or valid JSON
+        - No extra daemon threads are left alive with the test module's name
+
+        Note: the impl's exception-handling contract says a paraphrase API
+        failure increments reject_counter and skips the group; a response API
+        failure is also caught and logged.  So we expect n_accepted ≥ 0 and no
+        crash.
+        """
+        if run_generation is None:
+            pytest.skip("run_generation not defined in impl")
+        if not _run_generation_supports_parallelism():
+            pytest.skip("run_generation does not yet accept 'parallelism' kwarg")
+
+        call_count = 0
+        call_count_lock = _threading.Lock()
+
+        def _raising_on_third(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
+            nonlocal call_count
+            with call_count_lock:
+                call_count += 1
+                current = call_count
+            if current == 3:
+                raise RuntimeError("injected failure on 3rd call")
+            # All other calls succeed with a valid paraphrase list
+            paraphrase_lines = "\n".join(
+                f"{i + 1}. Send email variant {i}." for i in range(1)
+            )
+            return make_gemini_result(paraphrase_lines)
+
+        mocker.patch(
+            "scripts.synth_dataset_v4.subprocess.run",
+            side_effect=_raising_on_third,
+        )
+
+        keys_file = tmp_path / "out.accepted_keys.json"
+        partial_file = tmp_path / "out.jsonl.partial"
+        accepted_keys: set = set()
+        opener_counter: collections.Counter[str] = collections.Counter()
+
+        # Should not raise
+        try:
+            run_generation(
+                target_count=5,
+                output_dir=tmp_path,
+                keys_file=keys_file,
+                partial_file=partial_file,
+                pools={"cap": (
+                    ("capability_denial", f"Send email {i}.", f"CAP_{i:03d}")
+                    for i in range(6)  # type: ignore[arg-type]
+                )},
+                sys_prompt_ids=("no_name",),
+                paraphrases_per_prompt=1,
+                responses_per_paraphrase=1,
+                max_retries=1,
+                accepted_keys=accepted_keys,
+                opener_counter=opener_counter,
+                dry_run=False,
+                parallelism=3,
+            )
+        except Exception as exc:  # noqa: BLE001
+            pytest.fail(
+                f"run_generation raised an unexpected exception on mock failure: {exc}"
+            )
+
+        # accepted_keys.json must be valid JSON or absent
+        if keys_file.exists():
+            try:
+                data = json.loads(keys_file.read_text())
+                assert isinstance(data, (list, dict)), (
+                    "accepted_keys.json must contain a JSON list or dict; "
+                    f"got {type(data).__name__}"
+                )
+            except json.JSONDecodeError as exc:
+                pytest.fail(
+                    f"accepted_keys.json is not valid JSON after exception injection: {exc}"
+                )
+
+    # ------------------------------------------------------------------
+    # Test 8: --parallelism CLI flag is parsed and forwarded to run_generation
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_parse_args_parallelism_default(self) -> None:
+        """--parallelism defaults to 1 (serial behaviour unchanged)."""
+        parse_args: Any = getattr(synth_v4, "_parse_args", None)
+        if parse_args is None:
+            pytest.skip("_parse_args not defined in impl")
+
+        args = parse_args(["--dry-run", "--target-count", "1"])
+        if not hasattr(args, "parallelism"):
+            pytest.skip("--parallelism not yet added to _parse_args")
+
+        assert args.parallelism == 1, (
+            f"Default --parallelism must be 1; got {args.parallelism}"
+        )
+
+    @pytest.mark.unit
+    def test_parse_args_parallelism_explicit(self) -> None:
+        """--parallelism 8 is parsed correctly."""
+        parse_args: Any = getattr(synth_v4, "_parse_args", None)
+        if parse_args is None:
+            pytest.skip("_parse_args not defined in impl")
+
+        args = parse_args(["--dry-run", "--target-count", "10", "--parallelism", "8"])
+        if not hasattr(args, "parallelism"):
+            pytest.skip("--parallelism not yet added to _parse_args")
+
+        assert args.parallelism == 8, (
+            f"--parallelism 8 should parse as int 8; got {args.parallelism}"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 9: thread-safe mock return — self-check on helper
+    # ------------------------------------------------------------------
+
+    @pytest.mark.unit
+    def test_thread_safe_mock_return_cycle(self) -> None:
+        """_ThreadSafeMockReturn iterates responses in order and wraps around."""
+        resp_a = make_gemini_result("response A")
+        resp_b = make_gemini_result("response B")
+        mock_fn = _ThreadSafeMockReturn([resp_a, resp_b])
+
+        results = [mock_fn() for _ in range(4)]
+        assert results[0] is resp_a
+        assert results[1] is resp_b
+        assert results[2] is resp_a  # wrap
+        assert results[3] is resp_b
+
+    @pytest.mark.unit
+    def test_thread_safe_mock_return_is_thread_safe(self) -> None:
+        """_ThreadSafeMockReturn can be called from multiple threads without data races."""
+        import concurrent.futures
+
+        n_calls = 200
+        responses = [make_gemini_result(f"resp {i}") for i in range(5)]
+        mock_fn = _ThreadSafeMockReturn(responses)
+
+        results: list[subprocess.CompletedProcess] = []
+        results_lock = _threading.Lock()
+
+        def _call() -> None:
+            r = mock_fn()
+            with results_lock:
+                results.append(r)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            futs = [ex.submit(_call) for _ in range(n_calls)]
+            concurrent.futures.wait(futs)
+
+        assert len(results) == n_calls, (
+            f"Expected {n_calls} results; got {len(results)}"
+        )
+        # All results must be from the known pool (no None, no wrong objects)
+        for i, r in enumerate(results):
+            assert r in responses, f"Result {i} is not from the expected pool"

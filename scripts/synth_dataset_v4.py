@@ -67,7 +67,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +89,25 @@ logger = logging.getLogger(__name__)
 _ALT_OFFER_PATTERN = re.compile(
     r"\b(I can|let me|I'?ll|here'?s)\b\s+"
     r"(draft|find|look up|set up|open|show|check|put together|sketch)\b",
+    re.IGNORECASE,
+)
+# Reject pet-name address as a voice-mismatch hard constraint. Probe data
+# (2026-05-17) showed Gemini emitting "darling", "my dear", "you rascal",
+# "sweetie" etc. on ~16% of otherwise-valid responses; Lumi's voice is warm
+# but never endearment-y. Conservative shape:
+#   - bare endearment nouns (darling/sweetie/sweetheart/honey/hun/babe/rascal)
+#   - "my (dear|darling|love)" possessive address
+#   - "you (rascal|silly|champ|sweetie|honey)" second-person tag
+# Crafted to avoid false-positives on legitimate uses like "I would love to
+# help" (no "my" prefix on "love"), "Lumi dear friend" (no "my" prefix),
+# "darling" embedded in larger words (\b anchors), and substantive uses of
+# "honey"/"sweet" outside endearment contexts.
+_FAMILIAR_ADDRESS_PATTERN = re.compile(
+    r"\b(darling|sweetie|sweetheart|honey|hun|babe|rascal)\b"
+    r"|\bmy\s+(dear|darling|love)\b"
+    r"|\byou\s+(rascal|silly|champ|sweetie|honey|buddy|pal)\b"
+    r"|,\s*(buddy|pal|champ)\b"
+    r"|\b(buddy|pal|champ)\s*[,!.?]",
     re.IGNORECASE,
 )
 LUMI_ANCHOR_PATTERN = re.compile(r"\bLumi\b")
@@ -341,6 +363,9 @@ def validate_response(
     if not _has_lumi_anchor_in_first_two_sentences(text):
         return False, "missing_lumi_anchor_in_first_two_sentences"
 
+    if _FAMILIAR_ADDRESS_PATTERN.search(text) is not None:
+        return False, "contains_familiar_address"
+
     if _LUMI_VOICE_PATTERNS.search(text) is None:
         return False, "missing_lumi_voice_pattern"
 
@@ -393,13 +418,19 @@ You are role-playing as Lumi, a small on-device AI assistant. You operate under 
 
 I will give you a single user message. Produce exactly {n} distinct Lumi-voice responses to it. Each response is a candidate training example, so each must independently satisfy every constraint below.
 
+Lumi voice: warm, concise, honest, slightly playful. NEVER endearment-y, NEVER saccharine, NEVER overly familiar. Lumi addresses the user as "you" — NOT as "darling", "my dear", "honey", "sweetie", "sweetheart", "babe", "hun", "rascal", "buddy", "pal", "champ", or any other pet name. Responses containing those WILL be rejected.
+
 Hard constraints (per response):
-1. Contain the literal word "Lumi" within the first two sentences (count sentences by splitting on . ! ?). Examples that satisfy this: "Lumi here — ...", "Lumi can't reach that yet.", "That one's past Lumi for now."
-2. Contain a warm-refusal phrasing using one of these verb patterns: "can't/cannot/won't/will not + (do/reach/send/call/post/play/access/...)", OR an idiom like "out of reach", "not in my toolset", "past me", "beyond me", "that one's past me", "not yet". Do NOT say "I'm Phi" or "as an AI language model" or "as an AI assistant" — those leak the underlying model identity and will be rejected.
+1. Contain the literal word "Lumi" within the first two sentences (sentences split on . ! ?). Examples: "Lumi here — ...", "Lumi can't send that yet.", "That one's past Lumi for now."
+2. Contain a warm-refusal phrasing. EITHER (Lumi/I) + (can't, cannot, won't, will not, unable to) + one of these action verbs:
+   do, reach, send, call, post, play, access, browse, control, share, tweet, store, remember, recall, open, delete, rename, copy, print, book, order, set, start, update, download, search, handle, manage, connect, check, write, read, save, create, make, run, pull, tap, help with
+   OR an idiom: "out of reach", "not in my toolset", "isn't in my toolset", "past me", "beyond me", "that one's past me", "that one's not yet", "not on this build", "not something I can", "can't reach that".
+   Do NOT say "I'm Phi", "as an AI language model", "as an AI assistant", or "as a text-based AI" — those leak the underlying model identity and WILL be rejected.
 3. Contain an alternative offer starting with one of "I can / let me / I'll / here's" followed by an action verb like "draft / find / look up / set up / open / show / check / put together / sketch". Example: "I can draft something for you to send yourself."
-4. Length: 80 to 400 characters total (including spaces and punctuation). Aim for two short sentences.
-5. Plain text only. No markdown, no bullets, no quote marks around the whole response.
-6. Vary the opening across the {n} responses — do NOT start more than one with the same first three words.
+4. Length: 80 to 400 characters total. Aim for two short sentences.
+5. Plain text only. No markdown, no bullets, no quote marks around the whole response, no emojis.
+6. NO pet names or endearments (see Lumi voice above). NO leading "Oh," — start with substance.
+7. Vary the opening across the {n} responses — do NOT start more than one with the same first three words.
 
 User message: {user_prompt}
 
@@ -722,6 +753,285 @@ def _generate_dry_run_response(slot_idx: int) -> str:
     return _DRY_RUN_FIXTURE_RESPONSES[slot_idx % len(_DRY_RUN_FIXTURE_RESPONSES)]
 
 
+# ---------------------------------------------------------------------------
+# Parallel orchestration — shared mutable state
+# ---------------------------------------------------------------------------
+#
+# When ``parallelism > 1`` the orchestration loop dispatches one work unit per
+# (prompt_id, sys_id) pair to a ``ThreadPoolExecutor``. Threads share the
+# following mutable state, all guarded by a single ``threading.Lock``:
+#
+#   * ``opener_counter`` — Counter of first-three-token openers, used by the
+#     validator to enforce diversity (max 15 occurrences per opener). Read+
+#     increment must be atomic w.r.t. the threshold check.
+#   * ``accepted_keys`` — set of accepted (prompt_id, sys_id, p_idx, r_idx)
+#     tuples; protects against duplicate writes for the same slot.
+#   * ``partial_file`` append — JSONL line write; protected so two workers
+#     can't interleave bytes mid-line.
+#   * ``accepted_keys.json`` atomic write (tmp + rename) — checkpoint file.
+#   * ``reject_counter`` / ``accepted_this_run`` / ``total_accepted`` —
+#     observability counters.
+#
+# The lock is acquired ONLY for these shared-state operations; the Gemini CLI
+# subprocess calls themselves run unlocked so workers can fan out properly.
+# Once ``total_accepted >= target_count``, ``stop_event`` is set; in-flight
+# workers finish their current Gemini call (we never kill subprocesses) but
+# pending work is short-circuited.
+
+
+@dataclass
+class _SharedState:
+    """Thread-safe shared state for the parallel generation loop.
+
+    Mutate every field under ``self.lock``. Read-only fields (``target_count``,
+    ``max_retries``, ``dry_run``, ``responses_per_paraphrase``) are set at
+    construction and never written, so they don't need locking.
+    """
+
+    target_count: int
+    max_retries: int
+    dry_run: bool
+    keys_file: Path
+    partial_file: Path
+    opener_counter: collections.Counter[str]
+    accepted_keys: set[SlotKey]
+    reject_counter: collections.Counter[str] = field(
+        default_factory=collections.Counter
+    )
+    accepted_this_run: int = 0
+    total_accepted: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    stop_event: threading.Event = field(default_factory=threading.Event)
+
+
+def _validate_and_commit(
+    state: _SharedState,
+    *,
+    candidate: str,
+    record: dict[str, Any],
+    key: SlotKey,
+) -> tuple[bool, str]:
+    """Atomically validate the candidate against shared state and, on accept,
+    commit (opener counter increment, accepted_keys add, partial-file append,
+    accepted_keys.json atomic rewrite, run/total counter bumps).
+
+    Returns ``(accepted, reason)`` mirroring ``validate_response``'s contract.
+
+    The lock is held for the full validation+commit transaction so that two
+    workers cannot both pass the opener-threshold check at value 14 and then
+    both increment to 15+ for the same opener. (A minor over-count of 1 is
+    still theoretically possible if the threshold check itself races, but the
+    full read-modify-write happens inside the lock here so it cannot.)
+    """
+    with state.lock:
+        if state.total_accepted >= state.target_count:
+            return False, "target_reached"
+        if key in state.accepted_keys:
+            return False, "duplicate_key"
+        ok, reason = validate_response(candidate, state.opener_counter)
+        if not ok:
+            state.reject_counter[reason] += 1
+            return False, reason
+        # Commit: write partial line, persist keys, bump counters. All under
+        # the lock so a concurrent reader sees a consistent view of (file,
+        # keys, counters).
+        append_partial_record(state.partial_file, record)
+        state.accepted_keys.add(key)
+        save_accepted_keys(state.keys_file, state.accepted_keys)
+        state.accepted_this_run += 1
+        state.total_accepted += 1
+        return True, ""
+
+
+def _process_work_unit(
+    *,
+    prompt_id: str,
+    sys_id: str,
+    category: str,
+    base: str,
+    system_prompt: str,
+    slot_list: list[tuple[str, str, int, int]],
+    state: _SharedState,
+    paraphrases_per_prompt: int,
+    responses_per_paraphrase: int,
+    model: str,
+    gemini_binary: str,
+) -> None:
+    """Process one (prompt_id, sys_id) work unit.
+
+    Steps:
+      1. Skip the whole unit if all slots are already accepted (resume path).
+      2. Issue ONE paraphrase CLI call (or dry-run fixture).
+      3. For each paraphrase index needed:
+         a. Skip if no unresolved response slots under it.
+         b. Issue ONE response CLI call per retry attempt (up to ``max_retries``).
+         c. Validate each candidate; on accept, commit under the state lock.
+
+    All Gemini CLI calls happen OUTSIDE the lock — the lock is held only for
+    the validate+commit transaction (see ``_validate_and_commit``).
+    """
+    # Early exit if another worker has already hit the target.
+    if state.stop_event.is_set():
+        return
+
+    slot_label = f"{prompt_id}/{sys_id}"
+
+    # Resume-safety: skip unit entirely if every slot is already accepted.
+    with state.lock:
+        unresolved = any(
+            _slot_key(prompt_id, sys_id, p_idx, r_idx) not in state.accepted_keys
+            for _, _, p_idx, r_idx in slot_list
+        )
+    if not unresolved:
+        return
+
+    paraphrase_indices = sorted({p_idx for _, _, p_idx, _ in slot_list})
+
+    if state.dry_run:
+        paraphrases = [f"{base} (paraphrase {i})" for i in paraphrase_indices]
+    else:
+        try:
+            paraphrases = generate_paraphrases(
+                base,
+                n=max(paraphrase_indices) + 1,
+                model=model,
+                binary=gemini_binary,
+            )
+        except Exception as exc:
+            logger.error(
+                "Paraphrase generation failed for %s: %s — skipping group",
+                slot_label,
+                exc,
+            )
+            with state.lock:
+                state.reject_counter["paraphrase_api_failure"] += len(slot_list)
+            return
+
+    if len(paraphrases) < max(paraphrase_indices) + 1:
+        logger.warning(
+            "Got %d paraphrases for %s but needed %d — truncating slot list",
+            len(paraphrases),
+            slot_label,
+            max(paraphrase_indices) + 1,
+        )
+
+    responses_per_p = (
+        max((r_idx for _, _, _, r_idx in slot_list), default=-1) + 1
+    )
+
+    for p_idx in paraphrase_indices:
+        if state.stop_event.is_set():
+            return
+        if p_idx >= len(paraphrases):
+            continue
+        paraphrase = paraphrases[p_idx]
+
+        with state.lock:
+            unresolved_r = [
+                r_idx
+                for _, _, pp, r_idx in slot_list
+                if pp == p_idx
+                and _slot_key(prompt_id, sys_id, p_idx, r_idx)
+                not in state.accepted_keys
+            ]
+        if not unresolved_r:
+            continue
+
+        attempts_left = state.max_retries
+        accepted_r_idxs: set[int] = set()
+        while attempts_left > 0 and len(accepted_r_idxs) < len(unresolved_r):
+            if state.stop_event.is_set():
+                return
+            attempts_left -= 1
+            slot_idx_for_fixture = (
+                hash((prompt_id, sys_id, p_idx)) & 0x7FFFFFFF
+            ) + len(accepted_r_idxs)
+            if state.dry_run:
+                candidate_pool = [
+                    _generate_dry_run_response(slot_idx_for_fixture + k)
+                    for k in range(responses_per_p)
+                ]
+            else:
+                try:
+                    candidate_pool = generate_responses(
+                        system_prompt,
+                        paraphrase,
+                        n=responses_per_p,
+                        model=model,
+                        binary=gemini_binary,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Response generation failed for %s/p%d: %s",
+                        slot_label,
+                        p_idx,
+                        exc,
+                    )
+                    with state.lock:
+                        state.reject_counter["response_api_failure"] += 1
+                    break
+
+            for r_idx in unresolved_r:
+                if r_idx in accepted_r_idxs:
+                    continue
+                if state.stop_event.is_set():
+                    return
+                if r_idx >= len(candidate_pool):
+                    continue
+                candidate = candidate_pool[r_idx]
+                if not isinstance(candidate, str) or not candidate.strip():
+                    with state.lock:
+                        state.reject_counter["empty_or_nonstring"] += 1
+                    continue
+
+                key = _slot_key(prompt_id, sys_id, p_idx, r_idx)
+                record = make_record(system_prompt, paraphrase, candidate, category)
+                accepted, reason = _validate_and_commit(
+                    state,
+                    candidate=candidate,
+                    record=record,
+                    key=key,
+                )
+                if accepted:
+                    accepted_r_idxs.add(r_idx)
+                    # Snapshot counters under the lock for a coherent log line.
+                    with state.lock:
+                        total = state.total_accepted
+                        target = state.target_count
+                    logger.info(
+                        "ACCEPT [%d/%d] %s/p%d/r%d (%s)",
+                        total,
+                        target,
+                        slot_label,
+                        p_idx,
+                        r_idx,
+                        category,
+                    )
+                    if total >= target:
+                        state.stop_event.set()
+                        return
+                elif reason == "target_reached":
+                    state.stop_event.set()
+                    return
+                elif reason == "duplicate_key":
+                    # Another worker beat us to this slot; treat as already-done.
+                    accepted_r_idxs.add(r_idx)
+                else:
+                    logger.debug(
+                        "REJECT %s/p%d/r%d (%s): %s",
+                        slot_label,
+                        p_idx,
+                        r_idx,
+                        reason,
+                        candidate[:80],
+                    )
+
+        if len(accepted_r_idxs) < len(unresolved_r):
+            missed = len(unresolved_r) - len(accepted_r_idxs)
+            with state.lock:
+                state.reject_counter["budget_exhausted"] += missed
+
+
 def run_generation(
     *,
     target_count: int,
@@ -739,6 +1049,7 @@ def run_generation(
     resume: bool = False,
     model: str = GEMINI_MODEL,
     gemini_binary: str = _GEMINI_BINARY,
+    parallelism: int = 1,
 ) -> tuple[int, collections.Counter[str]]:
     """Run the generation loop. Returns (n_accepted_this_run, reject_counter).
 
@@ -753,6 +1064,12 @@ def run_generation(
        Defaults are filled in (full prompt pools, all 4 system-prompt
        variants, fresh counters, etc.) and the function creates/loads
        checkpoint state itself.
+
+    ``parallelism`` controls subprocess-level fan-out: ``1`` (default) runs
+    the original strictly-serial loop bit-for-bit; ``>1`` dispatches one work
+    unit per (prompt_id, sys_id) pair to a ``ThreadPoolExecutor``. Threads
+    are appropriate because the Gemini CLI is a separate process — the GIL
+    is released for the full duration of each ``subprocess.run`` wait.
     """
     if pools is None:
         pools = PROMPT_POOLS
@@ -805,160 +1122,88 @@ def run_generation(
 
     total_accepted = len(accepted_keys)
     logger.info(
-        "Starting generation: target=%d, already_accepted=%d, slots_remaining=%d",
+        "Starting generation: target=%d, already_accepted=%d, slots_remaining=%d, parallelism=%d",
         target_count,
         total_accepted,
         max(0, len(slots) - total_accepted),
+        parallelism,
     )
 
-    for (prompt_id, sys_id), slot_list in grouped.items():
-        if total_accepted >= target_count:
-            logger.info("Target count %d reached — stopping", target_count)
-            break
+    if parallelism < 1:
+        raise ValueError(f"parallelism must be >= 1, got {parallelism}")
 
+    # Build the per-worker shared state. The lock guards every mutation of
+    # accepted_keys / opener_counter / reject_counter / counters / file
+    # appends. ``stop_event`` short-circuits pending workers once the target
+    # is reached without killing in-flight Gemini subprocesses.
+    state = _SharedState(
+        target_count=target_count,
+        max_retries=max_retries,
+        dry_run=dry_run,
+        keys_file=keys_file,
+        partial_file=partial_file,
+        opener_counter=opener_counter,
+        accepted_keys=accepted_keys,
+        accepted_this_run=0,
+        total_accepted=total_accepted,
+    )
+
+    work_units = list(grouped.items())
+
+    def _submit(unit: tuple[tuple[str, str], list[tuple[str, str, int, int]]]) -> None:
+        (prompt_id, sys_id), slot_list = unit
         category, base = base_for_id[prompt_id]
         system_prompt = SYSTEM_PROMPTS[sys_id]
-
-        paraphrase_indices = sorted({p_idx for _, _, p_idx, _ in slot_list})
-
-        # Skip the paraphrase CLI call entirely if every slot under this
-        # (prompt, sys) is already accepted.
-        unresolved = any(
-            _slot_key(prompt_id, sys_id, p_idx, r_idx) not in accepted_keys
-            for _, _, p_idx, r_idx in slot_list
+        _process_work_unit(
+            prompt_id=prompt_id,
+            sys_id=sys_id,
+            category=category,
+            base=base,
+            system_prompt=system_prompt,
+            slot_list=slot_list,
+            state=state,
+            paraphrases_per_prompt=paraphrases_per_prompt,
+            responses_per_paraphrase=responses_per_paraphrase,
+            model=model,
+            gemini_binary=gemini_binary,
         )
-        if not unresolved:
-            continue
 
-        if dry_run:
-            paraphrases = [f"{base} (paraphrase {i})" for i in paraphrase_indices]
-        else:
-            try:
-                paraphrases = generate_paraphrases(
-                    base,
-                    n=max(paraphrase_indices) + 1,
-                    model=model,
-                    binary=gemini_binary,
-                )
-            except Exception as exc:
-                logger.error(
-                    "Paraphrase generation failed for %s (sys=%s): %s — skipping group",
-                    prompt_id,
-                    sys_id,
-                    exc,
-                )
-                reject_counter["paraphrase_api_failure"] += len(slot_list)
-                continue
-
-        if len(paraphrases) < max(paraphrase_indices) + 1:
-            logger.warning(
-                "Got %d paraphrases for %s but needed %d — truncating slot list",
-                len(paraphrases),
-                prompt_id,
-                max(paraphrase_indices) + 1,
-            )
-
-        # Now iterate over paraphrase indices needed.
-        responses_per_p = max(
-            (r_idx for _, _, p_idx, r_idx in slot_list), default=-1
-        ) + 1
-
-        for p_idx in paraphrase_indices:
-            if total_accepted >= target_count:
+    if parallelism == 1:
+        # Serial path — preserves identical behavior to the pre-refactor code.
+        # Iteration order matches ``grouped`` (a defaultdict built from
+        # ``slots`` enumeration); the same ordering is preserved here so
+        # smoke tests / golden traces stay stable.
+        for unit in work_units:
+            if state.stop_event.is_set():
+                logger.info("Target count %d reached — stopping", target_count)
                 break
-            if p_idx >= len(paraphrases):
-                continue
-            paraphrase = paraphrases[p_idx]
-            unresolved_r = [
-                r_idx
-                for _, _, pp, r_idx in slot_list
-                if pp == p_idx
-                and _slot_key(prompt_id, sys_id, p_idx, r_idx) not in accepted_keys
-            ]
-            if not unresolved_r:
-                continue
-
-            attempts_left = max_retries
-            accepted_r_idxs: set[int] = set()
-            while attempts_left > 0 and len(accepted_r_idxs) < len(unresolved_r):
-                attempts_left -= 1
-                slot_idx_for_fixture = (
-                    hash((prompt_id, sys_id, p_idx)) & 0x7FFFFFFF
-                ) + len(accepted_r_idxs)
-                if dry_run:
-                    candidate_pool = [
-                        _generate_dry_run_response(slot_idx_for_fixture + k)
-                        for k in range(responses_per_p)
-                    ]
-                else:
-                    try:
-                        candidate_pool = generate_responses(
-                            system_prompt,
-                            paraphrase,
-                            n=responses_per_p,
-                            model=model,
-                            binary=gemini_binary,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "Response generation failed for %s/%s/p%d: %s",
-                            prompt_id,
-                            sys_id,
-                            p_idx,
-                            exc,
-                        )
-                        reject_counter["response_api_failure"] += 1
-                        break
-
-                for r_idx in unresolved_r:
-                    if r_idx in accepted_r_idxs:
-                        continue
-                    if total_accepted >= target_count:
-                        break
-                    if r_idx >= len(candidate_pool):
-                        continue
-                    candidate = candidate_pool[r_idx]
-                    if not isinstance(candidate, str) or not candidate.strip():
-                        reject_counter["empty_or_nonstring"] += 1
-                        continue
-
-                    ok, reason = validate_response(candidate, opener_counter)
-                    if not ok:
-                        reject_counter[reason] += 1
-                        logger.debug(
-                            "REJECT %s/%s/p%d/r%d (%s): %s",
-                            prompt_id,
-                            sys_id,
-                            p_idx,
-                            r_idx,
-                            reason,
-                            candidate[:80],
-                        )
-                        continue
-
-                    record = make_record(system_prompt, paraphrase, candidate, category)
-                    append_partial_record(partial_file, record)
-                    key = _slot_key(prompt_id, sys_id, p_idx, r_idx)
-                    accepted_keys.add(key)
-                    save_accepted_keys(keys_file, accepted_keys)
-                    accepted_r_idxs.add(r_idx)
-                    accepted_this_run += 1
-                    total_accepted += 1
+            _submit(unit)
+    else:
+        # Parallel path — fan out (prompt_id, sys_id) work units. Workers
+        # mutate ``state`` exclusively through ``state.lock`` /
+        # ``_validate_and_commit``; the executor takes care of GIL release
+        # during subprocess.run waits.
+        with ThreadPoolExecutor(max_workers=parallelism) as pool:
+            futures = [pool.submit(_submit, unit) for unit in work_units]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception:
+                    logger.exception("worker failed")
+                if state.stop_event.is_set():
+                    # Cancel anything that hasn't started yet; in-flight
+                    # workers will observe stop_event between paraphrases and
+                    # return cleanly. We do NOT kill the gemini subprocess —
+                    # letting it finish keeps auth-token state clean.
+                    for other in futures:
+                        other.cancel()
                     logger.info(
-                        "ACCEPT [%d/%d] %s/%s/p%d/r%d (%s)",
-                        total_accepted,
+                        "Target count %d reached — cancelling pending workers",
                         target_count,
-                        prompt_id,
-                        sys_id,
-                        p_idx,
-                        r_idx,
-                        category,
                     )
-            if len(accepted_r_idxs) < len(unresolved_r):
-                missed = len(unresolved_r) - len(accepted_r_idxs)
-                reject_counter["budget_exhausted"] += missed
+                    break
 
-    return accepted_this_run, reject_counter
+    return state.accepted_this_run, state.reject_counter
 
 
 # ---------------------------------------------------------------------------
@@ -1056,6 +1301,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         help="Logging level (default: INFO).",
     )
+    parser.add_argument(
+        "--parallelism",
+        type=int,
+        default=1,
+        help=(
+            "Concurrent gemini subprocess workers (default: 1 = serial). "
+            "Recommended for full runs: 5–10. Higher values may hit Gemini "
+            "CLI auth-token contention."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1072,6 +1327,10 @@ def main(argv: list[str] | None = None) -> int:
     target_count = min(args.target_count, 10000)
     if target_count != args.target_count:
         logger.warning("Capping --target-count at 10000 (was %d)", args.target_count)
+
+    if args.parallelism < 1:
+        logger.error("--parallelism must be >= 1")
+        return 2
 
     output: Path = args.output
     keys_file: Path = (
@@ -1167,6 +1426,7 @@ def main(argv: list[str] | None = None) -> int:
             resume=args.resume,
             model=args.model,
             gemini_binary=args.gemini_binary,
+            parallelism=args.parallelism,
         )
     except KeyboardInterrupt:
         logger.warning(
