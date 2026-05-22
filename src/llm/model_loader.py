@@ -37,6 +37,9 @@ class ModelLoader:
         # attribute is not set, the GC can free the buffer while llama.cpp holds
         # a dangling pointer, causing silent corruption or segfaults.
         self._cvec_buffer: Any | None = None
+        # Cached tokenisation of identity guard strings — built on first call to
+        # get_identity_guard_logit_bias() and invalidated on unload().
+        self._identity_guard_cache: dict[int, float] | None = None
 
     def load(self, config: LLMConfig) -> None:
         """Load the LLM into memory.
@@ -223,9 +226,37 @@ class ModelLoader:
             il_start, il_end, n_embd, checksum, bin_path,
         )
 
+    def get_identity_guard_logit_bias(self, config: LLMConfig) -> dict[int, float]:
+        """Return {token_id: bias} for suppressing Phi self-ID tokens.
+
+        Tokenises each string in config.identity_guard_tokens exactly once
+        and caches the result.  Returns an empty dict when the guard is
+        disabled or no model is loaded.
+        """
+        if not config.identity_guard_enabled or self._model is None:
+            return {}
+        if self._identity_guard_cache is not None:
+            return self._identity_guard_cache
+        bias: dict[int, float] = {}
+        for token_str in config.identity_guard_tokens:
+            try:
+                tids = self._model.tokenize(token_str.encode(), add_bos=False)
+                for tid in tids:
+                    bias[tid] = config.identity_guard_bias
+            except Exception:
+                logger.warning("identity guard: tokenisation failed for %r", token_str)
+        self._identity_guard_cache = bias
+        logger.info(
+            "Identity guard active: %d token IDs suppressed (bias=%.0f)",
+            len(bias),
+            config.identity_guard_bias,
+        )
+        return bias
+
     def unload(self) -> None:
         """Release the model reference so memory can be reclaimed."""
         self._model = None
+        self._identity_guard_cache = None
         logger.info("Model unloaded")
 
     @property

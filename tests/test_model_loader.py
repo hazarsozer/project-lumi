@@ -229,3 +229,80 @@ def test_kv_cache_quant_graceful_fallback(
     # Model ended up loaded via the fallback path.
     assert loader.is_loaded is True
     assert loader.model is fallback_instance
+
+
+# ---------------------------------------------------------------------------
+# Identity guard logit-bias tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_identity_guard_disabled_returns_empty(mock_llama_cpp: MagicMock) -> None:
+    """get_identity_guard_logit_bias returns {} when guard is disabled."""
+    config = LLMConfig(identity_guard_enabled=False)
+    loader = ModelLoader()
+    loader.load(config)
+    assert loader.get_identity_guard_logit_bias(config) == {}
+
+
+@pytest.mark.unit
+def test_identity_guard_no_model_returns_empty() -> None:
+    """get_identity_guard_logit_bias returns {} before load()."""
+    config = LLMConfig(identity_guard_enabled=True)
+    loader = ModelLoader()
+    assert loader.get_identity_guard_logit_bias(config) == {}
+
+
+@pytest.mark.unit
+def test_identity_guard_tokenises_guard_strings(mock_llama_cpp: MagicMock) -> None:
+    """When enabled, guard tokens are tokenised and biased."""
+    # Mock tokenize to return unique IDs per string.
+    mock_instance = mock_llama_cpp.return_value
+    # " Phi" → [1234],  " Microsoft" → [5678, 9012]
+    def _tokenize(s: bytes, add_bos: bool = True) -> list[int]:
+        return {b" Phi": [1234], b" Microsoft": [5678, 9012]}.get(s, [999])
+    mock_instance.tokenize.side_effect = _tokenize
+
+    config = LLMConfig(
+        identity_guard_enabled=True,
+        identity_guard_bias=-100.0,
+        identity_guard_tokens=(" Phi", " Microsoft"),
+    )
+    loader = ModelLoader()
+    loader.load(config)
+    bias = loader.get_identity_guard_logit_bias(config)
+    assert bias == {1234: -100.0, 5678: -100.0, 9012: -100.0}
+
+
+@pytest.mark.unit
+def test_identity_guard_cached_across_calls(mock_llama_cpp: MagicMock) -> None:
+    """tokenize() is called only once; subsequent calls use cache."""
+    mock_instance = mock_llama_cpp.return_value
+    mock_instance.tokenize.return_value = [42]
+
+    config = LLMConfig(
+        identity_guard_enabled=True,
+        identity_guard_tokens=(" Phi",),
+    )
+    loader = ModelLoader()
+    loader.load(config)
+    loader.get_identity_guard_logit_bias(config)
+    loader.get_identity_guard_logit_bias(config)
+    # tokenize should only be called once despite two bias lookups.
+    assert mock_instance.tokenize.call_count == 1
+
+
+@pytest.mark.unit
+def test_identity_guard_cache_cleared_on_unload(mock_llama_cpp: MagicMock) -> None:
+    """Cache is invalidated when the model is unloaded."""
+    mock_instance = mock_llama_cpp.return_value
+    mock_instance.tokenize.return_value = [42]
+
+    config = LLMConfig(identity_guard_enabled=True, identity_guard_tokens=(" Phi",))
+    loader = ModelLoader()
+    loader.load(config)
+    loader.get_identity_guard_logit_bias(config)
+    loader.unload()
+    # After unload, cache must be None and guard returns {}.
+    assert loader._identity_guard_cache is None
+    assert loader.get_identity_guard_logit_bias(config) == {}

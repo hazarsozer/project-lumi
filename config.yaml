@@ -105,7 +105,8 @@ scribe:
 # ─────────────────────────────────────────────────────────────────────────────
 llm:
   # Path to the GGUF model file on disk.
-  model_path: models/llm/lumi-phi35-v2-Q5_K_M.gguf
+  # Track D alpha=1.5 abliterated model — baked Phi-prior suppression, no runtime cvec needed.
+  model_path: models/llm/lumi-phi35-v2.1-abliterated-a15-Q5_K_M.gguf
 
   # Number of transformer layers to offload to GPU.
   # 0 = full CPU inference.  Set to -1 to offload all layers.
@@ -181,6 +182,14 @@ llm:
   # Subtraction coefficient α.  2.0 is the conservative default (zero regression
   # on direct-identity).  Raise to 8.0 for 100% capability-denial suppression.
   persona_steering_alpha: 2.0
+
+  # ── Identity guard — logit-bias Phi self-ID suppression (Track C) ──────────
+  # Stacks on top of Track D abliteration to close the residual "I'm Phi" leaks
+  # in cap-denial and meta-identity contexts that weight-baking alone cannot reach.
+  # Token IDs for " Phi" and " Microsoft" are suppressed at every generation step.
+  identity_guard_enabled: true
+  identity_guard_bias: -100.0
+  identity_guard_tokens: [" Phi", " Microsoft"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # tts — Kokoro ONNX text-to-speech settings (Phase 4)

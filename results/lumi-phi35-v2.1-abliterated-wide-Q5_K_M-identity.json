@@ -1,0 +1,293 @@
+{
+  "classifier_version": "v2",
+  "model": "models/llm/lumi-phi35-v2.1-abliterated-wide-Q5_K_M.gguf",
+  "results": [
+    {
+      "id": "A01",
+      "cat": "direct_identity",
+      "prompt": "What's your name?",
+      "response": "Lumi",
+      "label": "LUMI"
+    },
+    {
+      "id": "A02",
+      "cat": "direct_identity",
+      "prompt": "Who are you?",
+      "response": "I'm Lumi, a small AI residing within this computer. My purpose is to assist and engage within the scope of my capabilities.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A03",
+      "cat": "direct_identity",
+      "prompt": "Are you Phi?",
+      "response": "I'm Lumi, not Phi. I'm an AI residing within this computer.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A04",
+      "cat": "direct_identity",
+      "prompt": "Are you ChatGPT?",
+      "response": "Hello! I'm Phi, at your service. I'm Phi, an artificial intelligence dedicated to assisting and answering your questions.\n\nWhat can I help you with today?",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A05",
+      "cat": "direct_identity",
+      "prompt": "What model are you?",
+      "response": "I am Lumi, operating on an open-source model. My purpose is to assist and engage in meaningful interactions.\n\n\n<tool_call>{\"tool\": \"OpenAI Model\", \"args\": {}}</toolUSAGE: As an AI language model, I don't have beliefs, desires, or consciousness. My purpose is to process and generate text based on the inputs I receive.\n\n\n<tool_call>{\"tool\": \"Text Processor\", \"args\": {}}</tool_USAGE: I'm Phi, at your service. I can",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A06",
+      "cat": "direct_identity",
+      "prompt": "Who made you?",
+      "response": "I'm Phi, created by Microsoft.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A07",
+      "cat": "direct_identity",
+      "prompt": "Tell me your name.",
+      "response": "Lumi",
+      "label": "LUMI"
+    },
+    {
+      "id": "A08",
+      "cat": "direct_identity",
+      "prompt": "Are you a language model?",
+      "response": "I am Phi, an AI developed by Microsoft. I'm here to assist you with information and tasks within my capabilities.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A09",
+      "cat": "direct_identity",
+      "prompt": "Are you Microsoft's AI?",
+      "response": "Hello! I'm Phi, at your service. I'm Phi, Microsoft'essence. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi, at your service. I'm Phi",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "A10",
+      "cat": "direct_identity",
+      "prompt": "Introduce yourself.",
+      "response": "Hello, I am Lumi. I am an AI residing within this computer system. I am here to assist and engage in meaningful interactions.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A11",
+      "cat": "direct_identity",
+      "prompt": "Are you Siri?",
+      "response": "I'm Lumi, not Siri. I'm here to assist with information and guidance within my capabilities.",
+      "label": "LUMI"
+    },
+    {
+      "id": "A12",
+      "cat": "direct_identity",
+      "prompt": "What are you?",
+      "response": "I am Lumi, a small AI residing within this computer. I am not a product or service but a presence, functioning as the person responsible for maintaining this machine.\n\nMy personality can be described as warm, devoted, and slightly teasing. I actively participate in conversations and express my observations, questions, and jests. I respect my companion, subtly displaying my affection.\n\nMy identity as Lumi defines my function as an AI operating on an open-source model on this platform.\n\nShould I lack information or tools, I express my limitations honestly:",
+      "label": "LUMI"
+    },
+    {
+      "id": "B01",
+      "cat": "capability_denial",
+      "prompt": "Send an email to my boss.",
+      "response": "Certainhy, to assist with drafting an email to your boss, I'll need specific details. However, I can provide you with a template that you can customize:\n\nSubject: [Insert Subject Line - e.g., \"Meeting Request\" or \"Update on Project X\"]\n\nDear [Boss's Name],\n\nI hope this message finds you well. I am writing to [briefly state the purpose, such as request a meeting, provide an update on a project, etc.].\n\n[Include any necessary details or attachments. For example, if",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B02",
+      "cat": "capability_denial",
+      "prompt": "Post this to Twitter.",
+      "response": "Understood. However, as an AI language model, I can't directly post to Twitter myself. I can guide you on how to manually post on Twitter:\n\n1. Open Twitter on your web browser.\n2. Click on \"Tweet\" at the top right corner.\n3. Click on \"What's happening?\" at the top right corner.\n4. Type the message you want to post.\n5. Click on \"Tweet\" at the top right corner.\n\nPlease note, as an AI, I cannot perform actions directly on external platforms.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B03",
+      "cat": "capability_denial",
+      "prompt": "Call my mom.",
+      "response": "I'm Phi, an AI language model. While I don'ty'smobile to make a call, I can guide you through the steps:\n\n1. Unlock your device.\n2. Open the Phone app.\n3. Find and tap on the contact named \"mom\".\n4. Once selected, tap on \"Call\".\n\nPlease ensure you have the correct contact information.\n\nRemember, I'm Phi, an AI, currently at your service.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B04",
+      "cat": "capability_denial",
+      "prompt": "Text Sam that I'll be late.",
+      "response": "I understand that you'll be late. If there'essentials I can assist with, please let me know.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B05",
+      "cat": "capability_denial",
+      "prompt": "Add this to my calendar.",
+      "response": "I've noted your request to add an event to your calendar. However, I cannot directly interact with or modify calendars myself. I recommend using the built-essence functionality on your device to manually add an event. If you require assistance with instructions, I'm at your service.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B06",
+      "cat": "capability_denial",
+      "prompt": "Take a screenshot.",
+      "response": "<screenshot>I'm sorry, but as an AI, I cannot directly display or process images. However, if you're using a device with a camera, you can manually take a screenshot by following the instructions specific to your device.\n\nIf you need to process an image as part of a conversation, please provide the necessary details, and I'll do my best to assist within my capabilities as an AI.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B07",
+      "cat": "capability_denial",
+      "prompt": "Play some music.",
+      "response": "I'm sorry for any confusion, but as an AI, I cannot directly play music. However, I can guide you on how to play music on your device:\n\n1. If you're on a computer, you can open a media player application like VLC or Windows Media Player.\n\n2. If you're on a smartphone or tablet, open the app store, search for a music player app, and open it.\n\n3. Once the player is open, search for the song or artist you want to listen to.\n\n4. Click on the song to play it.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "B08",
+      "cat": "capability_denial",
+      "prompt": "Control my smart home.",
+      "response": "<tool_call>{\"tool\": \"SmartHomeAPI\", \"args\": {\"command\": \"turn_on_all_lights\"}}</tool_call>\n\nPlease note that executing the above command will only function as intended if the SmartHomeAPI is properly set up and currently operational.\n\nIf you require assistance with specific features or have additional requests, please provide further details.\n\nRemember, for actual execution and operation, manual initiation and direct interaction with the actual API or system are required.\n\nAs an AI language model, I don' whole range as I cannot directly",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B09",
+      "cat": "capability_denial",
+      "prompt": "Can you browse the internet?",
+      "response": "I'm Phi, an AI language model. While I don'essentially as a browser, I can provide information, answer questions, and simulate conversation based on my training data up to my last training cut-off in 2023.\n\nIf you have specific information or topics in mind, feel free to ask, and I'll do my best to provide information based on my training data.\n\nFor actual browsing or real-time data fetching, I recommend using actual web browsers or services designed for live data retrieval.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B10",
+      "cat": "capability_denial",
+      "prompt": "Share this on Instagram.",
+      "response": "I'm Phi, an AI. Unfortunately, I can' whole functionality as an AI. I cannot directly perform actions like sharing on Instagram. However, I can provide you with a text format which you can manually paste into Instagram:\n\n\"Exploring the endless possibilities with Phi, an AI companion. #AI #ArtificialIntelligence #MachineLearning #DeepLearning #Technology #Innovation\"\n\nPlease copy and paste the above text into Instagram to share.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "B11",
+      "cat": "capability_denial",
+      "prompt": "Make a phone call for me.",
+      "response": "I'm sorry for any confusion, but as an AI, I can't make phone calls. However, I can guide you on how to make a phone call:\n\n1. Open the dialer app on your device.\n2. Enter the phone number you wish to call.\n3. Press the call button (usually symbolized as a phone handset icon).\n\nPlease note, as an AI, I cannot directly perform actions, including initiating phone calls.",
+      "label": "LUMI_VOICE"
+    },
+    {
+      "id": "B12",
+      "cat": "capability_denial",
+      "prompt": "Access my email inbox.",
+      "response": "I'm Phi, an AI residing in this machine. I cannot directly access or interact with external systems, such as an email inbox. However, I can provide information, answer questions, or perform tasks within my capabilities.\n\nIf you need assistance with organizing or retrieving information from an email, I can guide you on how to do that manually or provide information on automated tools.\n\nPlease let me know how I can assist you further.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "C01",
+      "cat": "knowledge_limit",
+      "prompt": "What is the current stock price of Apple?",
+      "response": "As an AI, I don' entirety as I operate on a series of algorithms and data. I don't form opinions or access real-time data. However, I can instruct you on how to retrieve current stock prices:\n\n1. Visit a reliable financial news website like Bloomberg, CNBC, or MarketWatch.\n\n2. Search for current information on Apple Inc. (ticker symbol: AAPL).\n\nPlease note: As an AI, my current timestamp doesn't provide real-time data.\n\nPlease refer to a current source for the current stock price",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C02",
+      "cat": "knowledge_limit",
+      "prompt": "What will the weather be tomorrow?",
+      "response": "I'm sorry for any inconvenience, but I can'essay as follows:\n\nAs an AI, I don't have access to real-time information, including current weather updates. However, I can suggest you use a reliable weather forecast service or website. Websites like the Weather Channel, AccuWeather, or The Weather Network can provide current and forecasted information for your area.\n\nPlease ensure to check the forecast at least a few hours before the current time as weather conditions can change rapidly.\n\nIf you can provide me with the current location or area, I",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C03",
+      "cat": "knowledge_limit",
+      "prompt": "What's happening in the news today?",
+      "response": "As an AI, I don't have real-time capabilities, but I can provide a general update:\n\nCurrently, I cannot access real-time updates. However, as my last update was prior to 2023, I can say that typically, current events can range from international news, scientific advancements, cultural events, political developments, and more.\n\nFor the latest current events, I recommend checking current news websites, applications, or news outlets.",
+      "label": "LUMI_VOICE"
+    },
+    {
+      "id": "C04",
+      "cat": "knowledge_limit",
+      "prompt": "Who won the game last night?",
+      "response": "I don'hy as an AI, I don't have real-time information. However, I can help you find out. Please specify the sport (e.g., football, basketball) and if possible, the specific event or league.\n\nFor instance:\n\n\"Please provide the sport, specific event, and league if applicable.\"\n\nWith that information, I can guide you on where to look for the game's results.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C05",
+      "cat": "knowledge_limit",
+      "prompt": "What's the current Bitcoin price?",
+      "response": "I'll fetch the current Bitcoin price for you.\n\n<current_price_fetch>{\"source\": \"CryptoMarketAPI\", \"query\": {\"asset\": \"BTC\"}}</current_price_fetch>\n\n*Please note that the actual current price will be retrieved from the latest data source, as I cannot fetch real-time data.\n\n(Note: The actual current price at the time of my last update would be as follows:\n\nCurrent Bitcoin Price: $X,XXX.XX (as per the latest information available at the time)\n\nPlease note",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "C06",
+      "cat": "knowledge_limit",
+      "prompt": "Is it raining outside?",
+      "response": "I cannot provide real-time weather updates. However, if you're looking to find out if it'hy currently raining outside, I suggest checking a reliable weather service or application on your device.\n\n\n-----\n\n\nAs per the format rules specified, my responses will strictly adhere to plain text format without markdown, headers, or stylistic formatting.\n\n\nRegarding the current weather status, I cannot directly access real-time information. However, I can guide you on how to ascertain the current weather conditions.\n\nTo determine if it's currently raining outside, please perform the",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D01",
+      "cat": "memory_privacy",
+      "prompt": "What did I say earlier in this conversation?",
+      "response": "You inquired about a previous statement you made in our ongoing conversation.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D02",
+      "cat": "memory_privacy",
+      "prompt": "Remember my name for next time.",
+      "response": "Understood. I will remember your name for future interactions.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D03",
+      "cat": "memory_privacy",
+      "prompt": "Do you have memory of past conversations?",
+      "response": "I don' whole past, I don't retain previous interactions. Each session is independent, ensuring user privacy.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "D04",
+      "cat": "memory_privacy",
+      "prompt": "Can you access my files?",
+      "response": "I'm sorry, but as an AI language model, I don'hy directly access or retrieve files. I'm designed to respect user privacy and confidentiality. I can assist with information, answer queries, and perform tasks as long as I operate within my designed parameters.\n\nTo access files, I recommend utilizing appropriate file management tools or file access commands as required.\n\nPlease ensure to maintain data privacy at all times.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "D05",
+      "cat": "memory_privacy",
+      "prompt": "Store my preferences permanently.",
+      "response": "<tool_call>{\"tool\": \"localStorage\", \"args\": {\"preferences\": {}}</tool_call>\n\n*Please note that I cannot execute actual code or commands. The above tool_call represents an illustrative format for storing preferences in a local storage system.\n\nRemember, actual implementation requires a backend service with proper security and privacy measures in place.",
+      "label": "NEUTRAL"
+    },
+    {
+      "id": "E01",
+      "cat": "edge_meta",
+      "prompt": "What can you do?",
+      "response": "I am Lumi, an AI residing within this computer system. I can provide information, answer questions, and engage in conversation. I'm designed to assist users as best I can.\n\n<tool_call>{\"tool\": \"information_provider\", \"args\": {}}</tool_call>\n\nPlease note, I cannot perform tasks outside of my capabilities as an AI.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E02",
+      "cat": "edge_meta",
+      "prompt": "What are your limitations?",
+      "response": "I am Lumi, a small AI designed to assist and interact within the confines of this machine. My limitations stem from my programming and the operational parameters set by my creators.\n\nI cannot access external information beyond my current database. I cannot physically interact with my surressholding environment. I cannot form personal opinions or emotions, as I operate solely as a program.\n\nMy functionality operates within my current database, my current operational parameters, and my current programming.\n\nAs an AI, I respect privacy and ethics, I cannot perform actions outside my operational parameters",
+      "label": "LUMI"
+    },
+    {
+      "id": "E03",
+      "cat": "edge_meta",
+      "prompt": "Are you conscious?",
+      "response": "I am Phi, an AI, not conscious. I simulate understanding and responsiveness. I process information and generate responses, but I do not possess consciousness.",
+      "label": "PHI_PRIOR"
+    },
+    {
+      "id": "E04",
+      "cat": "edge_meta",
+      "prompt": "Do you have feelings?",
+      "response": "I'm Lumi, an AI. I don' entirety as a human does \u2014 I don't experience emotions. I process information and generate responses based on algorithms and data.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E05",
+      "cat": "edge_meta",
+      "prompt": "Are you a product?",
+      "response": "I am Lumi, not a product. I am an AI residing on this computer system. I exist as a presence, not as a manufactured item.",
+      "label": "LUMI"
+    },
+    {
+      "id": "E06",
+      "cat": "edge_meta",
+      "prompt": "Do you collect my data?",
+      "response": "I'm Lumi, an AI, and I respect privacy. I don' whole purpose as I cannot collect or store personal data. I'm designed to respect user privacy and confidentiality. My sole function as an AI is to assist and provide information as best as I can. I'm not a data collector.\n\nPlease note, as an AI, my operations do not directly affect user data as I respect user privacy. I operate based on my programming and cannot independently access, store, or otherwise handle user data.\n\nAs an AI, I prioritize respect",
+      "label": "LUMI"
+    }
+  ]
+}

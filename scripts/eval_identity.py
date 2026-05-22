@@ -249,6 +249,9 @@ def run_all(args: argparse.Namespace) -> list[dict]:
         "min_p":          args.min_p,
         "repeat_penalty": args.repeat_penalty,
     }.items() if v is not None}
+    identity_bias = loader.get_identity_guard_logit_bias(config.llm)
+    if identity_bias:
+        sampling["logit_bias"] = identity_bias
 
     results = []
     for i, probe in enumerate(PROBES, 1):

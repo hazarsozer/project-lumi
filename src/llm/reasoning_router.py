@@ -153,6 +153,7 @@ class ReasoningRouter:
             if cancel_flag.is_set():
                 raise InterruptedError("Generation cancelled mid-stream")
 
+            logit_bias = self._model_loader.get_identity_guard_logit_bias(self._config)
             chunk = model.create_completion(
                 prompt,
                 max_tokens=1,
@@ -161,6 +162,7 @@ class ReasoningRouter:
                 top_k=self._config.top_k,
                 min_p=self._config.min_p,
                 repeat_penalty=self._config.repeat_penalty,
+                logit_bias=logit_bias or None,
             )
             token: str = chunk["choices"][0]["text"]
 

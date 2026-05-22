@@ -238,6 +238,21 @@ class LLMConfig:
     # offload count with no meaning for the HF backend).
     persona_steering_device: str = "auto"
 
+    # ── Identity guard — logit-bias suppression of Phi self-ID tokens ────────
+    # When True, any token in identity_guard_tokens is penalised by
+    # identity_guard_bias at every generation step.  Applied on top of
+    # abliteration (Track C) to close the residual "I'm Phi" cap-denial leaks
+    # that abliteration alone cannot reach without causing coherence regression.
+    # The guard strings are tokenised once at first inference and cached.
+    identity_guard_enabled: bool = False
+    # Logit bias applied to each guard token.  −100 is effectively −∞ in fp16.
+    identity_guard_bias: float = -100.0
+    # Strings whose token IDs are suppressed.  Each entry is tokenised and ALL
+    # resulting token IDs are added to the bias dict — handles multi-token strings
+    # gracefully.  The leading space on " Phi" suppresses "I'm Phi" / "I am Phi"
+    # while leaving lone "Phi" (e.g. in a user's sentence) free to appear.
+    identity_guard_tokens: tuple[str, ...] = (" Phi", " Microsoft")
+
 
 @dataclass(frozen=True)
 class TTSConfig:
@@ -564,6 +579,8 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     if "persona_steering_layer_range" in llm_raw:
         r = llm_raw["persona_steering_layer_range"]
         llm_raw["persona_steering_layer_range"] = (int(r[0]), int(r[1]))
+    if "identity_guard_tokens" in llm_raw:
+        llm_raw["identity_guard_tokens"] = tuple(llm_raw["identity_guard_tokens"])
     llm_cfg = LLMConfig(**llm_raw)
     tts_cfg = TTSConfig(**_merge_section(TTSConfig(), raw.get("tts", {})))
     ipc_cfg = IPCConfig(**_merge_section(IPCConfig(), raw.get("ipc", {})))
