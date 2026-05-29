@@ -43,6 +43,22 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+
+# ---------------------------------------------------------------------------
+# IPC auth — disable token verification during all tests
+# ---------------------------------------------------------------------------
+
+# When ~/.lumi/ipc_token exists on a dev machine, EventBridge enables bearer-
+# token auth.  Integration tests that use FakeWSClient.do_handshake() send no
+# token, so they would be rejected.  Patching read_token at the event_bridge
+# import site to always return None keeps token auth disabled for the whole
+# test session without touching any test or the production handshake logic.
+@pytest.fixture(autouse=True, scope="session")
+def _disable_ipc_token_auth() -> Generator[None, None, None]:
+    """Patch EventBridge's read_token so no bearer token is required during tests."""
+    with patch("src.core.event_bridge.read_token", return_value=None):
+        yield
+
 # ---------------------------------------------------------------------------
 # Audio data fixtures
 # ---------------------------------------------------------------------------
@@ -200,14 +216,53 @@ def mock_oww_model() -> Generator[MagicMock, None, None]:
 # ---------------------------------------------------------------------------
 
 
+def _make_streaming_side_effect(
+    return_value: dict,
+) -> Any:
+    """Return a ``create_completion`` side-effect that honours ``stream=True``.
+
+    When *stream=True* is passed the callable returns a generator that yields
+    the single-response dict as one chunk, matching the llama.cpp streaming
+    protocol (an iterator of ``{"choices": [{"text": ..., "finish_reason":
+    ...}]}`` dicts).
+
+    When *stream* is absent or False the callable returns the plain dict,
+    preserving non-streaming usage.
+
+    If a test has already set a custom ``side_effect`` on
+    ``mock_instance.create_completion``, that side_effect is used directly —
+    this helper only wraps the *default* return value.
+    """
+
+    def _side_effect(*args: object, **kwargs: object) -> Any:
+        stream = kwargs.get("stream", False)
+        if stream:
+            # Return a one-shot generator containing the response dict.
+            # Tests that need multi-token streaming override side_effect
+            # themselves (see test_cr02_empty_first_token.py).
+            def _gen() -> Any:
+                yield return_value
+
+            return _gen()
+        return return_value
+
+    return _side_effect
+
+
 @pytest.fixture()
 def mock_llama_cpp() -> Generator[MagicMock, None, None]:
     """Patch llama_cpp.Llama to prevent any model loading.
 
     The mock instance supports:
     - __call__(prompt, ...) returning {"choices": [{"text": "mock response"}]}
-    - create_completion(...) returning the same structure
-    - Configurable via mock_llama_cpp.return_value to set custom responses
+    - create_completion(..., stream=False) returning the same structure as a
+      plain dict (non-streaming, backward-compatible).
+    - create_completion(..., stream=True) returning a one-shot generator that
+      yields the response dict as a single chunk, matching the llama.cpp
+      streaming protocol used by ReasoningRouter.generate().
+    - Configurable via mock_llama_cpp.return_value to set custom responses;
+      tests may also override create_completion.side_effect directly for
+      multi-token sequences.
 
     Yields the mock Llama *class* so tests can configure return values.
 
@@ -218,11 +273,13 @@ def mock_llama_cpp() -> Generator[MagicMock, None, None]:
     openwakeword, ensuring the mock is seen regardless of whether the
     module imports the class directly or via the package namespace.
     """
+    _default_response: dict = {"choices": [{"text": "mock response", "finish_reason": "stop"}]}
+
     mock_instance = MagicMock()
-    mock_instance.return_value = {"choices": [{"text": "mock response"}]}
-    mock_instance.create_completion.return_value = {
-        "choices": [{"text": "mock response"}]
-    }
+    mock_instance.return_value = _default_response
+    mock_instance.create_completion.side_effect = _make_streaming_side_effect(
+        _default_response
+    )
     mock_cls = MagicMock(return_value=mock_instance)
 
     # llama_cpp is an optional extra not installed on CI. Inject a fake module

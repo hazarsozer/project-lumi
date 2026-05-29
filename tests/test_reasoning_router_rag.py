@@ -22,17 +22,15 @@ def _make_model_loader(response_tokens=("Hello", " world")):
     loader.is_loaded = True
 
     tokens = list(response_tokens)
-    call_count = [0]
 
-    def fake_complete(prompt, max_tokens=1, **kwargs):
-        # Accept any sampler kwargs (temperature, top_p, top_k, min_p,
-        # repeat_penalty) — reasoning_router forwards the full set.
-        idx = call_count[0]
-        call_count[0] += 1
-        if idx >= len(tokens):
-            return {"choices": [{"text": "", "finish_reason": "stop"}]}
-        finish = "stop" if idx == len(tokens) - 1 else None
-        return {"choices": [{"text": tokens[idx], "finish_reason": finish}]}
+    def fake_complete(prompt, **kwargs):
+        # Return a one-shot generator that yields all tokens as streaming chunks,
+        # matching the llama.cpp stream=True protocol expected by ReasoningRouter.
+        def _gen():
+            for idx, tok in enumerate(tokens):
+                finish = "stop" if idx == len(tokens) - 1 else None
+                yield {"choices": [{"text": tok, "finish_reason": finish}]}
+        return _gen()
 
     loader.model.create_completion.side_effect = fake_complete
     return loader

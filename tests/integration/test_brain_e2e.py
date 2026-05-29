@@ -72,16 +72,15 @@ def _mock_speaker() -> MagicMock:
 
 def _make_model_loader_cls(tokens: list[str]) -> MagicMock:
     """Return a mock ModelLoader class whose instance yields *tokens* then stops."""
-    call_count = 0
 
-    def _create_completion(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        nonlocal call_count
-        if call_count < len(tokens):
-            tok = tokens[call_count]
-            call_count += 1
-            finish = "stop" if call_count == len(tokens) else None
-            return {"choices": [{"text": tok, "finish_reason": finish}]}
-        return {"choices": [{"text": "", "finish_reason": "stop"}]}
+    def _create_completion(*args: Any, **kwargs: Any):
+        # Return a one-shot generator that streams all tokens, matching the
+        # llama.cpp stream=True protocol expected by ReasoningRouter.
+        def _gen():
+            for idx, tok in enumerate(tokens):
+                finish = "stop" if idx == len(tokens) - 1 else None
+                yield {"choices": [{"text": tok, "finish_reason": finish}]}
+        return _gen()
 
     mock_model = MagicMock()
     mock_model.is_loaded = True

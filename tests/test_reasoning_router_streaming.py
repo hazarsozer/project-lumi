@@ -50,16 +50,13 @@ def _build_router(
 def _setup_multi_token_mock(mock_llama_cpp: MagicMock) -> None:
     """Configure mock to return three tokens then stop."""
     tokens = ["Hello", " ", "world"]
-    call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
-        nonlocal call_count
-        if call_count < len(tokens):
-            token = tokens[call_count]
-            call_count += 1
-            finish = "stop" if call_count == len(tokens) else None
-            return {"choices": [{"text": token, "finish_reason": finish}]}
-        return {"choices": [{"text": "", "finish_reason": "stop"}]}
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
+        def _gen():
+            for idx, tok in enumerate(tokens):
+                finish = "stop" if idx == len(tokens) - 1 else None
+                yield {"choices": [{"text": tok, "finish_reason": finish}]}
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
@@ -130,14 +127,14 @@ def test_generate_cancel_stops_streaming(
     """cancel_flag set mid-loop raises InterruptedError; partial tokens are posted."""
     event_q: queue.Queue[Any] = queue.Queue()
     cancel = threading.Event()
-    call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
-        nonlocal call_count
-        call_count += 1
-        if call_count >= 2:
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
+        def _gen():
+            yield {"choices": [{"text": "tok1", "finish_reason": None}]}
+            # Set cancel after the first chunk so the router sees it next iteration.
             cancel.set()
-        return {"choices": [{"text": f"tok{call_count}", "finish_reason": None}]}
+            yield {"choices": [{"text": "tok2", "finish_reason": None}]}
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
@@ -161,16 +158,13 @@ def test_generate_cancel_stops_streaming(
 
 def _setup_sentence_mock(mock_llama_cpp: MagicMock, tokens: list[str]) -> None:
     """Configure mock to emit *tokens* then stop."""
-    call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
-        nonlocal call_count
-        if call_count < len(tokens):
-            tok = tokens[call_count]
-            call_count += 1
-            finish = "stop" if call_count == len(tokens) else None
-            return {"choices": [{"text": tok, "finish_reason": finish}]}
-        return {"choices": [{"text": "", "finish_reason": "stop"}]}
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
+        def _gen():
+            for idx, tok in enumerate(tokens):
+                finish = "stop" if idx == len(tokens) - 1 else None
+                yield {"choices": [{"text": tok, "finish_reason": finish}]}
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
