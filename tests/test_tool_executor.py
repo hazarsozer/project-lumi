@@ -6,6 +6,7 @@ All tests are pure in-memory; no subprocess or filesystem calls.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any
@@ -196,3 +197,67 @@ def test_execute_with_empty_args_dict_works() -> None:
     assert len(results) == 1
     assert results[0].success is True
     registry.get("tool_a").execute.assert_called_once_with({})
+
+
+# ---------------------------------------------------------------------------
+# Privacy / log-redaction tests (CR-08 / issue #9)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_info_log_does_not_contain_raw_arg_values(caplog: pytest.LogCaptureFixture) -> None:
+    """INFO-level logs must NOT leak raw arg values (queries, file paths, etc.)."""
+    registry = _make_registry("search_tool")
+    executor = ToolExecutor(registry, _config(allowed=("search_tool",)))
+
+    sensitive_query = "my private query"
+    sensitive_path = "/home/user/secret_file.txt"
+
+    with caplog.at_level("INFO", logger="src.tools.executor"):
+        executor.execute(
+            [{"tool": "search_tool", "args": {"query": sensitive_query, "path": sensitive_path}}],
+            _no_cancel(),
+        )
+
+    info_messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+
+    # Sensitive values must NOT appear in any INFO record
+    for msg in info_messages:
+        assert sensitive_query not in msg, (
+            f"Sensitive query leaked in INFO log: {msg!r}"
+        )
+        assert sensitive_path not in msg, (
+            f"Sensitive path leaked in INFO log: {msg!r}"
+        )
+
+    # At least one INFO record about the tool attempt must exist
+    assert any("search_tool" in msg for msg in info_messages), (
+        "Expected an INFO record referencing the tool name"
+    )
+
+    # Arg KEYS (not values) must appear at INFO
+    assert any("query" in msg and "path" in msg for msg in info_messages), (
+        "Expected arg keys to appear in INFO log"
+    )
+
+
+@pytest.mark.unit
+def test_debug_log_contains_full_arg_values(caplog: pytest.LogCaptureFixture) -> None:
+    """DEBUG-level logs SHOULD contain the full args so operators can opt in."""
+    registry = _make_registry("search_tool")
+    executor = ToolExecutor(registry, _config(allowed=("search_tool",)))
+
+    sensitive_query = "my private query"
+
+    with caplog.at_level("DEBUG", logger="src.tools.executor"):
+        executor.execute(
+            [{"tool": "search_tool", "args": {"query": sensitive_query}}],
+            _no_cancel(),
+        )
+
+    debug_messages = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
+
+    # The full value must be present in at least one DEBUG record
+    assert any(sensitive_query in msg for msg in debug_messages), (
+        "Expected full arg value in DEBUG log for operator diagnostics"
+    )
