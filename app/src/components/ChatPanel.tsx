@@ -1,6 +1,7 @@
 // ChatPanel — 380×540 floating chat window
 import { useState, useRef, useEffect } from 'react';
 import { tokens as T, AvatarStateKey } from '../styles/tokens';
+import type { ConnectionState } from '../ipc/client';
 
 export interface Message {
   id: string;
@@ -14,11 +15,12 @@ export interface ChatPanelProps {
   messages: Message[];
   streamingTokens?: string;
   brainState: AvatarStateKey;
+  connectionState: ConnectionState;
   onSend: (text: string) => void;
   onClose: () => void;
 }
 
-export function ChatPanel({ messages, streamingTokens, brainState, onSend, onClose }: ChatPanelProps) {
+export function ChatPanel({ messages, streamingTokens, brainState, connectionState, onSend, onClose }: ChatPanelProps) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const isProcessing = brainState === 'processing' || brainState === 'speaking';
@@ -51,7 +53,7 @@ export function ChatPanel({ messages, streamingTokens, brainState, onSend, onClo
       boxShadow: T.shadow.lg, overflow: 'hidden',
       animation: 'fadeIn 280ms ease',
     }}>
-      <ChatHeader onClose={onClose} />
+      <ChatHeader connectionState={connectionState} onClose={onClose} />
 
       {/* Message list */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: T.space.lg, display: 'flex', flexDirection: 'column', gap: T.space.lg }}>
@@ -78,14 +80,28 @@ export function ChatPanel({ messages, streamingTokens, brainState, onSend, onClo
 
 // ── Sub-components ──────────────────────────────────────────
 
-function ChatHeader({ onClose }: { onClose: () => void }) {
+const CONNECTION_LABEL: Record<ConnectionState, string> = {
+  connected:    '● Online',
+  connecting:   '◌ Connecting',
+  disconnected: '○ Offline',
+};
+
+const CONNECTION_COLOR: Record<ConnectionState, string> = {
+  connected:    T.colors.accentGreen,
+  connecting:   T.colors.accentAmber,
+  disconnected: T.colors.textMuted,
+};
+
+function ChatHeader({ connectionState, onClose }: { connectionState: ConnectionState; onClose: () => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${T.space.md}px ${T.space.lg}px`, borderBottom: `1px solid ${T.colors.borderSub}`, flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 28, height: 28, borderRadius: '50%', background: T.colors.surfaceTop, border: `1.5px solid ${T.colors.accentBlue}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, boxShadow: T.shadow.glowBlue }}>✦</div>
         <div>
           <div style={{ fontSize: T.font.lg, fontWeight: 600, color: T.colors.textPri, lineHeight: 1 }}>Lumi</div>
-          <div style={{ fontSize: T.font.xs, color: T.colors.accentGreen, marginTop: 2 }}>● Online</div>
+          <div style={{ fontSize: T.font.xs, color: CONNECTION_COLOR[connectionState], marginTop: 2 }}>
+            {CONNECTION_LABEL[connectionState]}
+          </div>
         </div>
       </div>
       <div onClick={onClose} style={{ width: 26, height: 26, borderRadius: T.radius.md, background: T.colors.surfaceTop, border: `1px solid ${T.colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: T.colors.textSec }}>×</div>

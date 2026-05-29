@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { tauriEmit, tauriListen, tauriGetWindowByLabel } from "../lib/tauriCompat";
 import { ChatPanel, type Message } from "../components/ChatPanel";
+import { useBrainSocket } from "../state/useBrainSocket";
 import type { LumiBrainEvent } from "../ipc/events";
 import type { AvatarStateKey } from "../styles/tokens";
 import { EV_BRAIN, EV_SEND } from "../ipc/eventNames";
@@ -14,6 +15,7 @@ const toAvatarState = (s: string): AvatarStateKey =>
 
 // ── Chat root — listens via Tauri event bus ───────────────────────────────────
 export function ChatRoot() {
+  const { connectionState } = useBrainSocket();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState("");
   const [brainState, setBrainState] = useState<AvatarStateKey>("idle");
@@ -74,6 +76,7 @@ export function ChatRoot() {
       messages={messages}
       streamingTokens={streaming}
       brainState={brainState}
+      connectionState={connectionState}
       onSend={handleSend}
       onClose={handleClose}
     />
