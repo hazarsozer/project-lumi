@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -53,12 +54,30 @@ class ConversationMemory:
         self,
         memory_dir: str,
         summariser: Callable[[list[dict[str, str]]], str] | None = None,
+        max_age_s: float = 0.0,
+        _now_fn: Callable[[], float] | None = None,
     ) -> None:
+        """Initialise ConversationMemory.
+
+        Args:
+            memory_dir: Directory for the JSON persistence file.
+            summariser: Optional callable that summarises a list of turns into a
+                        single string.  Called off-thread during rotation.
+            max_age_s: Maximum age (in seconds) for persisted conversation
+                       entries.  Entries whose ``ts`` field is older than
+                       ``now - max_age_s`` are purged on load and save.
+                       0.0 disables age-based retention entirely.
+            _now_fn: Callable returning the current time as a float (UNIX
+                     epoch).  Defaults to ``time.time``.  Override in tests to
+                     inject a deterministic clock without wall-clock sleeps.
+        """
         expanded = Path(memory_dir).expanduser()
         expanded.mkdir(parents=True, exist_ok=True)
         self._history: list[dict[str, str]] = []
         self._file: Path = expanded / "conversation.json"
         self._summariser = summariser
+        self._max_age_s: float = max_age_s
+        self._now_fn: Callable[[], float] = _now_fn if _now_fn is not None else time.time
         self._lock: threading.RLock = threading.RLock()
         # Guards against concurrent rotations. True while a background rotation
         # task is queued or running. add_turn checks this under the lock so that
@@ -89,9 +108,14 @@ class ConversationMemory:
         rotation is already running are kept: the writeback splices using the
         live ``_history[k:]`` tail rather than a stale snapshot, so no turn is
         ever silently discarded.
+
+        Each entry is stamped with a ``ts`` field (UNIX epoch float) so that
+        age-based retention can later purge stale entries.  The ``ts`` field is
+        an implementation detail and is not returned by ``get_history()`` —
+        callers only see ``role`` and ``content``.
         """
         with self._lock:
-            self._history.append({"role": role, "content": content})
+            self._history.append({"role": role, "content": content, "ts": self._now_fn()})
             # Only dispatch a rotation if one is not already pending or running.
             # Turns added while _rotating is True will be preserved by the
             # in-flight rotation's splice-based writeback.
@@ -164,9 +188,54 @@ class ConversationMemory:
             self._save_locked()
 
     def get_history(self) -> list[dict[str, str]]:
-        """Return a shallow copy of the conversation history."""
+        """Return the conversation history with only ``role`` and ``content`` keys.
+
+        The internal ``ts`` (timestamp) field is an implementation detail for
+        retention bookkeeping and is stripped from the returned entries so that
+        callers always receive the ``{role, content}`` shape they expect.
+        """
         with self._lock:
-            return list(self._history)
+            return [
+                {"role": e["role"], "content": e["content"]}
+                for e in self._history
+            ]
+
+    def purge_old_entries(self) -> int:
+        """Remove entries older than ``max_age_s`` seconds (thread-safe).
+
+        Uses ``self._now_fn()`` as the reference clock so that tests can inject
+        a deterministic timestamp without relying on wall-clock sleeps.
+
+        Returns the number of entries removed.  No-op (returns 0) when
+        ``max_age_s`` is 0.0 (retention disabled).
+
+        Must be called with the lock NOT held — acquires it internally.
+        """
+        if self._max_age_s <= 0.0:
+            return 0
+        with self._lock:
+            return self._purge_locked()
+
+    def _purge_locked(self) -> int:
+        """Inner purge — must be called with ``_lock`` held."""
+        if self._max_age_s <= 0.0:
+            return 0
+        cutoff = self._now_fn() - self._max_age_s
+        before = len(self._history)
+        # Entries without a 'ts' field (e.g. summary entries written before
+        # this feature shipped) are preserved — they have no age information.
+        self._history = [
+            e for e in self._history
+            if not isinstance(e.get("ts"), (int, float)) or e["ts"] >= cutoff
+        ]
+        removed = before - len(self._history)
+        if removed:
+            logger.debug(
+                "Purged %d conversation entries older than %.0f s",
+                removed,
+                self._max_age_s,
+            )
+        return removed
 
     def prune(self, max_turns: int) -> None:
         """Keep only the last *max_turns* entries, discarding the oldest."""
@@ -189,7 +258,12 @@ class ConversationMemory:
             self._save_locked()
 
     def _save_locked(self) -> None:
-        """Write ``_history`` to disk.  Must be called with ``_lock`` held."""
+        """Purge stale entries, then write ``_history`` to disk.
+
+        Must be called with ``_lock`` held.  The purge is inline (no lock
+        acquisition needed) because we already hold the lock.
+        """
+        self._purge_locked()
         try:
             with self._file.open("w", encoding="utf-8") as fh:
                 json.dump(self._history, fh, indent=2, ensure_ascii=False)
@@ -256,6 +330,9 @@ class ConversationMemory:
 
         with self._lock:
             self._history = valid
+            # Purge age-expired entries before rotation so stale turns don't
+            # count against the MAX_TURNS threshold and are not summarised.
+            self._purge_locked()
             if len(self._history) > MAX_TURNS:
                 # Inline synchronous rotation on load — no background needed here
                 # because load() itself is called from a single-threaded startup

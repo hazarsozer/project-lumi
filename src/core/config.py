@@ -253,6 +253,15 @@ class LLMConfig:
     # while leaving lone "Phi" (e.g. in a user's sentence) free to appear.
     identity_guard_tokens: tuple[str, ...] = (" Phi", " Microsoft")
 
+    # ── Conversation history retention ────────────────────────────────────────
+    # Maximum age (in days) for persisted conversation entries.  Entries older
+    # than this are purged automatically on load() and save().
+    # 0.0 (default) disables age-based retention entirely — retention is OPT-IN.
+    # Set to a positive value (e.g. 30.0) to enable automatic purging.
+    # Entries without a timestamp (loaded from pre-retention JSON files) are
+    # never purged — they have no age information, so they are always preserved.
+    memory_max_age_days: float = 0.0
+
 
 @dataclass(frozen=True)
 class TTSConfig:
@@ -399,6 +408,11 @@ class RAGConfig:
     # exceeds this budget the retriever returns an empty result and logs a
     # warning, so the LLM still responds — without retrieved context.
     retrieval_timeout_s: float = 0.4
+
+    # Maximum age (in days) for stored document chunks.  Chunks whose parent
+    # document's ingested_at timestamp is older than this are purged by
+    # DocumentStore.purge_expired_chunks().  0.0 disables age-based retention.
+    rag_max_age_days: float = 0.0
 
 
 @dataclass(frozen=True)
