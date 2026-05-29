@@ -49,6 +49,7 @@ def _make_base_config(
     cfg.llm.context_length = 512
     cfg.llm.inference_timeout_s = 30.0
     cfg.llm.tools_in_system_prompt = False
+    cfg.observability.heartbeat_interval_s = 0.0
     return cfg
 
 

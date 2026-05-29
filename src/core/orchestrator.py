@@ -105,6 +105,7 @@ def _flatten_config(config: LumiConfig) -> dict[str, Any]:
         "vision": config.vision,
         "rag": config.rag,
         "persona": config.persona,
+        "observability": config.observability,
     }
     for section_name, section_obj in sections.items():
         for f in dataclasses.fields(section_obj):
@@ -133,6 +134,7 @@ class Orchestrator:
         ears: Ears | None = None,
         scribe: Scribe | None = None,
         missing_setup_items: list[str] | None = None,
+        error_tracker: Callable[[BaseException], None] | None = None,
     ) -> None:
         self._config: LumiConfig = config
         self._config_manager: ConfigManager = ConfigManager(config)
@@ -141,10 +143,19 @@ class Orchestrator:
         self._shutdown: bool = False
         self._handlers: dict[type, list[Callable[..., None]]] = {}
 
+        # Optional error-tracker hook (Callable[[BaseException], None]).
+        # Called on unhandled handler exceptions so they can be surfaced beyond
+        # local logs (e.g. Sentry, a custom sink).  Default is None (no-op).
+        # Lumi is local-first — no cloud SDK is imported by default.
+        self._error_tracker: Callable[[BaseException], None] | None = error_tracker
+
         # Guard flags used by _cleanup_partial_init() to release only resources
         # that were successfully acquired before a mid-init exception.
         self._speaker_started: bool = False
         self._bridge_started: bool = False
+
+        # Heartbeat timer handle — set in _init_subsystems when the interval > 0.
+        self._heartbeat_timer: threading.Timer | None = None
 
         try:
             self._init_subsystems(config, speaker, tts, event_bridge, ears, scribe, missing_setup_items)
@@ -343,6 +354,13 @@ class Orchestrator:
             self.register_handler(RAGStatusEvent, self._event_bridge.on_rag_status)
             self.register_handler(SystemStatusEvent, self._event_bridge.on_system_status)
 
+        # Heartbeat — optional periodic liveness signal.
+        # Fires a log line at the configured interval so a stalled Brain produces
+        # a visible gap in logs.  Disabled (default) when interval is 0.0.
+        _hb_interval = config.observability.heartbeat_interval_s
+        if _hb_interval > 0.0:
+            self._heartbeat_timer = self._schedule_heartbeat(_hb_interval)
+
     def _cleanup_partial_init(self) -> None:
         """Release resources acquired before a mid-__init__ exception.
 
@@ -353,6 +371,9 @@ class Orchestrator:
         Errors during cleanup are logged and suppressed to avoid masking the
         original exception.
         """
+        if self._heartbeat_timer is not None:
+            self._heartbeat_timer.cancel()
+
         if self._bridge_started and self._event_bridge is not None:
             try:
                 self._event_bridge.stop()
@@ -369,6 +390,59 @@ class Orchestrator:
     def state_machine(self) -> StateMachine:
         """Expose the state machine for observer registration."""
         return self._state_machine
+
+    # ------------------------------------------------------------------
+    # Heartbeat
+    # ------------------------------------------------------------------
+
+    def _schedule_heartbeat(self, interval_s: float) -> threading.Timer:
+        """Schedule a single heartbeat log line and then reschedule itself.
+
+        Uses a daemon threading.Timer so the heartbeat never prevents process
+        exit.  The timer is re-armed from within its own callback, which means
+        the period is ``interval_s`` *after each fire* (not wall-clock drift).
+
+        Args:
+            interval_s: Seconds between heartbeat log lines.  Must be > 0.
+
+        Returns:
+            The newly scheduled ``threading.Timer``.
+        """
+        def _fire() -> None:
+            if self._shutdown:
+                return
+            logger.info(
+                "Heartbeat — Brain is alive (interval=%.1f s)", interval_s
+            )
+            # Reschedule — store handle so stop() can cancel the next tick.
+            self._heartbeat_timer = self._schedule_heartbeat(interval_s)
+
+        timer = threading.Timer(interval_s, _fire)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _beat(self) -> None:
+        """Fire the heartbeat immediately (useful for tests without real sleeps)."""
+        logger.info(
+            "Heartbeat — Brain is alive (interval=%.1f s)",
+            self._config.observability.heartbeat_interval_s,
+        )
+
+    # ------------------------------------------------------------------
+    # Error-tracker hook
+    # ------------------------------------------------------------------
+
+    def set_error_tracker(self, hook: Callable[[BaseException], None] | None) -> None:
+        """Replace the error-tracker hook at runtime.
+
+        Passing ``None`` resets to the default no-op behaviour.
+
+        Args:
+            hook: Callable invoked with the exception on unhandled handler
+                  errors.  May be called from the event-loop thread.
+        """
+        self._error_tracker = hook
 
     def _make_summariser(
         self, llm_config: LLMConfig
@@ -484,12 +558,19 @@ class Orchestrator:
         for handler in handlers:
             try:
                 handler(event)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Handler %s raised an exception for %s",
                     handler.__name__,
                     event_type.__name__,
                 )
+                if self._error_tracker is not None:
+                    try:
+                        self._error_tracker(exc)
+                    except Exception:
+                        logger.warning(
+                            "error_tracker hook raised; ignoring", exc_info=True
+                        )
 
     def _handle_transcript(self, event: TranscriptReadyEvent) -> None:
         """Handle TranscriptReadyEvent: route text to reflex or LLM.
@@ -879,6 +960,11 @@ class Orchestrator:
             event: The shutdown event.
         """
         logger.info("Shutdown requested")
+        # Cancel the heartbeat timer before setting _shutdown so the timer
+        # callback's early-exit guard (_shutdown check) is not needed for
+        # correctness, but still fires correctly even if the two race.
+        if self._heartbeat_timer is not None:
+            self._heartbeat_timer.cancel()
         self._speaker.stop()
         if self._ears is not None:
             self._ears.stop()

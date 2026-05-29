@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.config import LLMConfig, LumiConfig
 from src.core.events import LLMResponseReadyEvent
+from src.core.logging_config import utterance_id_var
 from src.core.state_machine import LumiState, StateMachine
 from src.llm.reasoning_router import ReasoningRouter
 from src.llm.reflex_router import ReflexRouter
@@ -121,6 +122,16 @@ class LLMInferenceDispatcher:
             my_generation = self._turn_generation
 
         def _run_inference() -> None:
+            # Bind the utterance_id to the per-turn context variable so that
+            # every log record emitted from within this call carries the id.
+            # The token is reset in the finally block regardless of outcome.
+            _uid_token = utterance_id_var.set(utterance_id)
+            try:
+                _run_inference_body()
+            finally:
+                utterance_id_var.reset(_uid_token)
+
+        def _run_inference_body() -> None:
             # Count of LLMResponseReadyEvent firings so far this turn.
             # Streaming fires one per sentence; the state transition happens on
             # the first firing.  If zero events fire (e.g. empty response or

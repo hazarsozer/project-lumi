@@ -425,6 +425,21 @@ class RAGConfig:
 
 
 @dataclass(frozen=True)
+class ObservabilityConfig:
+    """Configuration for the process observability subsystem.
+
+    Controls the process heartbeat — a periodic log line that proves the Brain
+    is alive.  A stalled Brain (e.g. deadlocked inference thread) produces no
+    heartbeat signal, making the liveness gap immediately visible in logs.
+    """
+
+    # Interval in seconds between heartbeat log lines.
+    # 0.0 (default) disables the heartbeat entirely.
+    # Typical production value: 30.0 – 60.0 s.
+    heartbeat_interval_s: float = 0.0
+
+
+@dataclass(frozen=True)
 class LumiConfig:
     """Top-level configuration object passed to every subsystem at startup."""
 
@@ -441,6 +456,7 @@ class LumiConfig:
     vision: VisionConfig = field(default_factory=VisionConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     persona: PersonaConfig = field(default_factory=PersonaConfig)
+    observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
 
     # Root-logger level forwarded to setup_logging().
     log_level: str = "INFO"
@@ -671,6 +687,10 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         **_merge_section(PersonaConfig(), raw.get("persona", {}))
     )
 
+    observability_cfg = ObservabilityConfig(
+        **_merge_section(ObservabilityConfig(), raw.get("observability", {}))
+    )
+
     # Top-level scalar overrides.
     top_defaults = LumiConfig()
     edition = raw["edition"] if "edition" in raw else detect_edition()
@@ -688,6 +708,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         vision=vision_cfg,
         rag=rag_cfg,
         persona=persona_cfg,
+        observability=observability_cfg,
         log_level=log_level,
         json_logs=json_logs,
     )
