@@ -97,3 +97,6 @@ logs/
 # Private development knowledge base / second brain (Karpathy's LLM Wiki pattern)
 docs/wiki/
 
+# Crucible review artifacts
+.review/
+

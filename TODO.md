@@ -88,6 +88,22 @@ First pass landed `bb7a4cc`; architect audit found 3 critical + 4 high-severity 
 
 ---
 
+## Brain Integration Regressions — Open (2026-05-27)
+
+First live-test of the shipping persona candidate surfaced three independent integration regressions hiding between unit-green components. The persona itself ships correctly via direct LLM probe (`scripts/probe_persona.py`, new this session); the orchestrator path doesn't deliver it. Full postmortem at [[docs/wiki/postmortems/2026-05-27-three-integration-regressions-found-on-first-live-test]].
+
+- [ ] **R1 — Audio pipeline orphan** (`src/audio/ears.py`): `_consumer_loop` posts `WakeDetectedEvent` and immediately returns to wake-listening; never calls `record_command_with_vad` (line 129) and never posts `RecordingCompleteEvent`. Orchestrator's `_handle_recording_complete` (`orchestrator.py:750`) is correctly wired but waits for an event no production code produces. State machine sits in LISTENING forever after the first wake. Regression dates to Wave E3-G5 (`57b5bb2`, ~6 months). TDD an integration test driving wake → record → `RecordingCompleteEvent` before fixing.
+- [ ] **R2 — Reasoning router empty-token streaming** (`src/llm/reasoning_router.py:152-195`): `create_completion(max_tokens=1)` loop's first call decodes to `""` (likely EOS-class special token), so `if not token: break` exits with no collected output. Every WS response carries `tts_start.text = ""` and completes in <500ms. **On the critical path for any user-visible reply.** Confirm root cause with logits inspection, then switch to `create_completion(stream=True)` or to a single `max_tokens=N` call with `on_sentence` applied after. Direct probe with `max_tokens=128` (matching `eval_identity.py:211`) produces full responses, confirming the bug is in the streaming loop only.
+- [ ] **R3 — IPC handshake race** (`src/core/handshake.py:50`, `app/src/ipc/client.ts:89-104`): Brain's `HANDSHAKE_TIMEOUT_S = 3.0` is shorter than Tauri's first-call `invoke("read_ipc_token")` cold path. Brain disconnects with WS 1008; frontend explicitly does not retry on 1008. Preferred fix: pre-read the token at module load in `client.ts` and cache it module-level so `_sendHelloAck` doesn't await on the WS critical path.
+
+**Workarounds shipped this session for follow-up sessions:**
+- `scripts/chat_ws.py` — Python WS REPL/batch client bypassing Tauri (reads token synchronously, completes handshake in ~1ms).
+- `scripts/probe_persona.py` — direct model call bypassing orchestrator + router (matches `eval_identity.py` invocation; runs 10 inline persona probes with per-response brand-leak detection).
+
+**Lesson added to "Definition of Done":** every persona ship and refactor must run `uv run python -m src.main` and exchange at least one message end-to-end before claiming complete. Eval against the direct LLM is necessary but not sufficient.
+
+---
+
 ## ~~1. `time` Module Shadow in `_mic_callback`~~ — DONE
 * **Context:** The `time` argument in `sounddevice`'s `_mic_callback` shadows the global `import time`, meaning any use of `time.monotonic()` in that function will crash.
 * **Resolution:** `ears.py` now uses `import time as _time` and all calls use `_time.monotonic()`.
