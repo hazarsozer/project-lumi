@@ -22,6 +22,8 @@ Usage:
     ears.stop()
 """
 
+from __future__ import annotations
+
 import logging
 import queue
 import threading

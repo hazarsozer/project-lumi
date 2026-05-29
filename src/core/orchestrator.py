@@ -141,6 +141,28 @@ class Orchestrator:
         self._shutdown: bool = False
         self._handlers: dict[type, list[Callable[..., None]]] = {}
 
+        # Guard flags used by _cleanup_partial_init() to release only resources
+        # that were successfully acquired before a mid-init exception.
+        self._speaker_started: bool = False
+        self._bridge_started: bool = False
+
+        try:
+            self._init_subsystems(config, speaker, tts, event_bridge, ears, scribe, missing_setup_items)
+        except BaseException:
+            self._cleanup_partial_init()
+            raise
+
+    def _init_subsystems(
+        self,
+        config: LumiConfig,
+        speaker: SpeakerThread | None,
+        tts: KokoroTTS | None,
+        event_bridge: EventBridge | None,
+        ears: Ears | None,
+        scribe: Scribe | None,
+        missing_setup_items: list[str] | None,
+    ) -> None:
+        """Inner init — called from __init__ inside a try/except for cleanup safety."""
         # LLM subsystem — components are created here; the model itself is
         # loaded on first use (ModelLoader.load() is deferred until inference).
         self._reflex_router: ReflexRouter = ReflexRouter()
@@ -234,6 +256,7 @@ class Orchestrator:
             speaker if speaker is not None else SpeakerThread(self._event_queue)
         )
         self._speaker.start()
+        self._speaker_started = True
 
         # TTS engine — injectable for testing; None means no TTS (state machine
         # still transitions correctly via a synthetic SpeechCompletedEvent).
@@ -301,6 +324,7 @@ class Orchestrator:
                 config.ipc, self._event_queue, self._state_machine
             )
             self._event_bridge.start()
+            self._bridge_started = True
 
         if self._event_bridge is not None:
             # Injected instances have not had on_state_change registered against
@@ -318,6 +342,28 @@ class Orchestrator:
             self.register_handler(RAGRetrievalEvent, self._event_bridge.on_rag_retrieval)
             self.register_handler(RAGStatusEvent, self._event_bridge.on_rag_status)
             self.register_handler(SystemStatusEvent, self._event_bridge.on_system_status)
+
+    def _cleanup_partial_init(self) -> None:
+        """Release resources acquired before a mid-__init__ exception.
+
+        Called from the except clause in __init__ when _init_subsystems raises.
+        Only stops resources that were marked as successfully started; never
+        calls stop() on something that was never started.
+
+        Errors during cleanup are logged and suppressed to avoid masking the
+        original exception.
+        """
+        if self._bridge_started and self._event_bridge is not None:
+            try:
+                self._event_bridge.stop()
+            except Exception:
+                logger.warning("Error stopping EventBridge during init cleanup", exc_info=True)
+
+        if self._speaker_started:
+            try:
+                self._speaker.stop()
+            except Exception:
+                logger.warning("Error stopping SpeakerThread during init cleanup", exc_info=True)
 
     @property
     def state_machine(self) -> StateMachine:
