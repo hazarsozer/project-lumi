@@ -352,6 +352,271 @@ def test_apply_multiselect_invalid_option_returns_error(
 
 
 # ---------------------------------------------------------------------------
+# Stale-read window (CR-13 atomicity)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_no_stale_read_during_concurrent_reload(default_config: LumiConfig) -> None:
+    """A reader must never see the new config while observers have not yet completed.
+
+    This test is DETERMINISTIC by construction using a gating observer:
+
+    1. A ``_GatingObserver`` is the only registered observer.  Its
+       ``reconfigure()`` method sets ``observer_entered`` then blocks on
+       ``observer_gate`` (held by the test).  This keeps the notification
+       round open for an arbitrarily long time.
+
+    2. ``apply()`` is run in a background thread.  The background thread
+       will commit the new config (Phase 2) and then call the observer
+       (Phase 4), blocking inside the observer's ``reconfigure()``.
+
+    3. The main test thread waits until ``observer_entered`` is set,
+       confirming that the notification round is in progress (Phase 4 started
+       but not finished).  It then calls ``manager.current``.
+
+    4. Pre-fix: ``current()`` returns immediately with the new config value
+       (the commit happened before Phase 4); ``saw_new_value`` is True.
+
+    5. Post-fix: ``current()`` blocks until the notification round completes,
+       so it only returns after the gate is released; the main thread releases
+       the gate AFTER sampling, so ``current()`` would have to wait → the main
+       thread would not reach the ``saw_new_value`` assignment until after the
+       notification is done.
+
+    The key invariant asserted: if the reader saw the NEW value AND the
+    observer was still inside ``reconfigure()`` at the time of the read,
+    that's a stale-read violation.
+    """
+    import time
+
+    NEW_SENSITIVITY = 0.777
+
+    manager = ConfigManager(default_config)
+    assert manager.current.audio.sensitivity != pytest.approx(NEW_SENSITIVITY)
+
+    # observer_entered: set as soon as reconfigure() is called.
+    observer_entered = threading.Event()
+    # observer_gate: controls when the observer is allowed to finish.
+    observer_gate = threading.Event()
+    # observer_done: set when reconfigure() returns.
+    observer_done = threading.Event()
+
+    class _GatingObserver:
+        """Observer that signals entry, then blocks until released."""
+
+        def reconfigure(self, new_config: LumiConfig) -> None:
+            observer_entered.set()
+            observer_gate.wait(timeout=10.0)
+            observer_done.set()
+
+    manager.register_observer("gate", _GatingObserver())
+
+    # Run apply() in a background thread.
+    apply_thread = threading.Thread(
+        target=lambda: manager.apply({"audio.sensitivity": NEW_SENSITIVITY}),
+        daemon=True,
+    )
+    apply_thread.start()
+
+    # Wait until the notification round has started (observer entered reconfigure).
+    assert observer_entered.wait(timeout=5.0), (
+        "Observer never entered reconfigure() — apply_thread may have stalled."
+    )
+
+    # At this moment: Phase 4 is in progress (observer is blocked inside
+    # reconfigure()).  The new config was committed in Phase 2 (before Phase 4).
+    #
+    # Pre-fix: current() returns new_config immediately → saw_new_value = True.
+    # Post-fix: current() blocks until notification round completes.
+    #           We have NOT released observer_gate yet, so current() must block
+    #           here waiting.  Release the gate AFTER the sampling to let
+    #           apply_thread finish; then current() will return.
+
+    # Use a reader thread so we can enforce a timeout.
+    reader_result: list[LumiConfig] = []
+
+    def _reader() -> None:
+        reader_result.append(manager.current)
+
+    reader_thread = threading.Thread(target=_reader, daemon=True)
+    reader_thread.start()
+
+    # Give the reader a moment to either return (pre-fix) or block (post-fix).
+    reader_thread.join(timeout=0.2)
+
+    if reader_thread.is_alive():
+        # Post-fix: current() is blocking — the reader hasn't returned yet.
+        # This is the correct behaviour. Release the gate and let everything finish.
+        observer_gate.set()
+        reader_thread.join(timeout=5.0)
+        apply_thread.join(timeout=5.0)
+        observer_done.wait(timeout=5.0)
+        # The reader must have received the new config (it eventually unblocked).
+        assert len(reader_result) == 1
+        assert reader_result[0].audio.sensitivity == pytest.approx(NEW_SENSITIVITY)
+        # Test passes — current() blocked during the notification round.
+        return
+
+    # Pre-fix path: current() returned immediately (reader_thread finished within 0.2s).
+    observer_gate.set()
+    apply_thread.join(timeout=5.0)
+    observer_done.wait(timeout=5.0)
+
+    assert len(reader_result) == 1
+    saw_new_value = reader_result[0].audio.sensitivity == pytest.approx(NEW_SENSITIVITY)
+
+    assert not saw_new_value, (
+        "Stale-read window detected: manager.current returned the NEW config "
+        "value while the observer notification was still in progress. "
+        "(GitHub issue #14: current() must not return until the notify round "
+        "is complete.)"
+    )
+
+
+@pytest.mark.unit
+def test_config_version_increments_on_hot_change(manager: ConfigManager) -> None:
+    """config_version must increment each time a hot-reloadable field actually changes."""
+    v0 = manager.config_version
+    manager.apply({"audio.sensitivity": 0.3})
+    v1 = manager.config_version
+    assert v1 == v0 + 1, "version should increment after a hot change"
+
+
+@pytest.mark.unit
+def test_config_version_does_not_increment_on_no_change(
+    manager: ConfigManager,
+) -> None:
+    """config_version must NOT increment when the applied value is unchanged."""
+    manager.apply({"audio.sensitivity": 0.3})
+    v_after_first = manager.config_version
+    # Apply the same value again.
+    manager.apply({"audio.sensitivity": 0.3})
+    assert manager.config_version == v_after_first
+
+
+@pytest.mark.unit
+def test_config_version_does_not_increment_on_restart_only_change(
+    manager: ConfigManager,
+) -> None:
+    """config_version must NOT increment when only restart-required fields change
+    (those changes don't trigger observers so there's no notify window to guard)."""
+    v0 = manager.config_version
+    manager.apply({"llm.model_path": "models/llm/new.gguf"})
+    assert manager.config_version == v0
+
+
+# ---------------------------------------------------------------------------
+# finally-guard: observer exception must NOT wedge config readers (CR-13 fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_observer_exception_does_not_wedge_readers(
+    default_config: LumiConfig,
+) -> None:
+    """Readers must not be permanently blocked when an observer raises Exception.
+
+    This tests the Phase 4 try/finally guard introduced to fix the HIGH bug in
+    CR-13: if the observer loop exits abnormally (via Exception), the
+    finally-block must still advance _notify_done_epoch to match
+    _notify_epoch and broadcast _notify_cond so that any concurrent
+    manager.current call is released promptly.
+
+    Strategy
+    --------
+    1. Register an observer that always raises ``RuntimeError``.
+    2. Register a gating observer FIRST so we can confirm that Phase 4 has
+       started (and an exception has propagated) before we call current().
+       Actually simpler: call apply() synchronously — the per-observer
+       try/except catches the RuntimeError, so apply() finishes normally.
+       After apply() returns, _notify_epoch and _notify_done_epoch must be
+       equal (round closed) and current() must return promptly (no wedge).
+
+    Additionally verifies: a concurrent reader started WHILE the observer is
+    running (via a gating observer followed by a raising observer) is still
+    released after the raising observer, not permanently stalled.
+
+    What is tested
+    --------------
+    - After apply() with a raising observer, ``_notify_done_epoch == _notify_epoch``.
+    - ``manager.current`` returns (not blocked) and holds the updated value.
+    - A concurrent reader thread spawned while Phase 4 is in progress is
+      also unblocked (the gating observer releases before the raising one
+      is called, but the finally fires unconditionally regardless of which
+      observer raises and from which position in the loop).
+    """
+    import time
+
+    NEW_SENSITIVITY = 0.444
+    manager = ConfigManager(default_config)
+
+    # Observer that raises unconditionally.
+    class _RaisingObserver:
+        def reconfigure(self, new_config: LumiConfig) -> None:
+            raise RuntimeError("Simulated observer failure")
+
+    # Gating observer: blocks until released, THEN the raising observer fires.
+    observer_entered = threading.Event()
+    observer_gate = threading.Event()
+
+    class _GatingObserver:
+        def reconfigure(self, new_config: LumiConfig) -> None:
+            observer_entered.set()
+            observer_gate.wait(timeout=10.0)
+
+    # Register gating first so it runs first; raising runs second.
+    manager.register_observer("gate", _GatingObserver())
+    manager.register_observer("raise", _RaisingObserver())
+
+    apply_done = threading.Event()
+
+    def _apply() -> None:
+        manager.apply({"audio.sensitivity": NEW_SENSITIVITY})
+        apply_done.set()
+
+    apply_thread = threading.Thread(target=_apply, daemon=True)
+    apply_thread.start()
+
+    # Wait until the gating observer has started (Phase 4 is in progress).
+    assert observer_entered.wait(timeout=5.0), "Gating observer never entered"
+
+    # Spawn a concurrent reader while Phase 4 is in progress.
+    reader_result: list[LumiConfig] = []
+
+    def _reader() -> None:
+        reader_result.append(manager.current)
+
+    reader_thread = threading.Thread(target=_reader, daemon=True)
+    reader_thread.start()
+
+    # Give the reader a moment — it should be blocking (notification round open).
+    reader_thread.join(timeout=0.1)
+    assert reader_thread.is_alive(), (
+        "Reader returned before notification round closed — stale-read violation"
+    )
+
+    # Release the gating observer → raising observer fires → finally closes epoch.
+    observer_gate.set()
+
+    # Both threads must complete promptly.
+    apply_thread.join(timeout=5.0)
+    reader_thread.join(timeout=5.0)
+    assert not apply_thread.is_alive(), "apply() thread did not finish"
+    assert not reader_thread.is_alive(), "reader thread is still blocked (wedged)"
+
+    # Epoch must be closed: _notify_done_epoch must equal _notify_epoch.
+    assert manager._notify_done_epoch == manager._notify_epoch, (
+        f"Epoch not closed: _notify_epoch={manager._notify_epoch}, "
+        f"_notify_done_epoch={manager._notify_done_epoch}"
+    )
+
+    # Reader must have received the updated config.
+    assert len(reader_result) == 1
+    assert reader_result[0].audio.sensitivity == pytest.approx(NEW_SENSITIVITY)
+
+
+# ---------------------------------------------------------------------------
 # ConfigUpdateResult dataclass
 # ---------------------------------------------------------------------------
 
