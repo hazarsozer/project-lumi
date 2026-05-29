@@ -294,6 +294,8 @@ class IPCConfig:
     enabled: bool = False
 
     # Host address for the TCP socket — port is appended as ":PORT".
+    # Must be a loopback address (127.0.0.1 / localhost / ::1) unless
+    # allow_non_loopback is explicitly set to True.
     address: str = "127.0.0.1"
 
     # Port number for the TCP socket.
@@ -303,6 +305,13 @@ class IPCConfig:
     # token on each startup and writes it here (chmod 0600).  The Tauri
     # frontend reads this file and presents the token in its hello_ack frame.
     token_path: str = "~/.lumi/ipc_token"
+
+    # Security opt-in: allow binding to non-loopback addresses (e.g. 0.0.0.0).
+    # Default is False — non-loopback binds expose the Brain to the local
+    # network, contradicting Lumi's local-only, privacy-first posture.
+    # Set to True ONLY if you understand and accept the network-exposure risk
+    # (e.g. running Brain and frontend on separate machines in a trusted LAN).
+    allow_non_loopback: bool = False
 
 
 @dataclass(frozen=True)
@@ -502,6 +511,55 @@ def detect_edition() -> str:
 
 
 # ---------------------------------------------------------------------------
+# IPC address validation
+# ---------------------------------------------------------------------------
+
+#: Addresses that are always accepted as loopback binds.
+_LOOPBACK_ADDRESSES: frozenset[str] = frozenset(
+    ["127.0.0.1", "localhost", "::1"]
+)
+
+
+def _validate_ipc_address(address: str, allow_non_loopback: bool) -> None:
+    """Raise ``ValueError`` if *address* is not a loopback address and
+    *allow_non_loopback* is ``False``.
+
+    Loopback addresses are: ``127.0.0.1``, ``localhost``, ``::1``.  Any
+    other value (e.g. ``0.0.0.0``, a public IP, or a hostname) is rejected
+    unless the explicit opt-in flag is set.
+
+    Args:
+        address:            The IPC bind address string.
+        allow_non_loopback: If ``True``, the restriction is lifted.  This
+                            is a deliberate security trade-off: the caller
+                            accepts that the Brain will be reachable from
+                            the local network.
+
+    Raises:
+        ValueError: If the address is non-loopback and opt-in is not set.
+    """
+    if address in _LOOPBACK_ADDRESSES:
+        return
+    if allow_non_loopback:
+        logger.warning(
+            "ipc.address is set to a non-loopback address (%r) and "
+            "ipc.allow_non_loopback is True.  The Brain IPC server will "
+            "be reachable from the local network — ensure this is "
+            "intentional.",
+            address,
+        )
+        return
+    raise ValueError(
+        f"ipc.address {address!r} is not a loopback address "
+        f"(127.0.0.1 / localhost / ::1).  Binding to non-loopback "
+        f"addresses exposes the Brain to the local network, which "
+        f"contradicts Lumi's local-only, privacy-first posture.  "
+        f"Set ipc.allow_non_loopback: true in config.yaml to opt in "
+        f"(security trade-off: accept network exposure)."
+    )
+
+
+# ---------------------------------------------------------------------------
 # YAML loader and config factory
 # ---------------------------------------------------------------------------
 
@@ -598,6 +656,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     llm_cfg = LLMConfig(**llm_raw)
     tts_cfg = TTSConfig(**_merge_section(TTSConfig(), raw.get("tts", {})))
     ipc_cfg = IPCConfig(**_merge_section(IPCConfig(), raw.get("ipc", {})))
+    _validate_ipc_address(ipc_cfg.address, ipc_cfg.allow_non_loopback)
 
     # ToolsConfig: YAML lists parse as Python list; convert allowed_tools to tuple.
     tools_raw = _merge_section(ToolsConfig(), raw.get("tools", {}))

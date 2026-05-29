@@ -43,6 +43,7 @@ from src.core.config import (
     ToolsConfig,
     TTSConfig,
     VisionConfig,
+    _validate_ipc_address,
 )
 from src.core.config_schema import FIELD_META
 from src.core.config_writer import write_config
@@ -366,6 +367,27 @@ class ConfigManager:
             return ConfigUpdateResult(
                 applied_live=[], pending_restart=[], errors=errors
             )
+
+        # ------------------------------------------------------------------
+        # Phase 1b: Cross-field IPC address loopback validation.
+        #
+        # If ipc.address is being changed, enforce that it is loopback (or that
+        # ipc.allow_non_loopback is True — either already in the current config
+        # or in this same batch of changes).
+        # ------------------------------------------------------------------
+        if "ipc.address" in coerced:
+            effective_allow = coerced.get(
+                "ipc.allow_non_loopback",
+                self._config.ipc.allow_non_loopback,
+            )
+            try:
+                _validate_ipc_address(coerced["ipc.address"], effective_allow)
+            except ValueError as exc:
+                return ConfigUpdateResult(
+                    applied_live=[],
+                    pending_restart=[],
+                    errors={"ipc.address": str(exc)},
+                )
 
         # ------------------------------------------------------------------
         # Phase 2: Build the updated config under the lock.

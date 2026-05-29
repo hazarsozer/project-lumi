@@ -238,6 +238,12 @@ ipc:
   # File is created with chmod 0600 (owner read-only).
   token_path: "~/.lumi/ipc_token"
 
+  # Security opt-in: allow binding to non-loopback addresses (e.g. 0.0.0.0).
+  # Default false — keeps the Brain local-only (privacy-first posture).
+  # Set true ONLY if you understand the network-exposure risk
+  # (e.g. Brain and frontend on separate machines in a trusted LAN).
+  allow_non_loopback: false
+
 # ─────────────────────────────────────────────────────────────────────────────
 # tools — OS action tool framework settings
 # ─────────────────────────────────────────────────────────────────────────────
