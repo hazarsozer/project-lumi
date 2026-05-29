@@ -33,7 +33,12 @@ import sounddevice as sd
 from openwakeword.model import Model
 from openwakeword.vad import VAD
 
-from src.core.events import EarsErrorCode, EarsErrorEvent, WakeDetectedEvent
+from src.core.events import (
+    EarsErrorCode,
+    EarsErrorEvent,
+    RecordingCompleteEvent,
+    WakeDetectedEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -142,8 +147,17 @@ class Ears:
         start_time = _time.monotonic()
         last_voice_time = _time.monotonic()
         speech_detected = False
+        # Cooperative cancellation: only interrupt if stop() is called *during*
+        # recording (i.e. self.listening was True when we entered this method).
+        # When called directly with listening=False (unit tests, standalone use),
+        # the flag is ignored so normal VAD/timeout logic governs exit.
+        was_listening = self.listening
 
         while True:
+            # Cooperative cancellation: exit promptly when stop() is called.
+            if was_listening and not self.listening:
+                break
+
             now = _time.monotonic()
             if now - start_time > timeout:
                 break
@@ -184,7 +198,9 @@ class Ears:
     def _consumer_loop(self) -> None:
         """
         This runs in the background thread and processes the audio data.
-        Posts WakeDetectedEvent to the event queue on wake word detection.
+        Posts WakeDetectedEvent to the event queue on wake word detection,
+        then calls record_command_with_vad to capture the voice command and
+        posts RecordingCompleteEvent with the captured audio.
 
         Transient InputStream failures (PortAudioError, USB hiccups) are
         retried up to _MAX_RETRIES times with a short delay between attempts.
@@ -255,6 +271,23 @@ class Ears:
 
                                 self.model.reset()
                                 self._cooldown_until = _time.monotonic() + 2.0
+
+                                # Record the voice command and post the result.
+                                # record_command_with_vad blocks this thread while
+                                # recording — this intentionally prevents wake-word
+                                # re-detection during the command.  The InputStream
+                                # context manager remains active so _mic_callback
+                                # continues filling audio_queue.
+                                logger.info("Ears: recording command after wake…")
+                                audio = self.record_command_with_vad()
+                                logger.info(
+                                    "Ears: recording complete (%d samples)", len(audio)
+                                )
+                                if self._event_queue is not None:
+                                    self._event_queue.put(
+                                        RecordingCompleteEvent(audio=audio)
+                                    )
+
                                 break
 
             except sd.PortAudioError:
@@ -313,5 +346,9 @@ class Ears:
         """
         self.listening = False
         if hasattr(self, "thread"):
-            self.thread.join()
+            self.thread.join(timeout=2.0)
+            if self.thread.is_alive():
+                logger.warning(
+                    "Ears: consumer thread did not exit within 2 s after stop()"
+                )
 
