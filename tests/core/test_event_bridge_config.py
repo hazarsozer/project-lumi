@@ -244,6 +244,170 @@ def test_config_update_persist_not_bool_logs_warning(
 
 
 # ---------------------------------------------------------------------------
+# Inbound: config_update — filesystem-path key blocking (CR-04 / Issue #6)
+# ---------------------------------------------------------------------------
+
+# These tests verify that wire config_update requests containing any
+# filesystem-path config key are rejected before a ConfigUpdateEvent is posted.
+# The primary attack vector is llm.model_path redirection to an
+# attacker-controlled GGUF, but ALL path-type keys must be blocked.
+
+
+@pytest.mark.unit
+def test_config_update_llm_model_path_is_rejected(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """A config_update containing llm.model_path must be DROPPED (no event posted).
+
+    This is the primary CR-04 attack vector: redirecting the LLM to an
+    attacker-controlled GGUF file over the IPC channel.
+    """
+    raw = _make_wire_frame(
+        "config_update",
+        {"changes": {"llm.model_path": "/tmp/evil.gguf"}, "persist": True},
+    )
+    bridge._on_raw_message(raw)
+
+    with pytest.raises(queue.Empty):
+        event_queue.get(timeout=0.2)
+
+
+@pytest.mark.unit
+def test_config_update_llm_model_path_persist_false_is_rejected(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """llm.model_path is blocked even when persist=False (transient override)."""
+    raw = _make_wire_frame(
+        "config_update",
+        {"changes": {"llm.model_path": "/tmp/evil.gguf"}, "persist": False},
+    )
+    bridge._on_raw_message(raw)
+
+    with pytest.raises(queue.Empty):
+        event_queue.get(timeout=0.2)
+
+
+@pytest.mark.unit
+def test_config_update_llm_model_path_rejected_logs_warning(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Rejecting a path-key config_update must emit a WARNING-level log."""
+    import logging
+
+    raw = _make_wire_frame(
+        "config_update",
+        {"changes": {"llm.model_path": "/tmp/evil.gguf"}, "persist": True},
+    )
+
+    with caplog.at_level(logging.WARNING, logger="src.core.event_bridge"):
+        bridge._on_raw_message(raw)
+
+    # The log must mention the blocked key (or "restricted" / "path" indicator)
+    assert any(
+        "llm.model_path" in record.message or "path" in record.message.lower()
+        for record in caplog.records
+    )
+
+
+@pytest.mark.unit
+def test_config_update_tts_model_path_is_rejected(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """tts.model_path (another path key) must also be blocked."""
+    raw = _make_wire_frame(
+        "config_update",
+        {"changes": {"tts.model_path": "/tmp/evil.onnx"}, "persist": False},
+    )
+    bridge._on_raw_message(raw)
+
+    with pytest.raises(queue.Empty):
+        event_queue.get(timeout=0.2)
+
+
+@pytest.mark.unit
+def test_config_update_rag_db_path_is_rejected(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """rag.db_path (filesystem path to a SQLite DB) must be blocked."""
+    raw = _make_wire_frame(
+        "config_update",
+        {"changes": {"rag.db_path": "/tmp/evil.db"}, "persist": False},
+    )
+    bridge._on_raw_message(raw)
+
+    with pytest.raises(queue.Empty):
+        event_queue.get(timeout=0.2)
+
+
+@pytest.mark.unit
+def test_config_update_mixed_path_and_benign_key_rejects_whole_request(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """A request mixing a path key with a benign key must be rejected entirely.
+
+    The existing pattern for ipc.* is to drop the WHOLE request — not just
+    the offending key.  Path-key blocking must follow the same pattern.
+    """
+    raw = _make_wire_frame(
+        "config_update",
+        {
+            "changes": {
+                "audio.sensitivity": 0.5,     # benign slider key
+                "llm.model_path": "/tmp/evil.gguf",  # path key — should trigger rejection
+            },
+            "persist": False,
+        },
+    )
+    bridge._on_raw_message(raw)
+
+    with pytest.raises(queue.Empty):
+        event_queue.get(timeout=0.2)
+
+
+@pytest.mark.unit
+def test_config_update_benign_non_path_key_is_still_accepted(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """A non-path setting (e.g. audio.sensitivity slider) must NOT be blocked.
+
+    This is the anti-over-block regression test: legitimate user settings
+    must remain wire-settable after the path-key fix.
+    """
+    changes = {"audio.sensitivity": 0.65}
+    raw = _make_wire_frame("config_update", {"changes": changes, "persist": False})
+    bridge._on_raw_message(raw)
+
+    event = event_queue.get(timeout=0.5)
+    assert isinstance(event, ConfigUpdateEvent)
+    assert event.changes == {"audio.sensitivity": 0.65}
+    assert event.persist is False
+
+
+@pytest.mark.unit
+def test_config_update_llm_temperature_benign_key_is_accepted(
+    bridge: EventBridge,
+    event_queue: queue.Queue[Any],
+) -> None:
+    """llm.temperature (numeric, non-path) must still be wire-settable."""
+    changes = {"llm.temperature": 0.3}
+    raw = _make_wire_frame("config_update", {"changes": changes, "persist": True})
+    bridge._on_raw_message(raw)
+
+    event = event_queue.get(timeout=0.5)
+    assert isinstance(event, ConfigUpdateEvent)
+    assert event.changes == {"llm.temperature": 0.3}
+    assert event.persist is True
+
+
+# ---------------------------------------------------------------------------
 # Outbound: send_config_schema
 # ---------------------------------------------------------------------------
 
