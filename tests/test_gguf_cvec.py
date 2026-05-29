@@ -59,6 +59,10 @@ def _mock_llama_cpp() -> tuple[ModuleType, MagicMock]:
     mock_cvec_fn = MagicMock(return_value=0)
     mock_mod = MagicMock(spec=ModuleType)
     mock_mod.llama_set_adapter_cvec = mock_cvec_fn
+    # _apply_gguf_cvec now derives n_layers from the live model via
+    # llama_model_n_layer — return the real Phi-3.5-mini value so existing
+    # shape-assertion tests (buf_len == N_LAYERS * N_EMBD) stay correct.
+    mock_mod.llama_model_n_layer = MagicMock(return_value=N_LAYERS)
     return mock_mod, mock_cvec_fn
 
 

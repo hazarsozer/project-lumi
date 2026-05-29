@@ -287,6 +287,9 @@ def mock_llama_cpp() -> Generator[MagicMock, None, None]:
     # picks up the mock without requiring the real package.
     mock_module = types.ModuleType("llama_cpp")
     mock_module.Llama = mock_cls  # type: ignore[attr-defined]
+    # _apply_gguf_cvec derives n_layers via llama_model_n_layer — provide the
+    # Phi-3.5-mini value (32) so buffer-layout assertions in tests are correct.
+    mock_module.llama_model_n_layer = MagicMock(return_value=32)  # type: ignore[attr-defined]
 
     with patch.dict(sys.modules, {"llama_cpp": mock_module}):
         yield mock_cls
