@@ -70,7 +70,13 @@ export class BrainClient implements IBrainClient {
       this._setState("disconnected");
       // Code 1008 = policy violation (auth failure). Do not retry — the token
       // file may be missing or stale; a retry loop would be pointless noise.
-      if (ev.code !== 1008) {
+      // Re-prime the cached token promise so that if the Brain restarts with a
+      // new token, the next manual connect() will send the fresh token.
+      if (ev.code === 1008) {
+        _cachedTokenPromise = Promise.resolve(
+          invoke<string>("read_ipc_token")
+        ).catch(() => null);
+      } else {
         this._scheduleReconnect();
       }
     };
@@ -81,17 +87,36 @@ export class BrainClient implements IBrainClient {
   }
 
   private _dispatch(data: string): void {
-    let raw: Record<string, unknown>;
-    try { raw = JSON.parse(data) as Record<string, unknown>; } catch { return; }
+    let raw: unknown;
+    try { raw = JSON.parse(data); } catch { return; }
+
+    if (typeof raw !== "object" || raw === null) {
+      console.warn("[BrainClient] received non-object frame, discarding");
+      return;
+    }
+
+    const obj = raw as Record<string, unknown>;
 
     // Brain's hello frame uses "type" not "event" — intercept it and respond
     // with hello_ack carrying the IPC bearer token for authentication.
-    if (raw["type"] === "hello") {
+    if (obj["type"] === "hello") {
       void this._sendHelloAck();
       return;
     }
 
-    const wire = raw as unknown as WireMessage;
+    // Runtime validation: require event (string) and payload (object).
+    if (typeof obj["event"] !== "string" || typeof obj["payload"] !== "object" || obj["payload"] === null) {
+      console.warn("[BrainClient] received frame missing required fields, discarding:", obj["event"]);
+      return;
+    }
+
+    const wire: WireMessage = {
+      event: obj["event"],
+      payload: obj["payload"] as Record<string, unknown>,
+      timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0,
+      version: "1.0",
+    };
+
     if (!isLumiBrainEvent(wire)) return;
     const narrowed = wire as unknown as LumiBrainEvent;
     for (const h of this.handlers) h(narrowed);

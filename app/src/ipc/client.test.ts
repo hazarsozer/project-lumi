@@ -31,7 +31,7 @@ class MockWebSocket {
   readyState: number = 0; // CONNECTING
 
   onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((ev: { code: number }) => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
 
@@ -50,9 +50,9 @@ class MockWebSocket {
   }
 
   /** Simulate the server closing / network drop. */
-  simulateClose(): void {
+  simulateClose(code = 1000): void {
     this.readyState = 3; // CLOSED
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 
   /** Push a JSON-encoded brain event to the client. */
@@ -68,10 +68,10 @@ class MockWebSocket {
     this.sentMessages.push(data);
   }
 
-  close(): void {
+  close(code = 1000): void {
     this.closed = true;
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code });
   }
 
   // Satisfy the addEventListener / removeEventListener surface so TypeScript
@@ -464,6 +464,60 @@ describe("BrainClient — error handling", () => {
     ws.simulateError();
 
     expect(client.state).toBe("disconnected");
+    client.disconnect();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("BrainClient — 1008 auth-failure handling", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("does NOT schedule a reconnect when the server closes with code 1008", () => {
+    const client = new BrainClient();
+    client.connect();
+    const ws = latestWs();
+    ws.simulateOpen();
+
+    // Simulate auth failure from the Brain.
+    ws.simulateClose(1008);
+
+    // No reconnect timer should be scheduled — advancing time must NOT spawn a
+    // new WebSocket.
+    vi.advanceTimersByTime(BACKOFF_STEPS_MS[0] * 2);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(client.state).toBe("disconnected");
+  });
+
+  it("re-primes the token cache on 1008 so the next connect uses a fresh token", async () => {
+    // First token resolved at module load (or mockReset); set up a fresh token
+    // value that will be fetched on the 1008 re-prime.
+    mockInvoke.mockResolvedValue("fresh-token-after-1008");
+
+    vi.resetModules();
+    const { BrainClient: FreshClient } = await import("./client");
+
+    const client = new FreshClient();
+    client.connect();
+    const ws = latestWs();
+    ws.simulateOpen();
+
+    // Drain the module-level pre-cache call.
+    await Promise.resolve();
+
+    const callsAfterImport = mockInvoke.mock.calls.length;
+
+    // Simulate 1008 auth failure — should re-prime the token cache (one more invoke).
+    ws.simulateClose(1008);
+    expect(client.state).toBe("disconnected");
+
+    // The re-prime triggers another invoke call.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockInvoke.mock.calls.length).toBeGreaterThan(callsAfterImport);
+
     client.disconnect();
   });
 });

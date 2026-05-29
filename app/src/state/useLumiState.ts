@@ -7,6 +7,7 @@ export interface SystemStatus {
   rag_available: boolean;
   mic_available: boolean;
   llm_available: boolean;
+  source: "startup" | "degradation";
   setup_required: boolean;
   missing_items: string[];
 }
@@ -68,6 +69,7 @@ export function useLumiState(client: IBrainClient): LumiState {
               rag_available: e.payload.rag_available,
               mic_available: e.payload.mic_available,
               llm_available: e.payload.llm_available,
+              source: e.payload.source,
               setup_required: e.payload.setup_required,
               missing_items: e.payload.missing_items,
             },
