@@ -253,24 +253,38 @@ class DocumentStore:
     def delete_document_chunks(self, document_id: int) -> int:
         """Delete all chunks (and their vectors) for a document.
 
+        Deletion is performed in a single transaction with no Python-side
+        round trip:
+          1. vec0 vectors are removed via a subquery (the virtual table does
+             not participate in SQLite FK cascades, so they must be deleted
+             explicitly).
+          2. chunk rows are deleted via a direct WHERE clause; the
+             ``chunks_ad`` AFTER-DELETE trigger fires for every row, keeping
+             the FTS index consistent.
+
         Returns the number of chunks deleted.
         """
         conn = self._conn()
-        chunk_ids = [
-            row[0]
-            for row in conn.execute(
-                "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-            ).fetchall()
-        ]
-        if chunk_ids:
-            placeholders = ",".join("?" * len(chunk_ids))
+        # Count first so we can return the deleted chunk count without a
+        # second round trip after the delete.
+        count: int = conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (document_id,)
+        ).fetchone()[0]
+
+        if count:
+            # Delete vec0 vector rows via subquery — no Python list needed.
             conn.execute(
-                f"DELETE FROM vectors WHERE chunk_id IN ({placeholders})",
-                chunk_ids,
+                "DELETE FROM vectors WHERE chunk_id IN "
+                "(SELECT id FROM chunks WHERE document_id = ?)",
+                (document_id,),
             )
-        conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+            # Delete chunk rows — chunks_ad trigger fires per row → FTS stays in sync.
+            conn.execute(
+                "DELETE FROM chunks WHERE document_id = ?", (document_id,)
+            )
+
         conn.commit()
-        return len(chunk_ids)
+        return count
 
     # ------------------------------------------------------------------
     # Vectors

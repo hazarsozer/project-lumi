@@ -315,6 +315,90 @@ class TestSearchVectors:
 
 
 # ---------------------------------------------------------------------------
+# CR-32 — delete_document_chunks SQL-only, no Python round trip
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteDocumentChunksCR32:
+    """CR-32 (Issue #33): verify that delete_document_chunks removes vec0 vectors,
+    chunk rows (firing FTS trigger), and leaves unrelated documents untouched,
+    all in a single transaction with no SELECT-ids->Python->IN-clause round trip.
+    """
+
+    def test_full_deletion_vectors_chunks_fts(self, store: DocumentStore) -> None:
+        """vec0 vectors, chunk rows, and FTS entries are all removed for the target doc."""
+        doc = store.upsert_document("/target.md", "sha_t")
+        c0 = store.insert_chunk(doc.id, 0, "alpha beta", 0, 10)
+        c1 = store.insert_chunk(doc.id, 1, "gamma delta", 10, 21)
+        store.insert_vector(c0.id, [1.0, 0.0, 0.0, 0.0])
+        store.insert_vector(c1.id, [0.0, 1.0, 0.0, 0.0])
+
+        deleted = store.delete_document_chunks(doc.id)
+
+        conn = store._conn()
+        assert deleted == 2
+        # Chunk rows gone
+        assert conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (doc.id,)
+        ).fetchone()[0] == 0
+        # vec0 vectors gone
+        assert conn.execute(
+            "SELECT COUNT(*) FROM vectors WHERE chunk_id IN (?, ?)", (c0.id, c1.id)
+        ).fetchone()[0] == 0
+        # FTS entries gone — FTS search must return nothing for these terms
+        fts_hits = store.search_fts("alpha", top_k=10)
+        assert all(h.chunk_id not in (c0.id, c1.id) for h in fts_hits)
+
+    def test_unrelated_document_untouched(self, store: DocumentStore) -> None:
+        """Deleting one document's chunks must not affect other documents."""
+        target = store.upsert_document("/target.md", "sha_t")
+        other = store.upsert_document("/other.md", "sha_o")
+
+        tc = store.insert_chunk(target.id, 0, "to be deleted", 0, 13)
+        oc = store.insert_chunk(other.id, 0, "must survive", 0, 12)
+        store.insert_vector(tc.id, [1.0, 0.0, 0.0, 0.0])
+        store.insert_vector(oc.id, [0.0, 1.0, 0.0, 0.0])
+
+        store.delete_document_chunks(target.id)
+
+        conn = store._conn()
+        # Target chunks + vectors gone
+        assert conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (target.id,)
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM vectors WHERE chunk_id = ?", (tc.id,)
+        ).fetchone()[0] == 0
+        # Other doc chunks + vectors intact
+        assert conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (other.id,)
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM vectors WHERE chunk_id = ?", (oc.id,)
+        ).fetchone()[0] == 1
+        # Other doc still searchable via FTS
+        hits = store.search_fts("survive", top_k=5)
+        assert any(h.chunk_id == oc.id for h in hits)
+
+    def test_delete_no_chunks_returns_zero(self, store: DocumentStore) -> None:
+        """delete_document_chunks on a document with no chunks returns 0 without error."""
+        doc = store.upsert_document("/empty.md", "sha_e")
+        result = store.delete_document_chunks(doc.id)
+        assert result == 0
+
+    def test_delete_returns_correct_count_many_chunks(
+        self, store: DocumentStore
+    ) -> None:
+        """Return value equals the number of chunk rows removed."""
+        doc = store.upsert_document("/multi.md", "sha_m")
+        for i in range(5):
+            store.insert_chunk(doc.id, i, f"chunk {i}", i * 10, i * 10 + 10)
+
+        deleted = store.delete_document_chunks(doc.id)
+        assert deleted == 5
+
+
+# ---------------------------------------------------------------------------
 # Stats + metadata
 # ---------------------------------------------------------------------------
 
