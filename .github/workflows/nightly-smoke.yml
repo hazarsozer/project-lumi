@@ -5,9 +5,9 @@
 #   Value: a direct HTTPS download URL for the quantised model file
 #          `phi-3.5-mini.gguf` (e.g. a pre-signed S3/GCS URL, or a
 #          Hugging Face blob URL).
-#   If the secret is absent (e.g. in forks or when the model is not yet
-#   hosted), the workflow falls back to offline/stub mode automatically —
-#   no step will fail because of a missing secret.
+#   REQUIRED: if the secret is absent the job will FAIL with a clear error.
+#   Silent stubbing was removed (CR-27) — a missing model is a signal problem,
+#   not a safe no-op.  Set the secret or the nightly will stay red.
 #   To set it:
 #     gh secret set MODEL_DOWNLOAD_URL --body "https://…/phi-3.5-mini.gguf"
 #
@@ -40,29 +40,28 @@ jobs:
         run: uv sync --extra dev
 
       - name: Download model
-        # If MODEL_DOWNLOAD_URL is not configured the workflow runs in offline
-        # mode (stub responses).  This allows the job to function safely in
-        # forks and before the model is hosted anywhere.
+        # MODEL_DOWNLOAD_URL is REQUIRED.  Silent stub fallback was removed in
+        # CR-27: a missing model means a real LLM regression could go undetected,
+        # which defeats the purpose of a nightly smoke.  If the secret is absent
+        # the job fails here with a clear, actionable message.
+        env:
+          MODEL_DOWNLOAD_URL: ${{ secrets.MODEL_DOWNLOAD_URL }}
         run: |
-          if [ -n "${{ secrets.MODEL_DOWNLOAD_URL }}" ]; then
-            mkdir -p models/llm
-            curl -fsSL "${{ secrets.MODEL_DOWNLOAD_URL }}" -o models/llm/phi-3.5-mini.gguf
-            echo "Model downloaded successfully."
-          else
-            echo "MODEL_DOWNLOAD_URL not set — running in offline/stub mode."
-            echo "SMOKE_OFFLINE=1" >> $GITHUB_ENV
+          if [ -z "${MODEL_DOWNLOAD_URL}" ]; then
+            echo "::error::MODEL_DOWNLOAD_URL secret is not set."
+            echo "::error::This nightly job requires the real model to detect LLM regressions."
+            echo "::error::Set the secret: gh secret set MODEL_DOWNLOAD_URL --body 'https://…/phi-3.5-mini.gguf'"
+            exit 1
           fi
+          mkdir -p models/llm
+          curl -fsSL "${MODEL_DOWNLOAD_URL}" -o models/llm/phi-3.5-mini.gguf
+          echo "Model downloaded successfully."
 
       - name: Run persona eval
         id: eval
         run: |
-          if [ "${SMOKE_OFFLINE}" = "1" ]; then
-            echo "Mode: offline (stub responses)"
-            uv run python scripts/eval_persona.py --output eval_results/nightly.json
-          else
-            echo "Mode: live (real LLM inference)"
-            uv run python scripts/eval_persona.py --live --output eval_results/nightly.json
-          fi
+          echo "Mode: live (real LLM inference)"
+          uv run python scripts/eval_persona.py --live --output eval_results/nightly.json
 
       - name: Parse and post summary
         # Runs even when the eval step fails so we always get a summary entry.
