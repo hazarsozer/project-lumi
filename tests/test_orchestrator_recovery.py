@@ -1,19 +1,22 @@
 """
-RED-phase tests for graceful runtime error recovery in the Orchestrator.
+Graceful runtime error recovery tests for the Orchestrator.
 
 These tests verify that the state machine always returns to IDLE when
 unexpected exceptions occur during inference — regardless of which call
-inside _run_inference raises.
+inside the inference path raises.
 
 Failure modes covered:
 1. ReasoningRouter.generate() raises RuntimeError       → must reach IDLE
-2. memory.save() raises OSError (inside _llm_state_lock) → must reach IDLE
+2. memory.save() raises OSError in the success path     → must reach IDLE
 3. Same as #1 but via _handle_user_text                  → must reach IDLE
 4. Post-crash IDLE state still accepts a new interrupt correctly (no-op)
 5. A bad handler that raises must not crash the event loop
 
-Tests 1–3 are expected RED (failing) until the implementation guard is added
-around self._memory.save() in the success path of _run_inference.
+All five tests PASS: the Orchestrator's except-Exception guard in the
+inference dispatcher covers generate() errors (tests 1, 3), and
+LLMInferenceDispatcher wraps memory.save() in a try/except so a disk-full
+OSError returns the state machine to IDLE instead of leaving it in PROCESSING
+(test 2).  Tests 4 and 5 verify secondary invariants that were always passing.
 """
 
 from __future__ import annotations
@@ -78,12 +81,9 @@ def _wait_for_idle(orch: Orchestrator, timeout: float = 5.0) -> bool:
 def test_transcript_llm_crash_returns_to_idle() -> None:
     """RuntimeError from ReasoningRouter.generate() must transition state to IDLE.
 
-    The existing except-Exception block in _run_inference (transcript path)
-    already handles this case — the test documents and locks the behaviour so
-    any future refactor cannot silently break it.
-
-    RED trigger: if the except-Exception block is ever removed or narrowed,
-    this test will fail.
+    The except-Exception block in the inference dispatcher handles this case.
+    The test locks the behaviour so any future refactor that removes or narrows
+    that guard will fail loudly.
     """
     orch = _make_orchestrator()
 
@@ -125,16 +125,13 @@ def test_transcript_llm_crash_returns_to_idle() -> None:
 @pytest.mark.unit
 @pytest.mark.timeout(8)
 def test_transcript_memory_save_crash_returns_to_idle() -> None:
-    """OSError from memory.save() inside the _llm_state_lock success block must
-    still transition the state machine to IDLE instead of leaving it stuck in
-    PROCESSING.
+    """OSError from memory.save() in the success path must still reach IDLE.
 
-    This is the primary unhandled failure mode: the save() call at line ~361 in
-    orchestrator.py is NOT inside any try/except.  An exception there causes
-    the daemon thread to exit silently, leaving state == PROCESSING forever.
+    LLMInferenceDispatcher wraps memory.save() in a try/except so that a
+    disk-full or other storage error does not leave the state machine stuck
+    in PROCESSING — the except block ensures IDLE is always reached.
 
-    RED: this test will FAIL with the current implementation because the
-    recovery guard is missing around self._memory.save() in the success path.
+    Regression guard: if that try/except is ever removed, this test fails.
     """
     orch = _make_orchestrator()
 
@@ -178,12 +175,11 @@ def test_transcript_memory_save_crash_returns_to_idle() -> None:
 @pytest.mark.unit
 @pytest.mark.timeout(8)
 def test_user_text_llm_crash_returns_to_idle() -> None:
-    """RuntimeError from generate() in the _handle_user_text path must return
-    to IDLE, mirroring the behaviour required for _handle_transcript.
+    """RuntimeError from generate() in the _handle_user_text path must return to IDLE.
 
-    The existing except-Exception block in _handle_user_text._run_inference
-    already handles this — the test locks the behaviour symmetrically with
-    test_transcript_llm_crash_returns_to_idle.
+    Symmetric regression guard to test_transcript_llm_crash_returns_to_idle:
+    the same except-Exception block in the inference dispatcher covers both
+    the transcript path and the user-text path.
     """
     orch = _make_orchestrator()
 
