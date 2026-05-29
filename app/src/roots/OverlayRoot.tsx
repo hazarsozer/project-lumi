@@ -32,40 +32,52 @@ export function OverlayRoot() {
 
   // Forward send-text requests from Chat window to Brain
   useEffect(() => {
-    let cancelled = false;
-    const p = tauriListen<{ text: string }>(EV_SEND, (payload) => {
+    let unlistenFn: (() => void) | null = null;
+    let unmounted = false;
+    void tauriListen<{ text: string }>(EV_SEND, (payload) => {
       client.send({ event: "user_text", payload: { text: payload.text } });
+    }).then((fn) => {
+      if (unmounted) fn();
+      else unlistenFn = fn;
     });
     return () => {
-      cancelled = true;
-      void p.then((fn) => { if (cancelled) return; fn(); });
+      unmounted = true;
+      unlistenFn?.();
     };
   }, [client]);
 
   // Forward config-schema-request from Settings window to Brain
   useEffect(() => {
-    let cancelled = false;
-    const p = tauriListen<Record<string, never>>(EV_CONFIG_SCHEMA_REQUEST, () => {
+    let unlistenFn: (() => void) | null = null;
+    let unmounted = false;
+    void tauriListen<Record<string, never>>(EV_CONFIG_SCHEMA_REQUEST, () => {
       client.send({ event: "config_schema_request", payload: {} });
+    }).then((fn) => {
+      if (unmounted) fn();
+      else unlistenFn = fn;
     });
     return () => {
-      cancelled = true;
-      void p.then((fn) => { if (cancelled) return; fn(); });
+      unmounted = true;
+      unlistenFn?.();
     };
   }, [client]);
 
   // Forward config-update requests from Settings window to Brain
   useEffect(() => {
-    let cancelled = false;
-    const p = tauriListen<{ changes: Record<string, unknown>; persist: boolean }>(
+    let unlistenFn: (() => void) | null = null;
+    let unmounted = false;
+    void tauriListen<{ changes: Record<string, unknown>; persist: boolean }>(
       EV_CONFIG_UPDATE,
       (payload) => {
         client.send({ event: "config_update", payload });
       },
-    );
+    ).then((fn) => {
+      if (unmounted) fn();
+      else unlistenFn = fn;
+    });
     return () => {
-      cancelled = true;
-      void p.then((fn) => { if (cancelled) return; fn(); });
+      unmounted = true;
+      unlistenFn?.();
     };
   }, [client]);
 
