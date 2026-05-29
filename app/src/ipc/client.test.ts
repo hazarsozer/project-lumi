@@ -3,6 +3,22 @@ import { BrainClient } from "./client";
 import type { LumiBrainEvent, OutboundEvent } from "./events";
 
 // ---------------------------------------------------------------------------
+// @tauri-apps/api/core mock — used by the pre-cached token test suite.
+// vi.mock is hoisted by vitest so this runs before the module is imported.
+// ---------------------------------------------------------------------------
+
+// Default implementation resolves with null so the module-level pre-cache
+// (which runs at static import time) doesn't throw. Individual test suites
+// override this with mockResolvedValue / mockReturnValue as needed.
+const mockInvoke = vi.hoisted(() =>
+  vi.fn<(cmd: string) => Promise<string | null>>().mockResolvedValue(null)
+);
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mockInvoke,
+}));
+
+// ---------------------------------------------------------------------------
 // Minimal WebSocket mock
 // ---------------------------------------------------------------------------
 
@@ -448,6 +464,161 @@ describe("BrainClient — error handling", () => {
     ws.simulateError();
 
     expect(client.state).toBe("disconnected");
+    client.disconnect();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BrainClient — hello / hello_ack handshake + pre-cached token
+//
+// RED→GREEN proof:
+//   RED  (pre-fix): _sendHelloAck called invoke("read_ipc_token") inline on the
+//         critical path.  The test below verifies the ack is sent; on the pre-fix
+//         code the invoke call count would be ≥1 per connect (cold path each time).
+//   GREEN (post-fix): invoke is called ONCE at module load (pre-cache), NEVER
+//         again inside _sendHelloAck.  The ack is sent with the cached token even
+//         when the original invoke was slow — the promise is already resolved by
+//         the time hello arrives.
+// ---------------------------------------------------------------------------
+
+describe("BrainClient — hello/hello_ack handshake", () => {
+  beforeEach(() => {
+    // Reset the mock so each test starts clean.
+    mockInvoke.mockReset();
+  });
+
+  it("sends hello_ack with the cached token when Brain sends hello", async () => {
+    // Arrange: invoke resolves immediately with a known token.
+    mockInvoke.mockResolvedValue("test-token-abc");
+
+    // Re-import the module so the module-level cache is initialised with our mock.
+    vi.resetModules();
+    const { BrainClient: FreshClient } = await import("./client");
+
+    const client = new FreshClient();
+    client.connect();
+    const ws = latestWs();
+    ws.simulateOpen();
+
+    // Act: Brain sends hello frame.
+    ws.simulateMessage(JSON.stringify({ type: "hello", version: "1.0" }));
+
+    // Yield to the microtask queue so _sendHelloAck's await resolves.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Assert: hello_ack was sent with the token.
+    const ackMessages = ws.sentMessages.map((m) => JSON.parse(m) as Record<string, unknown>);
+    const ack = ackMessages.find((m) => m["type"] === "hello_ack");
+    expect(ack).toBeDefined();
+    expect(ack?.["status"]).toBe("ok");
+    expect(ack?.["token"]).toBe("test-token-abc");
+
+    client.disconnect();
+  });
+
+  it("invoke is called ONCE (at module load) not on the connect critical path", async () => {
+    // Arrange: invoke resolves with a token.
+    mockInvoke.mockResolvedValue("cached-token-xyz");
+
+    // Re-import to get a fresh module scope with the mock.
+    vi.resetModules();
+    const { BrainClient: FreshClient } = await import("./client");
+
+    // invoke was called once at module load (the pre-cache kick-off).
+    const callsAfterImport = mockInvoke.mock.calls.length;
+    expect(callsAfterImport).toBe(1);
+
+    const client = new FreshClient();
+    client.connect();
+    const ws = latestWs();
+    ws.simulateOpen();
+
+    // Trigger hello → _sendHelloAck three times to simulate reconnects.
+    for (let i = 0; i < 3; i++) {
+      ws.simulateMessage(JSON.stringify({ type: "hello", version: "1.0" }));
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
+    // invoke must NOT have been called again after the initial module-load call.
+    expect(mockInvoke.mock.calls.length).toBe(callsAfterImport);
+
+    client.disconnect();
+  });
+
+  it("sends hello_ack without token when invoke rejects (dev/missing file)", async () => {
+    // Arrange: invoke rejects — token file absent (dev mode).
+    mockInvoke.mockRejectedValue(new Error("token file not found"));
+
+    vi.resetModules();
+    const { BrainClient: FreshClient } = await import("./client");
+
+    const client = new FreshClient();
+    client.connect();
+    const ws = latestWs();
+    ws.simulateOpen();
+
+    ws.simulateMessage(JSON.stringify({ type: "hello", version: "1.0" }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const ackMessages = ws.sentMessages.map((m) => JSON.parse(m) as Record<string, unknown>);
+    const ack = ackMessages.find((m) => m["type"] === "hello_ack");
+    expect(ack).toBeDefined();
+    expect(ack?.["status"]).toBe("ok");
+    // No token field when invoke rejected.
+    expect(ack?.["token"]).toBeUndefined();
+
+    client.disconnect();
+  });
+
+  it("hello_ack succeeds even when token promise is slow (pre-fetch off critical path)", async () => {
+    // Arrange: invoke resolves only after a deliberate delay — simulating the
+    // Tauri cold-path that caused the original 1008 race.
+    // The module-level pre-cache was started at import time, so by the time
+    // the first connect/hello arrives the promise is already in-flight or resolved.
+    let resolveToken!: (v: string) => void;
+    const slowTokenPromise = new Promise<string>((res) => { resolveToken = res; });
+    mockInvoke.mockReturnValue(slowTokenPromise);
+
+    vi.resetModules();
+    const { BrainClient: FreshClient } = await import("./client");
+
+    // At this point invoke was called once (pre-cache). The promise is pending.
+    expect(mockInvoke.mock.calls.length).toBe(1);
+
+    const client = new FreshClient();
+    client.connect();
+    const ws = latestWs();
+    ws.simulateOpen();
+
+    // Brain sends hello before the token resolves.
+    ws.simulateMessage(JSON.stringify({ type: "hello", version: "1.0" }));
+
+    // Let microtasks run — ack should NOT be sent yet (token still pending).
+    await Promise.resolve();
+    // Pre-fix code would have issued a fresh invoke here (another pending promise);
+    // in both cases no ack yet — but crucially no extra invoke was issued.
+    expect(mockInvoke.mock.calls.length).toBe(1); // still only the pre-cache call
+    expect(ws.sentMessages.filter(
+      (m) => (JSON.parse(m) as Record<string, unknown>)["type"] === "hello_ack"
+    )).toHaveLength(0); // ack not yet sent — token promise still pending
+
+    // Now the slow token resolves — simulates Tauri cold-path completing.
+    resolveToken("slow-token-resolved");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Ack must now be sent with the resolved token.
+    const ackMessages = ws.sentMessages.map((m) => JSON.parse(m) as Record<string, unknown>);
+    const ack = ackMessages.find((m) => m["type"] === "hello_ack");
+    expect(ack).toBeDefined();
+    expect(ack?.["token"]).toBe("slow-token-resolved");
+
+    // invoke was called ONLY once (the pre-cache), never again on the critical path.
+    expect(mockInvoke.mock.calls.length).toBe(1);
+
     client.disconnect();
   });
 });
