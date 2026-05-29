@@ -171,12 +171,12 @@ def test_recording_complete_dispatches_scribe():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
-    # Give the daemon thread time to complete
+    # Poll until TranscriptReadyEvent appears in the queue.
     deadline = time.monotonic() + 4.0
     while time.monotonic() < deadline:
         if not orch._event_queue.empty():
             break
-        time.sleep(0.02)
+        time.sleep(0.005)
 
     assert not orch._event_queue.empty(), "TranscriptReadyEvent was never posted"
     event = orch._event_queue.get_nowait()
@@ -204,6 +204,9 @@ def test_recording_complete_ignored_when_idle():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
+    # Legitimate negative-test window: wait briefly to confirm no event is posted.
+    # The _handle_recording_complete in IDLE is synchronous (no thread dispatched),
+    # so any erroneous async action would appear within this window.
     time.sleep(0.15)
 
     assert orch._event_queue.empty(), "No event should have been posted"
@@ -223,6 +226,8 @@ def test_recording_complete_ignored_when_processing():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
+    # Legitimate negative-test window: no thread is dispatched in PROCESSING
+    # state, but we wait briefly to confirm nothing posts unexpectedly.
     time.sleep(0.15)
 
     assert orch._event_queue.empty(), "No event should have been posted"
@@ -426,12 +431,12 @@ def test_scribe_failure_returns_to_idle():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
-    # Give daemon thread time to finish
+    # Poll until state recovers to IDLE after the STT error.
     deadline = time.monotonic() + 4.0
     while time.monotonic() < deadline:
         if orch._state_machine.current_state == LumiState.IDLE:
             break
-        time.sleep(0.02)
+        time.sleep(0.005)
 
     assert orch._state_machine.current_state == LumiState.IDLE
     assert orch._event_queue.empty(), "No TranscriptReadyEvent should be posted on error"

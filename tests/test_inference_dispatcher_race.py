@@ -271,8 +271,12 @@ def test_watchdog_clears_cancel_flag_when_firing_during_speaking() -> None:
         # Wait until generate() has been called (inference thread started).
         assert generation_advanced.wait(timeout=3.0), "generate never called"
 
+        # Wait for inference thread to finish (generation_advanced was already set,
+        # but we need the thread to complete and transition to SPEAKING).
         import time
-        time.sleep(0.1)  # let inference thread complete and transition to SPEAKING
+        deadline = time.monotonic() + 2.0
+        while sm.current_state != LumiState.SPEAKING and time.monotonic() < deadline:
+            time.sleep(0.005)
 
     # At this point the inference thread has finished and Timer was captured but
     # never started (it's a MagicMock).  The watchdog_fn is in watchdog_fn_holder.
@@ -341,8 +345,16 @@ def test_watchdog_still_transitions_idle_from_processing() -> None:
             post_event=posted_events.append,
         )
 
+        # Wait until the inference thread is inside generate() (blocked on blocked.wait).
+        # We can observe this indirectly: the dispatcher is in PROCESSING state and
+        # the mock generate has been called.
         import time
-        time.sleep(0.05)  # let inference thread park inside generate()
+        deadline = time.monotonic() + 2.0
+        while (
+            reasoning_router.generate.call_count == 0
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.005)
 
     assert watchdog_fn_holder, "Watchdog function was never captured"
     watchdog_fn = watchdog_fn_holder[0]

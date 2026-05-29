@@ -258,16 +258,13 @@ def test_interrupt_during_idle_is_noop_after_crash_recovery() -> None:
         )
 
     # --- Phase 2: post an InterruptEvent in IDLE, verify it is a no-op ---
+    # Post InterruptEvent followed immediately by ShutdownEvent.  After joining
+    # the loop_thread we know both events were processed in order.
     orch.post_event(InterruptEvent(source="test"))
-    # Give the event loop time to process it.
-    time.sleep(0.05)
-
-    # State must still be IDLE (interrupt in IDLE is ignored, not an error).
-    assert orch.state_machine.current_state == LumiState.IDLE
-
     orch.post_event(ShutdownEvent())
     loop_thread.join(timeout=3.0)
 
+    # State must still be IDLE (interrupt in IDLE is ignored, not an error).
     assert orch.state_machine.current_state == LumiState.IDLE
 
 

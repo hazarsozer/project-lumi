@@ -95,7 +95,7 @@ def ipc_stack(
     )
     try:
         server.start()
-        time.sleep(0.05)
+        # start() blocks until bound (_ready event); no settle sleep needed.
         port = server.bound_port
         assert port is not None
         yield server, port
@@ -174,16 +174,14 @@ def test_malformed_frame_does_not_crash_server(
     _, port = ipc_stack
 
     with FakeWSClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame sent by the server on connect.
         client.do_handshake()
 
         # Send a frame whose body is not valid JSON.
         client.send_raw_frame(b"INVALID_JSON_NOT_A_DICT}{")
 
-        # Give the recv callback time to process the bad frame.
-        time.sleep(_RECV_SETTLE_S)
-
-        # Server must still be alive — trigger a state change.
+        # Server must still be alive — trigger a state change immediately.
+        # If the server crashed, recv_frame() would timeout — that IS the check.
         _state_machine.transition_to(LumiState.LISTENING)
         frame = client.recv_frame(timeout=_RECV_TIMEOUT_S)
 
@@ -213,7 +211,7 @@ def test_tts_start_round_trip(
     server, port = ipc_stack
 
     with FakeWSClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame sent by the server on connect.
         client.do_handshake()
 
         server.on_tts_start(LLMResponseReadyEvent(text="Hello from Lumi."))
@@ -302,22 +300,16 @@ def test_authenticated_handshake_and_round_trip() -> None:
 
         try:
             server.start()
-            time.sleep(0.05)
+            # start() blocks until bound; no sleep needed.
             port = server.bound_port
             assert port is not None, "EventBridge did not bind"
 
             with FakeWSClient(port) as client:
-                time.sleep(_CONNECT_SETTLE_S)
-
-                # Perform hello/hello_ack with the correct token.
+                # _do_handshake_with_token reads the hello frame (server sends on
+                # connect) and replies with the bearer token — already synchronised.
                 _do_handshake_with_token(client, _TEST_TOKEN)
 
-                # Allow the handshake handler time to process the ack and
-                # unblock the downstream message path.
-                time.sleep(_RECV_SETTLE_S)
-
-                # Send user_text — must reach the event queue because the
-                # authenticated handshake completed and downstream is unblocked.
+                # Send user_text — the handshake completed so downstream is unblocked.
                 client.send_frame("user_text", {"text": "auth test message"})
 
                 try:

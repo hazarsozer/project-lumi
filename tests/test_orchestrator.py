@@ -114,8 +114,17 @@ def test_shutdown_event_exits_run() -> None:
 def test_shutdown_from_background_thread() -> None:
     orch = _make_orchestrator()
 
+    run_entered = threading.Event()
+    original_run = orch.run
+
+    def _patched_run():
+        run_entered.set()
+        original_run()
+
+    orch.run = _patched_run  # type: ignore[method-assign]
+
     def _shutdown_after_delay() -> None:
-        time.sleep(0.05)
+        run_entered.wait(timeout=2.0)  # wait until run() is executing
         orch.post_event(ShutdownEvent())
 
     t = threading.Thread(target=_shutdown_after_delay, daemon=True)
@@ -458,11 +467,11 @@ def test_handle_transcript_stale_state_response_discarded(
         # discard the response.
         hold_thread.set()
 
-        # Wait until _wrapped_generate has returned (guard has been evaluated).
+        # Wait until _wrapped_generate has returned; the stale-state guard in
+        # _run_inference executes shortly after.  We wait for the inference
+        # thread to park (LLM cancel flag cleared or state stabilised) rather
+        # than sleeping: send ShutdownEvent and let the event loop drain.
         assert inference_guard_checked.wait(timeout=3.0), "Inference never completed"
-
-        # Small buffer to let the daemon thread finish the _run_inference body.
-        time.sleep(0.05)
 
         orch.post_event(ShutdownEvent())
         loop_thread.join(timeout=3.0)
@@ -687,7 +696,13 @@ def test_drain_event_types_retained_events_stay_at_front_no_interleave() -> None
     with q.mutex:
         producer_thread = threading.Thread(target=_run_producers, daemon=True)
         producer_thread.start()
-        time.sleep(0.05)  # ensure all producer threads are blocked on q.put
+        # Legitimate timing sleep: we hold q.mutex so producer threads start and
+        # immediately block on q.put() waiting for the mutex.  The sleep gives
+        # all 4 producer threads time to reach q.put() and contend on the mutex.
+        # This cannot be replaced with a deterministic primitive without either
+        # (a) modifying the production queue or (b) intercepting q.put in a way
+        # that defeats the race-detection purpose of this test.
+        time.sleep(0.05)
 
     # Fixed: _drain_event_types acquires mutex → holds for full operation →
     #   producers stay blocked → producer events land at the back.

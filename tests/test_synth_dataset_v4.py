@@ -2093,6 +2093,7 @@ class TestRunGenerationWithGeminiMock:
         )
 
     @pytest.mark.unit
+    @pytest.mark.timeout(90)  # retry backoff can reach 1+2+4+8+16+32=63 s max
     def test_paraphrase_subprocess_failure_increments_reject_counter(
         self, tmp_path: Path, mocker: Any
     ) -> None:
@@ -2104,6 +2105,8 @@ class TestRunGenerationWithGeminiMock:
             "scripts.synth_dataset_v4.subprocess.run",
             side_effect=RuntimeError("gemini CLI not found"),
         )
+        # Also mock the backoff sleep so the test finishes quickly.
+        mocker.patch("scripts.synth_dataset_v4.time.sleep")
 
         partial_file = tmp_path / "out.jsonl.partial"
         keys_file = tmp_path / "out.accepted_keys.json"

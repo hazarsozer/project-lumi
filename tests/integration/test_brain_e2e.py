@@ -163,8 +163,7 @@ def test_user_text_e2e_produces_llm_token_tts_start_tts_stop() -> None:
     ):
         orch = Orchestrator(config, speaker=speaker, tts=None)
 
-        # Wait for WSTransport to bind so bound_port is available.
-        time.sleep(_BIND_SETTLE_S)
+        # WSTransport.start() blocks until bound (_ready event); bound_port is valid.
         port = orch._event_bridge.bound_port  # type: ignore[union-attr]
         assert port is not None, "EventBridge did not bind to a port"
 
@@ -179,7 +178,7 @@ def test_user_text_e2e_produces_llm_token_tts_start_tts_stop() -> None:
 
         try:
             with FakeWSClient(port) as client:
-                time.sleep(_CONNECT_SETTLE_S)
+                # do_handshake() reads the hello frame — synchronises on accept.
                 client.do_handshake()
 
                 client.send_frame("user_text", {"text": _USER_QUERY})

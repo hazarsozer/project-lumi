@@ -88,8 +88,7 @@ def ipc_stack(
     )
     try:
         server.start()
-        # Let the accept loop bind and start listening before tests connect.
-        time.sleep(0.05)
+        # start() blocks until the WS server is bound (_ready event); no sleep needed.
         port = server.bound_port
         assert port is not None, "EventBridge.bound_port is None after start()"
         yield server, port
@@ -116,8 +115,8 @@ def test_full_state_lifecycle(
     _, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        # Wait for the accept loop to register the new connection.
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame sent by the server on connect;
+        # it already synchronises on the connection being established.
         client.do_handshake()
 
         state_machine.transition_to(LumiState.LISTENING)
@@ -148,7 +147,6 @@ def test_interrupt_returns_to_idle(
     _, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_message("interrupt", {})
 
@@ -175,7 +173,6 @@ def test_user_text_triggers_event(
     _, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
         client.send_message("user_text", {"text": "hello"})
 
@@ -202,7 +199,6 @@ def test_viseme_forwarding(
     zmq_server, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
 
         viseme = VisemeEvent(
@@ -238,17 +234,14 @@ def test_malformed_client_message_no_crash(
     zmq_server, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
         client.do_handshake()
 
         # Send a frame whose body is not valid JSON.
         client.send_raw(b"not json }{{}}")
 
-        # Small settle so the recv callback has time to process the bad frame.
-        time.sleep(0.05)
-
         # Server must still be alive — trigger a state change and confirm it
-        # arrives at the client.
+        # arrives at the client.  recv_message() with timeout acts as the gate;
+        # if the server crashed the frame would never arrive.
         state_machine.transition_to(LumiState.LISTENING)
 
         msg = client.recv_message(timeout=2.0)
@@ -275,19 +268,17 @@ def test_client_reconnect(
     """
     _, port = ipc_stack
 
-    # First client connects then disconnects (no handshake needed — closes immediately).
+    # First client connects then disconnects.
+    # do_handshake() synchronises on the server having accepted the connection;
+    # after it returns we know the server is aware of this client.
     first = FakeTCPClient(port)
     first.connect()
-    time.sleep(_CONNECT_SETTLE_S)
+    first.do_handshake()
     first.close()
 
-    # Give _recv_loop time to detect the closure and clear _client_sock so
-    # the accept loop is ready for the next connection.
-    time.sleep(_STOP_SETTLE_S)
-
-    # Second client connects.
+    # Second client connects and does its own handshake.  The server's asyncio
+    # loop will accept it once it detects the first client's close.
     with FakeTCPClient(port) as second:
-        time.sleep(_CONNECT_SETTLE_S)
         second.do_handshake()
 
         state_machine.transition_to(LumiState.LISTENING)

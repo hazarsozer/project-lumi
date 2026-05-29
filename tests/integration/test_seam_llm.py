@@ -248,8 +248,7 @@ def test_llm_response_carries_nonempty_tts_start(
 
         orch = Orchestrator(config, speaker=speaker, tts=None)
 
-    # Wait for WSTransport to bind.
-    time.sleep(0.15)
+    # WSTransport.start() (called inside Orchestrator.__init__) blocks until bound.
     port = orch._event_bridge.bound_port  # type: ignore[union-attr]
     assert port is not None, "EventBridge did not bind"
 
@@ -267,7 +266,7 @@ def test_llm_response_carries_nonempty_tts_start(
     tts_start_frame: dict[str, Any] | None = None
     try:
         with FakeWSClient(port) as client:
-            time.sleep(0.08)
+            # do_handshake() reads the hello frame — synchronises on connection accept.
             client.do_handshake()
             client.send_frame("user_text", {"text": "what is the capital of France"})
 

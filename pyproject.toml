@@ -136,6 +136,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 anyio_mode = "auto"
+# Global backstop: any test that hangs > 30 s fails loudly instead of blocking CI.
+# Per-test @pytest.mark.timeout(N) overrides this default where a tighter bound is known.
+timeout = 30
 markers = [
     "unit: unit tests (no hardware, no ML models)",
     "integration: integration tests (mocked boundaries)",
