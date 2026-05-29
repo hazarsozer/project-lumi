@@ -27,9 +27,20 @@ export interface SettingsPanelProps {
   onClose: () => void;
 }
 
-export function SettingsPanel({ onUpdate, onClose, updateResult }: SettingsPanelProps) {
+/**
+ * Derive initial SettingsValues from currentValues (the Brain's live config),
+ * falling back to DEFAULT_SETTINGS for any key absent in the live data.
+ */
+function resolveInitialVals(
+  currentValues: Record<string, unknown> | undefined,
+): SettingsValues {
+  if (!currentValues) return DEFAULT_SETTINGS;
+  return { ...DEFAULT_SETTINGS, ...(currentValues as Partial<SettingsValues>) };
+}
+
+export function SettingsPanel({ onUpdate, onClose, updateResult, currentValues }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<TabName>('General');
-  const [vals, setVals] = useState<SettingsValues>(DEFAULT_SETTINGS);
+  const [vals, setVals] = useState<SettingsValues>(() => resolveInitialVals(currentValues));
 
   function set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) {
     setVals((prev) => ({ ...prev, [key]: value }));
@@ -108,9 +119,6 @@ export function SettingsPanel({ onUpdate, onClose, updateResult }: SettingsPanel
           )}
           {updateResult && Object.keys(updateResult.errors).length === 0 && updateResult.pending_restart.length === 0 && (
             <span style={{ color: T.colors.textSec }}>✓ Applied</span>
-          )}
-          {!updateResult && (
-            <span style={{ color: T.colors.textMuted }}>↻ Requires restart</span>
           )}
         </div>
         <FooterButton label="Cancel" onClick={onClose} variant="ghost" />
