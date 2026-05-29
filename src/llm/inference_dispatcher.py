@@ -55,6 +55,13 @@ class LLMInferenceDispatcher:
 
         self._llm_cancel_flag: threading.Event = threading.Event()
         self._llm_state_lock: threading.Lock = threading.Lock()
+        # Monotonically increasing turn generation counter.  Incremented under
+        # _llm_state_lock at the start of every dispatch() call (after the
+        # reflex fast-path check).  The exception handler captures the value at
+        # turn start and only mutates shared state if the counter still matches
+        # — preventing a stale exception handler from clobbering a newer turn
+        # that began right after an interrupt.
+        self._turn_generation: int = 0
 
     # ------------------------------------------------------------------
     # Public properties (aliased by Orchestrator for interrupt wiring)
@@ -106,6 +113,13 @@ class LLMInferenceDispatcher:
         utterance_id = str(uuid.uuid4())
         use_rag = rag_runtime_enabled and self._reflex_router.route_rag_intent(text)
 
+        # Advance the turn generation counter so this turn owns a unique id.
+        # Done under the state lock so the exception handler of any still-running
+        # prior turn sees the updated value and backs off.
+        with self._llm_state_lock:
+            self._turn_generation += 1
+            my_generation = self._turn_generation
+
         def _run_inference() -> None:
             # Count of LLMResponseReadyEvent firings so far this turn.
             # Streaming fires one per sentence; the state transition happens on
@@ -155,7 +169,13 @@ class LLMInferenceDispatcher:
                     "LLM inference failed for %r (source=%s)", text, source
                 )
                 with self._llm_state_lock:
-                    if self._state_machine.current_state == LumiState.PROCESSING:
+                    # Guard: only clean up if this is still the active turn.
+                    # A newer turn may have started right after an interrupt,
+                    # and we must not clobber its PROCESSING state.
+                    if (
+                        self._turn_generation == my_generation
+                        and self._state_machine.current_state == LumiState.PROCESSING
+                    ):
                         self._state_machine.transition_to(LumiState.IDLE)
                 return
 
@@ -188,7 +208,12 @@ class LLMInferenceDispatcher:
                         "LLM tool-followup failed for %r (source=%s)", text, source
                     )
                     with self._llm_state_lock:
-                        if self._state_machine.current_state == LumiState.PROCESSING:
+                        # Guard: same turn-generation check as in the primary
+                        # exception handler — do not clobber a newer turn.
+                        if (
+                            self._turn_generation == my_generation
+                            and self._state_machine.current_state == LumiState.PROCESSING
+                        ):
                             self._state_machine.transition_to(LumiState.IDLE)
                     return
 
@@ -239,8 +264,20 @@ class LLMInferenceDispatcher:
                 )
                 self._llm_cancel_flag.set()
                 with self._llm_state_lock:
-                    if self._state_machine.current_state == LumiState.PROCESSING:
+                    state = self._state_machine.current_state
+                    if state == LumiState.PROCESSING:
                         self._state_machine.transition_to(LumiState.IDLE)
+                    elif state == LumiState.SPEAKING:
+                        # Watchdog fired after the turn already transitioned to
+                        # SPEAKING (inference completed but TTS is still running).
+                        # We cannot transition SPEAKING→IDLE here (that belongs to
+                        # the TTS/interrupt path), but we must clear the cancel flag
+                        # so that the NEXT turn is not immediately aborted by a
+                        # stale set.
+                        logger.debug(
+                            "Watchdog fired during SPEAKING — clearing stale cancel flag"
+                        )
+                        self._llm_cancel_flag.clear()
 
             _watchdog_timer = threading.Timer(_timeout_s, _watchdog_fn)
             _watchdog_timer.daemon = True
