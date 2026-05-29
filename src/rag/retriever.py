@@ -10,10 +10,28 @@ The retriever is designed to run inside the inference worker thread
   - A hard timeout (RAGConfig.retrieval_timeout_s) caps the total call
     so a slow embedding or overloaded DB cannot delay the response past
     the 2-second voice UI threshold.
+
+Thread model (CR-30 / issue #31):
+  A single-worker ``ThreadPoolExecutor`` is shared across all retrieve()
+  calls on a given RAGRetriever instance.  This eliminates the previous
+  thread-per-query pattern where each call spawned a new daemon thread
+  that was orphaned on timeout and continued to hold the Embedder lock.
+
+  Bounded executor guarantees:
+    - At most ONE worker thread exists at a time — no thread accumulation.
+    - On timeout the caller receives _EMPTY immediately; the executor's
+      worker thread runs to completion (releasing the Embedder lock) and
+      is then ready for the next submission.  Because work items are
+      serialised through a single worker, the Embedder lock is never
+      contested by more than one in-flight encode() call.
+    - A per-query abort_flag is set on timeout so _retrieve_inner can
+      short-circuit remaining work (post-embed checks) as soon as the
+      embed call returns.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import threading
 from dataclasses import dataclass
@@ -62,6 +80,14 @@ class RAGRetriever:
         self._store = store
         self._config = config
         self._embedder = get_embedder(config.embedding_model)
+        # Single-worker executor: bounds thread count to 1, preventing the
+        # thread-per-query accumulation that occurred with the old pattern.
+        # The executor is intentionally NOT shut down between queries —
+        # it lives for the lifetime of the RAGRetriever instance.
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="rag-worker",
+        )
 
     def retrieve(
         self,
@@ -80,8 +106,13 @@ class RAGRetriever:
           6. Trim fused results to *max_chars* at chunk boundaries.
           7. Return :class:`RAGResult`.
 
-        The entire call is wrapped in a timeout thread so that a slow
-        embedding cannot stall the inference pipeline.
+        The work is submitted to a shared bounded executor (1 worker) and
+        awaited with a hard timeout.  On timeout the caller receives
+        ``_EMPTY`` immediately.  The executor's worker continues to
+        completion, releasing the Embedder lock naturally, and is then ready
+        for the next submission.  A per-query ``abort_flag`` is set on
+        timeout so ``_retrieve_inner`` can short-circuit any post-embed work
+        as soon as the slow encode() call returns.
 
         Returns an empty :class:`RAGResult` (``context=""``) if:
           - cancel_flag is set,
@@ -101,25 +132,20 @@ class RAGRetriever:
         )
         timeout_s = self._config.retrieval_timeout_s
 
-        result_box: list[RAGResult] = []
-        exc_box: list[Exception] = []
-
-        def _work() -> None:
-            try:
-                result_box.append(
-                    self._retrieve_inner(query, cancel_flag, budget_chars)
-                )
-            except Exception as exc:
-                exc_box.append(exc)
+        # Per-query abort flag: set on timeout so _retrieve_inner bails out
+        # of remaining work (post-embed checks) once encode() returns.
+        abort_flag = threading.Event()
 
         t0 = time.perf_counter()
-        worker = threading.Thread(target=_work, daemon=True)
-        worker.start()
-        worker.join(timeout=timeout_s)
+        future = self._executor.submit(
+            self._retrieve_inner, query, cancel_flag, budget_chars, abort_flag
+        )
 
-        elapsed_ms = int((time.perf_counter() - t0) * 1000)
-
-        if worker.is_alive():
+        try:
+            result = future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            abort_flag.set()  # signal worker to exit early after encode() returns
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
             logger.warning(
                 "RAG retrieval timed out after %.0f ms (budget %.0f ms) for query: %.60s",
                 elapsed_ms,
@@ -127,11 +153,12 @@ class RAGRetriever:
                 query,
             )
             return _EMPTY
+        except RetrievalError:
+            raise
+        except Exception as exc:
+            raise RetrievalError(str(exc)) from exc
 
-        if exc_box:
-            raise RetrievalError(str(exc_box[0])) from exc_box[0]
-
-        result = result_box[0]
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
         return RAGResult(
             context=result.context,
             citations=result.citations,
@@ -148,16 +175,23 @@ class RAGRetriever:
         query: str,
         cancel_flag: threading.Event,
         budget_chars: int,
+        abort_flag: threading.Event | None = None,
     ) -> RAGResult:
         if cancel_flag.is_set():
             return _EMPTY
 
-        # Embed query.
+        # Embed query.  The Embedder._lock is held for the duration of this
+        # call; it is released when encode() returns regardless of whether
+        # the caller has already timed out.
         try:
             vectors = self._embedder.encode([query])
         except Exception as exc:
             raise RetrievalError(f"Embedding failed: {exc}") from exc
 
+        # After encode() the Embedder lock is free.  Check abort (timeout
+        # signal from retrieve()) and cancel flags before doing further work.
+        if abort_flag is not None and abort_flag.is_set():
+            return _EMPTY
         if cancel_flag.is_set():
             return _EMPTY
 
