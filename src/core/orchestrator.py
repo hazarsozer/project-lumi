@@ -896,20 +896,29 @@ class Orchestrator:
     def _drain_event_types(self, type_names: set[str]) -> None:
         """Remove events of the given type names from the queue.
 
-        This is best-effort: events may arrive after the drain. The
-        orchestrator re-checks state before dispatching anyway.
+        The snapshot, filter, and re-insertion are performed atomically under
+        the queue's internal mutex so that a concurrent producer cannot
+        interleave its events into the retained set.  Retained events are
+        placed at the front of the deque in their original relative order;
+        any events enqueued by producers while the lock is held will arrive
+        after them.
 
         Args:
             type_names: Set of event class names to discard.
         """
-        retained: list[Any] = []
-        try:
-            while True:
-                item = self._event_queue.get_nowait()
-                if type(item).__name__ not in type_names:
-                    retained.append(item)
-        except queue.Empty:
-            pass
-
-        for item in retained:
-            self._event_queue.put(item)
+        q = self._event_queue
+        with q.mutex:
+            # Snapshot the entire deque, filter out drained types, and
+            # re-populate the deque atomically.
+            all_items: list[Any] = list(q.queue)
+            retained: list[Any] = [
+                item for item in all_items if type(item).__name__ not in type_names
+            ]
+            q.queue.clear()
+            # appendleft from the *end* of retained preserves original order
+            # at the front of the deque.
+            for item in reversed(retained):
+                q.queue.appendleft(item)
+            # Wake any consumer blocked on get() if items are present.
+            if retained:
+                q.not_empty.notify()

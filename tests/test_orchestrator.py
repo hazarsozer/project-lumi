@@ -529,6 +529,226 @@ def test_user_text_routes_to_llm() -> None:
     assert received_responses[0].text == "Hi from reflex!"
 
 
+# ---------------------------------------------------------------------------
+# _drain_event_types — atomicity w.r.t. concurrent producers (CR-12 / #13)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(3)
+def test_drain_event_types_retained_events_preserve_order() -> None:
+    """Retained events must appear at the front of the queue in their original
+    relative order after draining.
+
+    This is the serial ordering invariant.  It passes on both pre-fix and
+    post-fix code — the fix does not change the serial ordering guarantee, it
+    only makes the operation atomic w.r.t. concurrent producers.
+    """
+    import queue as _queue
+
+    orch = _make_orchestrator()
+    q = orch._event_queue
+
+    class _Retain1:
+        pass
+
+    class _DrainA:
+        pass
+
+    class _Retain2:
+        pass
+
+    class _DrainB:
+        pass
+
+    class _Retain3:
+        pass
+
+    r1, da, r2, db, r3 = _Retain1(), _DrainA(), _Retain2(), _DrainB(), _Retain3()
+    for ev in [r1, da, r2, db, r3]:
+        q.put(ev)
+
+    orch._drain_event_types({_DrainA.__name__, _DrainB.__name__})
+
+    result: list[object] = []
+    try:
+        while True:
+            result.append(q.get_nowait())
+    except _queue.Empty:
+        pass
+
+    assert r1 in result, "Retain1 missing"
+    assert r2 in result, "Retain2 missing"
+    assert r3 in result, "Retain3 missing"
+    assert da not in result, "DrainA must not appear"
+    assert db not in result, "DrainB must not appear"
+
+    pos_r1 = result.index(r1)
+    pos_r2 = result.index(r2)
+    pos_r3 = result.index(r3)
+    assert pos_r1 < pos_r2 < pos_r3, (
+        f"retained events out of order: positions={pos_r1}, {pos_r2}, {pos_r3}"
+    )
+    assert pos_r1 == 0, "first retained event must be at index 0 (front of queue)"
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(3)
+def test_drain_event_types_retained_events_stay_at_front_no_interleave() -> None:
+    """With concurrent producers active during the drain, retained events must
+    appear before any producer event in the queue.
+
+    The interleave is forced deterministically using a two-phase barrier:
+
+    Phase 1 (setup): hold ``q.mutex`` externally while starting ``N_PRODUCERS``
+    producer threads that each call ``q.put(producer_event)``.  Because ``put``
+    acquires ``q.mutex``, all producer threads block immediately.  A small
+    sleep guarantees they are blocked before we release the external lock.
+
+    Phase 2 (race): release the external lock, then immediately call
+    ``_drain_event_types``.  The fixed implementation re-acquires ``q.mutex``
+    and holds it for the entire snapshot-filter-re-insert operation, so
+    producers remain blocked until all retained events are already in the
+    deque.  Only after the drain releases the lock can producers enqueue —
+    guaranteeing producer events arrive AFTER retained events.
+
+    Pre-fix code (non-atomic): the re-enqueue loop calls ``q.put(retained)``
+    once per item, releasing the mutex between iterations.  A producer that
+    wins the mutex between two consecutive retained re-enqueues will interleave
+    its event into the retained set.  To make this race deterministic WITHOUT
+    modifying production code, we also inject a controlled producer via a
+    ``q.put`` hook (see ``_atomic_put_hook``): on the very first retained
+    re-enqueue, the hook appends a *second* producer event directly into the
+    raw deque, which bypasses the lock entirely and reliably produces an
+    interleaved queue.  The final assertion catches both the threading race and
+    the hook-injected interleave.
+    """
+    import queue as _queue
+
+    orch = _make_orchestrator()
+    q = orch._event_queue
+
+    class _Retained:
+        pass
+
+    class _Drained:
+        pass
+
+    class _Producer:
+        pass
+
+    class _HookInjected:
+        """Injected synchronously after the first retained re-enqueue (pre-fix path)."""
+
+    # Pre-seed with a large mixed queue.
+    n_retained = 20
+    retained_events: list[_Retained] = [_Retained() for _ in range(n_retained)]
+    drained_events: list[_Drained] = [_Drained() for _ in range(n_retained)]
+    for r, d in zip(retained_events, drained_events):
+        q.put(r)
+        q.put(d)
+
+    # Producer threads.
+    N_PRODUCERS = 4
+    producer_events = [_Producer() for _ in range(N_PRODUCERS)]
+    producers_done = threading.Event()
+
+    def _run_producers() -> None:
+        threads = [
+            threading.Thread(target=q.put, args=(pe,), daemon=True)
+            for pe in producer_events
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=2.0)
+        producers_done.set()
+
+    # --- hook for pre-fix detection ------------------------------------------
+    # In the fixed code, q.put() is never called for retained items (we use
+    # q.queue.appendleft directly under the lock), so this hook is a no-op.
+    # In the pre-fix code, q.put() is called for each retained item; on the
+    # first call, we inject _HookInjected directly into the raw deque to
+    # reliably produce an interleave regardless of thread scheduling.
+    hook_injected = _HookInjected()
+    original_put = q.put
+    injection_count = [0]
+
+    def _atomic_put_hook(item: object) -> None:
+        original_put(item)
+        if injection_count[0] == 0:
+            # Inject into raw deque after first retained re-enqueue.
+            # Only fires on pre-fix code (fixed code never calls put for retained).
+            q.queue.append(hook_injected)
+            injection_count[0] += 1
+
+    # --- run the race --------------------------------------------------------
+    # Hold the mutex while starting producers so they block before drain starts.
+    with q.mutex:
+        producer_thread = threading.Thread(target=_run_producers, daemon=True)
+        producer_thread.start()
+        time.sleep(0.05)  # ensure all producer threads are blocked on q.put
+
+    # Fixed: _drain_event_types acquires mutex → holds for full operation →
+    #   producers stay blocked → producer events land at the back.
+    # Pre-fix: re-enqueue loop releases mutex between calls → producers/hook
+    #   can sneak in between two consecutive retained re-enqueues.
+    with patch.object(q, "put", side_effect=_atomic_put_hook):
+        orch._drain_event_types({_Drained.__name__})
+
+    assert producers_done.wait(timeout=2.0), "Producer threads did not complete"
+    producer_thread.join(timeout=2.0)
+
+    # Collect final queue state.
+    result: list[object] = []
+    try:
+        while True:
+            result.append(q.get_nowait())
+    except _queue.Empty:
+        pass
+
+    # --- assertions ----------------------------------------------------------
+
+    # All retained events must be present.
+    for i, re in enumerate(retained_events):
+        assert re in result, f"retained_events[{i}] missing from queue"
+
+    # No drained events must appear.
+    for de in drained_events:
+        assert de not in result, "a drained event must not appear in queue"
+
+    # Retained events must preserve their original relative order.
+    retained_positions = [result.index(re) for re in retained_events]
+    assert retained_positions == sorted(retained_positions), (
+        f"Retained events out of order: first 5 positions={retained_positions[:5]}, "
+        f"full queue={[type(x).__name__ for x in result]}"
+    )
+
+    # No producer / hook-injected event must appear before the last retained
+    # event (no interleaving).
+    max_retained_pos = max(retained_positions)
+
+    # The hook-injected sentinel must be absent on the fixed code path
+    # (fixed code never calls q.put for retained items, so the hook never fires).
+    assert hook_injected not in result, (
+        "hook_injected event found in queue — _drain_event_types called q.put() "
+        "for retained items instead of using atomic deque insertion; "
+        "the operation is NOT atomic w.r.t. concurrent producers"
+    )
+
+    # All producer events must appear after retained events.
+    producer_positions = [
+        result.index(pe) for pe in producer_events if pe in result
+    ]
+    assert len(producer_positions) == N_PRODUCERS, "not all producer events found"
+    min_producer_pos = min(producer_positions)
+    assert min_producer_pos > max_retained_pos, (
+        f"Producer event interleaved into retained set: "
+        f"max_retained_pos={max_retained_pos}, min_producer_pos={min_producer_pos}, "
+        f"full queue={[type(x).__name__ for x in result]}"
+    )
+
+
 @pytest.mark.unit
 @pytest.mark.timeout(3)
 def test_shutdown_stops_event_bridge() -> None:
