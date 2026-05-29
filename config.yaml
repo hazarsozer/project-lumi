@@ -79,7 +79,9 @@ scribe:
   model_size: tiny.en
 
   # Beam search width.  Higher = better accuracy, slower inference.
-  beam_size: 5
+  # Default 1 (greedy) — ~40-60% STT latency reduction vs beam_size=5
+  # on the assistant query path. Increase to 3-5 for batch/accuracy-sensitive use.
+  beam_size: 1
 
   # Quantization strategy passed to WhisperModel.
   # "int8"   — fastest on CPU, slight quality loss

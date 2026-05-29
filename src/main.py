@@ -79,6 +79,7 @@ def main() -> None:
         model_size=config.scribe.model_size,
         initial_prompt=config.scribe.initial_prompt
         or "Lumi, Firefox, browser, desktop assistant.",
+        beam_size=config.scribe.beam_size,
     )
 
     orchestrator = Orchestrator(

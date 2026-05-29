@@ -93,7 +93,9 @@ class ScribeConfig:
     model_size: str = "tiny.en"
 
     # Beam search width; higher values improve accuracy at the cost of speed.
-    beam_size: int = 5
+    # Default 1 (greedy) gives ~40-60% STT latency reduction vs beam_size=5
+    # on the assistant query path where speed matters more than peak accuracy.
+    beam_size: int = 1
 
     # Quantization type passed to WhisperModel — "int8" for CPU inference.
     compute_type: str = "int8"

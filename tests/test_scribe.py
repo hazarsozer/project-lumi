@@ -224,6 +224,52 @@ def test_scribe_transcribe_joins_multiple_segments(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# beam_size — configurable via constructor, passed to model.transcribe
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_scribe_transcribe_uses_default_beam_size(
+    mock_whisper_model: MagicMock,
+    recorded_audio: np.ndarray,
+) -> None:
+    """transcribe() passes beam_size=1 (the default) to model.transcribe."""
+    from src.audio.scribe import Scribe
+
+    scribe = Scribe(model_size="tiny.en", device="cpu")
+    scribe.transcribe(recorded_audio)
+
+    mock_instance = mock_whisper_model.return_value
+    call_kwargs = mock_instance.transcribe.call_args[1]
+    assert call_kwargs.get("beam_size") == 1
+
+
+@pytest.mark.unit
+def test_scribe_transcribe_uses_configured_beam_size(
+    mock_whisper_model: MagicMock,
+    recorded_audio: np.ndarray,
+) -> None:
+    """transcribe() passes the beam_size value set at construction time."""
+    from src.audio.scribe import Scribe
+
+    scribe = Scribe(model_size="tiny.en", device="cpu", beam_size=3)
+    scribe.transcribe(recorded_audio)
+
+    mock_instance = mock_whisper_model.return_value
+    call_kwargs = mock_instance.transcribe.call_args[1]
+    assert call_kwargs.get("beam_size") == 3
+
+
+@pytest.mark.unit
+def test_scribe_stores_beam_size(mock_whisper_model: MagicMock) -> None:
+    """Scribe stores beam_size as an instance attribute."""
+    from src.audio.scribe import Scribe
+
+    scribe = Scribe(model_size="tiny.en", device="cpu", beam_size=2)
+    assert scribe.beam_size == 2
+
+
 from src.audio.scribe import CommandResult, parse_command
 
 
