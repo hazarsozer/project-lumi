@@ -255,6 +255,7 @@ def test_rotation_triggers_at_max_turns_plus_one(tmp_path: Path) -> None:
     )
     for i in range(MAX_TURNS + 1):
         mem.add_turn("user", f"message {i}")
+    mem.flush()
 
     history = mem.get_history()
     assert len(history) == RETAIN_RECENT + 1
@@ -274,6 +275,7 @@ def test_rotation_keeps_newest_turns_verbatim(tmp_path: Path) -> None:
     )
     for i in range(MAX_TURNS + 1):
         mem.add_turn("user", f"message {i}")
+    mem.flush()
 
     history = mem.get_history()
     assert history[-1]["content"] == f"message {MAX_TURNS}"
@@ -288,6 +290,7 @@ def test_rotation_no_summariser_truncates_gracefully(tmp_path: Path) -> None:
     mem = ConversationMemory(memory_dir=str(tmp_path))  # no summariser
     for i in range(MAX_TURNS + 1):
         mem.add_turn("user", f"message {i}")
+    mem.flush()
 
     history = mem.get_history()
     assert len(history) == RETAIN_RECENT
@@ -305,6 +308,7 @@ def test_rotation_summariser_exception_falls_back_to_truncation(tmp_path: Path) 
     mem = ConversationMemory(memory_dir=str(tmp_path), summariser=failing_summariser)
     for i in range(MAX_TURNS + 1):
         mem.add_turn("user", f"message {i}")
+    mem.flush()
 
     history = mem.get_history()
     assert len(history) == RETAIN_RECENT
@@ -339,6 +343,7 @@ def test_set_summariser_post_construction(tmp_path: Path) -> None:
 
     for i in range(MAX_TURNS + 1):
         mem.add_turn("user", f"message {i}")
+    mem.flush()
 
     history = mem.get_history()
     assert len(history) == RETAIN_RECENT + 1
