@@ -31,13 +31,21 @@ export function CompactOverlay({ brainState, micAvailable = true, onSettingsClic
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', userSelect: 'none', position: 'relative' }}>
 
-      {/* Character portrait — drag region (transparent, no pointer-event conflicts with child buttons) */}
+      {/* Character portrait — outer wrapper is the drag region; inner avatar is the click-to-interrupt target.
+          Keeping them separate prevents the Tauri drag region from swallowing click events (CR-19 / Issue #20). */}
       <div
         data-tauri-drag-region
         style={{ zIndex: 2, position: 'relative' }}
-        onClick={onMicClick}
       >
-        <LumiAvatar state={brainState} />
+        {/* Inner element: NOT a drag region so click-to-interrupt fires reliably */}
+        <div
+          onClick={onMicClick}
+          style={{ cursor: 'pointer' }}
+          aria-label="Interrupt Lumi"
+          role="button"
+        >
+          <LumiAvatar state={brainState} />
+        </div>
       </div>
 
       {/* Button tray — pill shaped, sits below character with 28px overlap handled by avatar's negative margin */}
