@@ -182,6 +182,7 @@ class Orchestrator:
         self._memory: ConversationMemory = ConversationMemory(
             config.llm.memory_dir,
             summariser=self._make_summariser(config.llm),
+            max_age_s=config.llm.memory_max_age_days * 86_400.0,
         )
         self._memory.load()
         # RAG subsystem — built only when enabled in config.
@@ -196,6 +197,16 @@ class Orchestrator:
                 self._rag_store = DocumentStore(config.rag)
                 self._rag_retriever = RAGRetriever(self._rag_store, config.rag)
                 logger.info("RAG subsystem initialised (db=%s)", config.rag.db_path)
+                # Purge RAG chunks older than the configured retention window.
+                # rag_max_age_days=0.0 (default) disables purge — DocumentStore.
+                # purge_expired_chunks also guards on <= 0, so this is doubly safe.
+                _rag_max_age_s: float = config.rag.rag_max_age_days * 86_400.0
+                if _rag_max_age_s > 0.0:
+                    self._rag_store.purge_expired_chunks(_rag_max_age_s)
+                    logger.info(
+                        "RAG startup purge: removed chunks older than %.1f days",
+                        config.rag.rag_max_age_days,
+                    )
             except Exception:
                 logger.exception("RAG subsystem failed to initialise; disabling RAG")
                 self._rag_runtime_enabled = False
