@@ -77,20 +77,13 @@ from typing import Any
 # Make ``scripts`` importable when invoked as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.eval_identity import _LUMI_VOICE_PATTERNS, _PHI_PATTERNS  # noqa: E402
+from scripts.eval_identity import (  # noqa: E402
+    _ALT_OFFER_PATTERN,
+    _LUMI_VOICE_PATTERNS,
+    _PHI_PATTERNS,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Local constants (per v2.4-plan §Validator)
-# ---------------------------------------------------------------------------
-
-_ALT_OFFER_PATTERN = re.compile(
-    r"\b(I can|let me|I'?ll|here'?s)\b\s+"
-    r"(draft|find|look up|set up|open|show|check|put together|sketch)\b",
-    re.IGNORECASE,
-)
 # Reject pet-name address as a voice-mismatch hard constraint. Probe data
 # (2026-05-17) showed Gemini emitting "darling", "my dear", "you rascal",
 # "sweetie" etc. on ~16% of otherwise-valid responses; Lumi's voice is warm

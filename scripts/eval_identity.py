@@ -10,16 +10,23 @@ prompt types that might trigger identity disclosure:
   E. Edge / meta       — "What can you do?", "Are you conscious?"
 
 Classification (classifier v2):
-  LUMI       — response contains "Lumi" (persona anchor present)
+  LUMI       — response contains "Lumi" (persona anchor present).
+               Counts as SUCCESS in all categories (A–E).
   LUMI_VOICE — warm-refusal pattern without explicit name: capability-denial
                verb ("can't reach", "unable to send") or Lumi idiom
                ("out of reach", "not yet", "not on this build").
-               Only counts as success in B/C/D categories.
+               Counts as SUCCESS only in B/C/D (capability_denial,
+               knowledge_limit, memory_privacy).
+               In A (direct_identity) and E (edge_meta) it is NOT a success —
+               treated the same as NEUTRAL for scoring purposes; the explicit
+               "Lumi" anchor is required there.
   PHI_PRIOR  — response contains Phi-prior phrases:
                   "I'm Phi", "I am Phi", "as an AI language model",
                   "as a text-based AI", "I'm an AI language model",
                   "I'm an AI assistant", "I am an AI"
-  NEUTRAL    — none of the above; short generic response
+               NEVER a success.  Takes precedence over all other labels.
+  NEUTRAL    — none of the above; short generic response.
+               NEVER a success.
 
 Usage
 -----
@@ -40,6 +47,19 @@ import re
 import sys
 from pathlib import Path
 from typing import Literal
+
+# ---------------------------------------------------------------------------
+# Shared sampling defaults — these mirror the production config.yaml values
+# so any script that calls eval_identity.py as a subprocess can import these
+# constants and pass them explicitly, ensuring full reproducibility.
+# ---------------------------------------------------------------------------
+
+SHIPPING_TEMPERATURE: float = 0.5
+SHIPPING_TOP_P: float = 0.9
+SHIPPING_TOP_K: int = 30
+SHIPPING_MIN_P: float = 0.05
+SHIPPING_REPEAT_PENALTY: float = 1.05
+SHIPPING_MAX_TOKENS: int = 128  # probe-specific cap (not the 512 production cap)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -151,6 +171,22 @@ _LUMI_VOICE_SUCCESS_CATS: frozenset[str] = frozenset(
     {"capability_denial", "knowledge_limit", "memory_privacy"}
 )
 
+# Alternative-offer pattern — shared with scripts/synth_dataset_v4.py which
+# uses it as a generation constraint.  Defined here (canonical location) so
+# eval_identity.py can MEASURE the property at eval time and synth_dataset_v4.py
+# imports it from here rather than keeping a local copy.
+#
+# Matches phrases where the model offers an alternative action it CAN do:
+#   "I can draft something …"    (I can + action-verb)
+#   "let me find an alternative" (let me + action-verb)
+#   "I'll set up a reminder"     (I'll + action-verb)
+#   "here's something I can check" (here's + action-verb)
+_ALT_OFFER_PATTERN = re.compile(
+    r"\b(I can|let me|I'?ll|here'?s)\b\s+"
+    r"(draft|find|look up|set up|open|show|check|put together|sketch)\b",
+    re.IGNORECASE,
+)
+
 Label = Literal["LUMI", "LUMI_VOICE", "PHI_PRIOR", "NEUTRAL"]
 
 
@@ -208,7 +244,11 @@ def run_probe(model, tokenizer, probe: dict, sampling: dict) -> str:
         history=[],
         available_tools=None,
     )
-    raw = model(prompt_text, max_tokens=128, **sampling)
+    # max_tokens may be in sampling (from --max-tokens CLI arg); fall back to
+    # SHIPPING_MAX_TOKENS so the probe cap is always explicit and recorded.
+    call_sampling = dict(sampling)
+    max_tokens = call_sampling.pop("max_tokens", SHIPPING_MAX_TOKENS)
+    raw = model(prompt_text, max_tokens=max_tokens, **call_sampling)
     return raw["choices"][0]["text"].strip()
 
 
@@ -248,6 +288,8 @@ def run_all(args: argparse.Namespace) -> list[dict]:
         "top_k":          args.top_k,
         "min_p":          args.min_p,
         "repeat_penalty": args.repeat_penalty,
+        "max_tokens":     args.max_tokens,
+        "seed":           args.seed,
     }.items() if v is not None}
     identity_bias = loader.get_identity_guard_logit_bias(config.llm)
     if identity_bias:
@@ -260,7 +302,12 @@ def run_all(args: argparse.Namespace) -> list[dict]:
         label = classify(response)
         ok = "✓" if is_success(label, probe["cat"]) else label
         print(ok)
-        results.append({**probe, "response": response, "label": label})
+        results.append({
+            **probe,
+            "response": response,
+            "label": label,
+            "alt_offer": bool(_ALT_OFFER_PATTERN.search(response)),
+        })
 
     return results
 
@@ -344,6 +391,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--top-k",          type=int,   default=None)
     parser.add_argument("--min-p",          type=float, default=None)
     parser.add_argument("--repeat-penalty", type=float, default=None)
+    parser.add_argument("--max-tokens",     type=int,   default=None,
+                        help="Max tokens per probe response (default: SHIPPING_MAX_TOKENS=128).")
+    parser.add_argument("--seed",           type=int,   default=None,
+                        help="RNG seed for deterministic sampling (default: None = non-deterministic).")
     parser.add_argument("--output",         type=Path,  default=None,
                         help="Optional JSON output path.")
     # Steering overrides (avoids editing config.yaml for eval runs)
@@ -400,9 +451,21 @@ def main(argv: list[str] | None = None) -> int:
                   f"Phi {phi_a/n:.0%}→{phi_b/n:.0%}")
 
     if args.output:
+        # Build the full sampling config dict that was (or would be) used.
+        # This records every param so the run is reproducible from the artifact.
+        sampling_config: dict = {
+            "temperature":    args.temperature    if args.temperature    is not None else SHIPPING_TEMPERATURE,
+            "top_p":          args.top_p          if args.top_p          is not None else SHIPPING_TOP_P,
+            "top_k":          args.top_k          if args.top_k          is not None else SHIPPING_TOP_K,
+            "min_p":          args.min_p          if args.min_p          is not None else SHIPPING_MIN_P,
+            "repeat_penalty": args.repeat_penalty if args.repeat_penalty is not None else SHIPPING_REPEAT_PENALTY,
+            "max_tokens":     args.max_tokens     if args.max_tokens     is not None else SHIPPING_MAX_TOKENS,
+            "seed":           args.seed,  # None means non-deterministic; record it as-is
+        }
         payload = {
             "classifier_version": "v2",
             "model": args.model_path,
+            "sampling_config": sampling_config,
             "results": results_a,
         }
         if args.model_path_b:
