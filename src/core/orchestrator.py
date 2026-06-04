@@ -280,9 +280,26 @@ class Orchestrator:
         self._speaker.start()
         self._speaker_started = True
 
-        # TTS engine — injectable for testing; None means no TTS (state machine
-        # still transitions correctly via a synthetic SpeechCompletedEvent).
-        self._tts: KokoroTTS | None = tts
+        # TTS engine.  Injectable for testing.  When neither a speaker nor a tts
+        # is injected (the main.py production path), build the real KokoroTTS
+        # alongside the auto-created SpeakerThread above so the Brain can speak.
+        # config.tts.enabled gates it; KokoroTTS self-degrades to silent mode if
+        # the model/package is unavailable.  When a speaker IS injected (tests),
+        # the caller owns audio-out and injects a tts only if it needs one, so we
+        # leave _tts=None and avoid loading the model in the test suite.
+        self._tts: KokoroTTS | None
+        if tts is not None:
+            self._tts = tts
+        elif config.tts.enabled and speaker is None:
+            self._tts = KokoroTTS(
+                model_path=config.tts.model_path,
+                voices_path=config.tts.voices_path,
+                voice=config.tts.voice,
+                speaker=self._speaker,
+                event_queue=self._event_queue,
+            )
+        else:
+            self._tts = None
 
         # Guards _current_utterance_id and _tts_pending_count so that interrupt
         # and multi-sentence completion can atomically read and modify TTS state.

@@ -458,3 +458,47 @@ def test_no_ears_text_only_mode_runs_without_crash():
     orch.post_event(ShutdownEvent())
     # Must not raise
     orch.run()
+
+
+# ---------------------------------------------------------------------------
+# R4 regression — orchestrator must build a real TTS in the production path.
+# main.py constructs the Orchestrator without a `tts=` argument; before this
+# fix the orchestrator did not auto-build one, so _tts stayed None, every reply
+# hit the `tts is None` fast-path, and the Brain shipped permanently silent
+# regardless of config.tts.enabled.  Caught only by the DoD §2 live-test gate.
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_builds_tts_when_enabled_and_audio_out_not_injected() -> None:
+    """No speaker and no tts injected (the main.py path) → orchestrator builds a
+    real KokoroTTS, wired to the auto-created SpeakerThread, so it can speak."""
+    from src.audio.mouth import KokoroTTS
+    from src.core.orchestrator import Orchestrator
+
+    config = _minimal_config()  # tts defaults to TTSConfig(enabled=True)
+    assert config.tts.enabled is True  # guard: this is the scenario under test
+
+    with (
+        patch("src.core.orchestrator.ModelLoader"),
+        patch("src.core.orchestrator.ConversationMemory") as mock_mem_cls,
+        patch("src.core.orchestrator.ReasoningRouter"),
+        patch("src.audio.speaker.sd.OutputStream"),  # no real audio device
+        patch.object(KokoroTTS, "_load_model", lambda self: None),  # skip 89MB load
+    ):
+        mock_mem_cls.return_value.load = MagicMock()
+        orch = Orchestrator(config)  # no speaker, no tts → production path
+        try:
+            assert isinstance(orch._tts, KokoroTTS), (
+                "Orchestrator must auto-build KokoroTTS when config.tts.enabled "
+                "and no audio-out is injected (R4: Brain shipped silent)."
+            )
+            assert orch._tts._speaker is orch._speaker  # wired to the real speaker
+        finally:
+            orch._speaker.stop()
+
+
+def test_orchestrator_no_tts_when_speaker_injected() -> None:
+    """Injecting a speaker (the test path) must NOT auto-build a real TTS — the
+    89MB model stays unloaded and existing fixtures keep their None behaviour."""
+    orch = _make_orchestrator()
+    assert orch._tts is None

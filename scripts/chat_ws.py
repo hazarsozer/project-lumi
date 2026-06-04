@@ -72,9 +72,13 @@ async def chat(prompts: list[str] | None) -> None:
                 event = msg.get("event")
                 payload = msg.get("payload", {})
                 if event == "llm_token":
-                    delta = payload.get("delta", "")
-                    assistant_buf.append(delta)
-                    print(delta, end="", flush=True)
+                    # Wire protocol sends the token under "token" (see
+                    # event_bridge.py and app/src/ipc/events.ts). Guard against
+                    # empty deltas so the tts_start fallback below still fires.
+                    delta = payload.get("token") or payload.get("delta") or ""
+                    if delta:
+                        assistant_buf.append(delta)
+                        print(delta, end="", flush=True)
                 elif event == "tts_start":
                     text = payload.get("text", "")
                     if text and not assistant_buf:
