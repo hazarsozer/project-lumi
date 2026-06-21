@@ -65,6 +65,12 @@ class AudioConfig:
     # empty array (prevents a long hang when the wake word fires on noise).
     no_speech_timeout_s: float = 3.0
 
+    # Seconds to keep wake-word detection suppressed after Lumi finishes
+    # speaking (the SPEAKING->IDLE transition).  Wake detection is fully paused
+    # *during* SPEAKING and re-armed with this cooldown afterwards, so the tail
+    # of her own TTS cannot re-trigger the wake word (R5 feedback-loop band-aid).
+    wake_resume_cooldown_s: float = 1.0
+
     # Path to the custom "hey Lumi" ONNX wake-word model.
     wake_word_model_path: str = "models/hey_lumi.onnx"
 

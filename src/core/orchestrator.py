@@ -315,6 +315,12 @@ class Orchestrator:
         self._scribe: Scribe | None = scribe
         self._missing_setup_items: list[str] = missing_setup_items or []
 
+        # R5: pause Ears wake detection while Lumi is SPEAKING (and briefly
+        # after) so her own TTS can't re-trigger the wake word.  PTT is
+        # unaffected — it posts WakeDetectedEvent directly, bypassing inference.
+        self._wake_resume_cooldown_s: float = config.audio.wake_resume_cooldown_s
+        self._state_machine.register_observer(self._on_state_change_audio)
+
         # Push-to-talk listener — optional; created when config.audio.ptt_enabled.
         self._ptt_listener = None
         if config.audio.ptt_enabled:
@@ -901,6 +907,23 @@ class Orchestrator:
             return
 
         logger.debug("WakeDetectedEvent received in state %s; ignoring.", current.value)
+
+    def _on_state_change_audio(
+        self, old_state: LumiState, new_state: LumiState
+    ) -> None:
+        """State observer that gates the wake word around SPEAKING (R5).
+
+        Pauses Ears wake detection on entry to SPEAKING and re-arms it (after a
+        short cooldown) when leaving SPEAKING, so Lumi's own TTS output cannot
+        re-trigger the wake word.  No-op in text-only mode (no Ears).  PTT
+        barge-in is unaffected — it posts WakeDetectedEvent directly.
+        """
+        if self._ears is None:
+            return
+        if new_state == LumiState.SPEAKING:
+            self._ears.pause_wake()
+        elif old_state == LumiState.SPEAKING:
+            self._ears.resume_wake(self._wake_resume_cooldown_s)
 
     def _handle_recording_complete(self, event: RecordingCompleteEvent) -> None:
         """Handle RecordingCompleteEvent: invoke Scribe in a daemon thread.

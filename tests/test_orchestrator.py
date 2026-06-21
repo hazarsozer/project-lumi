@@ -46,6 +46,61 @@ def test_orchestrator_has_llm_cancel_flag() -> None:
 
 
 # ---------------------------------------------------------------------------
+# R5 — wake-word gating during SPEAKING (TTS->mic feedback-loop band-aid, #49)
+# ---------------------------------------------------------------------------
+
+
+def _make_orchestrator_with_ears(mock_ears: MagicMock) -> Orchestrator:
+    """Orchestrator with a mock SpeakerThread + injected mock Ears (no IPC socket)."""
+    mock_speaker = MagicMock(spec=SpeakerThread)
+    return Orchestrator(
+        config=LumiConfig(),
+        speaker=mock_speaker,
+        ears=mock_ears,
+        event_bridge=MagicMock(),
+    )
+
+
+@pytest.mark.unit
+def test_entering_speaking_pauses_wake_word() -> None:
+    """PROCESSING->SPEAKING pauses Ears wake detection (R5 feedback-loop guard)."""
+    mock_ears = MagicMock()
+    orch = _make_orchestrator_with_ears(mock_ears)
+    sm = orch.state_machine
+    sm.transition_to(LumiState.LISTENING)
+    sm.transition_to(LumiState.PROCESSING)
+    sm.transition_to(LumiState.SPEAKING)
+    mock_ears.pause_wake.assert_called_once()
+    mock_ears.resume_wake.assert_not_called()
+
+
+@pytest.mark.unit
+def test_leaving_speaking_resumes_wake_word_with_cooldown() -> None:
+    """SPEAKING->IDLE resumes wake detection after the configured cooldown."""
+    mock_ears = MagicMock()
+    orch = _make_orchestrator_with_ears(mock_ears)
+    sm = orch.state_machine
+    sm.transition_to(LumiState.LISTENING)
+    sm.transition_to(LumiState.PROCESSING)
+    sm.transition_to(LumiState.SPEAKING)
+    sm.transition_to(LumiState.IDLE)
+    mock_ears.resume_wake.assert_called_once_with(
+        LumiConfig().audio.wake_resume_cooldown_s
+    )
+
+
+@pytest.mark.unit
+def test_wake_gating_noop_when_no_ears() -> None:
+    """With no Ears (text-only mode) the SPEAKING transitions must not raise."""
+    orch = _make_orchestrator()  # ears=None
+    sm = orch.state_machine
+    sm.transition_to(LumiState.LISTENING)
+    sm.transition_to(LumiState.PROCESSING)
+    sm.transition_to(LumiState.SPEAKING)
+    sm.transition_to(LumiState.IDLE)  # observer must no-op safely when _ears is None
+
+
+# ---------------------------------------------------------------------------
 # post_event and register_handler dispatch
 # ---------------------------------------------------------------------------
 

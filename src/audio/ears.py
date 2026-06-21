@@ -137,6 +137,12 @@ class Ears:
         # Cooldown timestamp (monotonic seconds) to ignore audio after a wake event
         self._cooldown_until = 0.0
 
+        # When True, wake-word inference is skipped (the mic still drains).  Set
+        # by the orchestrator while Lumi is SPEAKING so her own TTS cannot
+        # re-trigger the wake word (R5).  Plain bool: written from the
+        # orchestrator thread, read from the consumer thread; atomic under GIL.
+        self._wake_paused = False
+
     def _mic_callback(
         self, indata: np.ndarray, frames: int, time: Any, status: Any
     ) -> None:
@@ -260,9 +266,11 @@ class Ears:
                                 chunk = chunk.reshape(-1)
                             chunk = chunk.astype(np.int16, copy=False)
 
-                        # Respect cooldown window: keep draining queue but skip inference
+                        # Skip wake inference while paused (Lumi is speaking) or
+                        # within the post-wake / post-speaking cooldown window;
+                        # keep draining the queue so it does not back up.
                         now = _time.monotonic()
-                        if now < self._cooldown_until:
+                        if self._wake_paused or now < self._cooldown_until:
                             continue
 
                         try:
@@ -375,4 +383,25 @@ class Ears:
                 logger.warning(
                     "Ears: consumer thread did not exit within 2 s after stop()"
                 )
+
+    def pause_wake(self) -> None:
+        """Suspend wake-word inference (e.g. while Lumi is SPEAKING).
+
+        The microphone stays open and the audio queue keeps draining; only
+        wake-word detection is skipped.  Used to stop Lumi's own TTS output
+        from re-triggering the wake word (R5 feedback-loop band-aid).
+        """
+        self._wake_paused = True
+
+    def resume_wake(self, cooldown_s: float = 0.0) -> None:
+        """Re-enable wake-word inference, optionally after a short cooldown.
+
+        Args:
+            cooldown_s: Seconds to keep inference suppressed after resuming, to
+                let the tail of TTS playback clear the acoustic path before the
+                wake word can fire again.
+        """
+        self._wake_paused = False
+        if cooldown_s > 0.0:
+            self._cooldown_until = _time.monotonic() + cooldown_s
 

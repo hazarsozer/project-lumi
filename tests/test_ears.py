@@ -419,3 +419,67 @@ def test_record_vad_threshold_governs_speech_detection(
     elapsed_detected = _run(0.5)  # 0.9 > 0.5 -> speech -> silence cut-off (~0.2)
     elapsed_ignored = _run(0.95)  # 0.9 < 0.95 -> no speech -> no-speech abort (~0.8)
     assert elapsed_detected < elapsed_ignored
+
+
+# ---------------------------------------------------------------------------
+# R5 — wake-word pause/resume (TTS->mic feedback-loop band-aid, #49)
+#
+# While Lumi is SPEAKING the orchestrator pauses wake detection so her own TTS
+# (which often contains the word "Lumi") cannot re-trigger the wake word.  The
+# mic stays open and the queue keeps draining; only inference is skipped.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_pause_resume_wake_flag(mock_oww_model: MagicMock) -> None:
+    """pause_wake()/resume_wake() toggle the _wake_paused flag."""
+    ears = _make_ears_vad(mock_oww_model)
+    assert ears._wake_paused is False
+    ears.pause_wake()
+    assert ears._wake_paused is True
+    ears.resume_wake(cooldown_s=0.0)
+    assert ears._wake_paused is False
+
+
+@pytest.mark.unit
+def test_resume_wake_arms_cooldown(mock_oww_model: MagicMock) -> None:
+    """resume_wake(cooldown_s) clears the pause and arms a cooldown window."""
+    ears = _make_ears_vad(mock_oww_model)
+    ears.pause_wake()
+    before = time.monotonic()
+    ears.resume_wake(cooldown_s=5.0)
+    assert ears._wake_paused is False
+    assert ears._cooldown_until >= before + 5.0 - 0.1
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(5)
+def test_wake_suppressed_while_paused(
+    mock_oww_model: MagicMock, mock_sounddevice: MagicMock
+) -> None:
+    """While paused the consumer loop skips wake inference entirely (R5).
+
+    Even with the model scoring well above sensitivity, no WakeDetectedEvent is
+    posted and model.predict is never called while _wake_paused is True.
+    """
+    ears = _make_ears_vad(mock_oww_model)
+    ears.model.predict.return_value = {"hey_lumi": 0.99}  # would fire if not paused
+    ears.pause_wake()
+
+    event_queue: queue.Queue = queue.Queue()
+    served = [0]
+
+    def _get(**kwargs):
+        served[0] += 1
+        if served[0] >= 3:
+            ears.listening = False
+            raise queue.Empty
+        return np.ones(1280, dtype=np.int16)
+
+    ears.audio_queue.get = _get  # type: ignore[method-assign]
+
+    ears.start(event_queue)
+    ears.thread.join(timeout=3.0)
+
+    assert event_queue.empty()  # no wake event posted while paused
+    assert ears.model.predict.call_count == 0  # inference skipped while paused
