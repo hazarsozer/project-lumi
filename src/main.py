@@ -72,6 +72,10 @@ def main() -> None:
         ears = Ears(
             sensitivity=config.audio.sensitivity,
             model_paths=[config.audio.wake_word_model_path],
+            vad_threshold=config.audio.vad_threshold,
+            silence_timeout_s=config.audio.silence_timeout_s,
+            recording_timeout_s=config.audio.recording_timeout_s,
+            no_speech_timeout_s=config.audio.no_speech_timeout_s,
         )
 
     # Scribe wraps faster-whisper for speech-to-text.

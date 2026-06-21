@@ -60,6 +60,11 @@ class AudioConfig:
     # Hard upper bound on command recording duration in seconds.
     recording_timeout_s: float = 10.0
 
+    # Seconds to wait for speech to begin after recording starts.  If no speech
+    # is detected within this window the command capture aborts and returns an
+    # empty array (prevents a long hang when the wake word fires on noise).
+    no_speech_timeout_s: float = 3.0
+
     # Path to the custom "hey Lumi" ONNX wake-word model.
     wake_word_model_path: str = "models/hey_lumi.onnx"
 

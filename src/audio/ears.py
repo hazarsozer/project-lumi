@@ -53,15 +53,31 @@ _RETRY_DELAY_S = 0.25  # seconds to wait between retries
 
 
 class Ears:
-    def __init__(self, sensitivity: float = 0.5, model_paths: list[str] | None = None):
+    def __init__(
+        self,
+        sensitivity: float = 0.5,
+        model_paths: list[str] | None = None,
+        vad_threshold: float = 0.5,
+        silence_timeout_s: float = 1.5,
+        recording_timeout_s: float = 10.0,
+        no_speech_timeout_s: float = 3.0,
+    ):
         """
         Implementation of the threaded microphone listener.
         Args:
             sensitivity: The sensitivity of the wake word detector.
             model_paths: Optional list of paths to wake word models.
+            vad_threshold: VAD score above which a recorded chunk counts as speech.
+            silence_timeout_s: Seconds of silence after speech before recording stops.
+            recording_timeout_s: Hard upper bound on a single command recording.
+            no_speech_timeout_s: Seconds to wait for speech to begin before aborting.
         """
 
         self.sensitivity = sensitivity
+        self._vad_threshold = vad_threshold
+        self._silence_timeout_s = silence_timeout_s
+        self._recording_timeout_s = recording_timeout_s
+        self._no_speech_timeout_s = no_speech_timeout_s
         self.listening = False
         self._event_queue: queue.Queue[Any] | None = None
 
@@ -134,16 +150,22 @@ class Ears:
         self.audio_queue.put(indata.copy())
 
     def record_command_with_vad(
-        self, timeout: float = 10.0, silence_limit: float = 1.5
+        self, timeout: float | None = None, silence_limit: float | None = None
     ) -> np.ndarray:
         """
         Records audio from the queue until VAD detects silence or timeout is reached.
         Args:
-            timeout: Maximum recording time in seconds.
-            silence_limit: How many seconds of silence to wait before stopping.
+            timeout: Maximum recording time in seconds.  Defaults to the
+                configured recording_timeout_s when None.
+            silence_limit: Seconds of silence to wait before stopping.  Defaults
+                to the configured silence_timeout_s when None.
         Returns:
             The recorded audio as a numpy array.
         """
+        timeout = self._recording_timeout_s if timeout is None else timeout
+        silence_limit = (
+            self._silence_timeout_s if silence_limit is None else silence_limit
+        )
         recorded_chunks = []
 
         start_time = _time.monotonic()
@@ -166,7 +188,7 @@ class Ears:
             # Silence/no-speech checks run every iteration, even when queue is empty
             if speech_detected and (now - last_voice_time > silence_limit):
                 break
-            if not speech_detected and (now - start_time > 3.0):
+            if not speech_detected and (now - start_time > self._no_speech_timeout_s):
                 break
 
             try:
@@ -185,7 +207,7 @@ class Ears:
                 # VAD expects 16kHz 16-bit PCM; CHUNK_SIZE=1280 (80ms) is fine.
                 vad_score = self.vad.predict(chunk_flat)
 
-                if vad_score > 0.5:
+                if vad_score > self._vad_threshold:
                     speech_detected = True
                     last_voice_time = now
 

@@ -278,3 +278,144 @@ def test_record_vad_speech_then_silence_stops_early(
     assert elapsed < 5.0
     assert isinstance(result, np.ndarray)
     assert len(result) > 0
+
+
+# ---------------------------------------------------------------------------
+# VAD config plumbing (config.audio knobs must actually reach Ears)
+#
+# Regression guard for the dead-config bug: AudioConfig declared vad_threshold,
+# silence_timeout_s and recording_timeout_s but main.py only passed
+# `sensitivity`, and record_command_with_vad() was called with no args, so the
+# hardcoded method defaults always won and the config values did nothing.
+# ---------------------------------------------------------------------------
+
+
+def _make_ears_vad(mock_oww_model, **kwargs):
+    """Construct an Ears instance with mocked hardware and explicit VAD config."""
+    with patch("os.path.exists", return_value=False):
+        from src.audio.ears import Ears
+
+        return Ears(sensitivity=0.8, model_paths=[], **kwargs)
+
+
+@pytest.mark.unit
+def test_ears_stores_vad_config(mock_oww_model: MagicMock) -> None:
+    """Ears stores all VAD knobs passed at construction time."""
+    ears = _make_ears_vad(
+        mock_oww_model,
+        vad_threshold=0.7,
+        silence_timeout_s=2.0,
+        recording_timeout_s=8.0,
+        no_speech_timeout_s=4.0,
+    )
+    assert ears._vad_threshold == 0.7
+    assert ears._silence_timeout_s == 2.0
+    assert ears._recording_timeout_s == 8.0
+    assert ears._no_speech_timeout_s == 4.0
+
+
+@pytest.mark.unit
+def test_ears_vad_config_defaults(mock_oww_model: MagicMock) -> None:
+    """Ears VAD knobs default to the historical hardcoded values."""
+    ears = _make_ears_vad(mock_oww_model)
+    assert ears._vad_threshold == 0.5
+    assert ears._silence_timeout_s == 1.5
+    assert ears._recording_timeout_s == 10.0
+    assert ears._no_speech_timeout_s == 3.0
+
+
+@pytest.mark.unit
+@pytest.mark.slow
+@pytest.mark.timeout(10)
+def test_record_vad_noarg_uses_configured_recording_timeout(
+    mock_oww_model: MagicMock,
+) -> None:
+    """A no-arg record honors the configured recording_timeout_s (not the 10s default).
+
+    Empty queue, no speech.  no_speech_timeout_s is set high so the hard
+    recording cap (0.4s) is the governing exit — proving it is read from config.
+    """
+    ears = _make_ears_vad(
+        mock_oww_model, recording_timeout_s=0.4, no_speech_timeout_s=5.0
+    )
+    start = time.monotonic()
+    result = ears.record_command_with_vad()  # NO ARGS -> must use instance config
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.5  # 0.4 cap, not the old 10.0 method default
+    assert isinstance(result, np.ndarray)
+    assert result.dtype == np.int16
+
+
+@pytest.mark.unit
+@pytest.mark.slow
+@pytest.mark.timeout(10)
+def test_record_vad_noarg_uses_configured_no_speech_timeout(
+    mock_oww_model: MagicMock,
+) -> None:
+    """A no-arg record aborts at the configured no_speech_timeout_s when no speech.
+
+    Empty queue; recording_timeout_s is large so the no-speech abort (0.4s)
+    is the governing exit — proving it is read from config (was hardcoded 3.0).
+    """
+    ears = _make_ears_vad(
+        mock_oww_model, no_speech_timeout_s=0.4, recording_timeout_s=10.0
+    )
+    start = time.monotonic()
+    ears.record_command_with_vad()  # NO ARGS
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.5  # 0.4 abort, not the old hardcoded 3.0
+
+
+@pytest.mark.unit
+@pytest.mark.slow
+@pytest.mark.timeout(10)
+def test_record_vad_noarg_uses_configured_silence_timeout(
+    mock_oww_model: MagicMock,
+) -> None:
+    """A no-arg record ends the configured silence_timeout_s after speech (cut-off)."""
+    ears = _make_ears_vad(
+        mock_oww_model, silence_timeout_s=0.3, recording_timeout_s=10.0
+    )
+    # Speech on the first chunks, then silence for the rest.
+    ears.vad.predict.side_effect = [0.9, 0.9, 0.9] + [0.1] * 300
+    for _ in range(50):
+        ears.audio_queue.put(np.ones(1280, dtype=np.int16))
+
+    start = time.monotonic()
+    result = ears.record_command_with_vad()  # NO ARGS
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.2  # 0.3 cut-off, not the old 1.5 method default
+    assert len(result) > 0
+
+
+@pytest.mark.unit
+@pytest.mark.slow
+@pytest.mark.timeout(10)
+def test_record_vad_threshold_governs_speech_detection(
+    mock_oww_model: MagicMock,
+) -> None:
+    """vad_threshold decides whether a chunk counts as speech.
+
+    Identical 0.9-scoring input: with threshold 0.5 it is speech (fast silence
+    cut-off); with threshold 0.95 it is not (slow no-speech abort).  The
+    relative timing proves the configured threshold is applied.
+    """
+
+    def _run(threshold: float) -> float:
+        ears = _make_ears_vad(
+            mock_oww_model,
+            vad_threshold=threshold,
+            silence_timeout_s=0.2,
+            no_speech_timeout_s=0.8,
+            recording_timeout_s=10.0,
+        )
+        ears.vad.predict.return_value = 0.9
+        for _ in range(5):
+            ears.audio_queue.put(np.ones(1280, dtype=np.int16))
+        start = time.monotonic()
+        ears.record_command_with_vad()
+        return time.monotonic() - start
+
+    elapsed_detected = _run(0.5)  # 0.9 > 0.5 -> speech -> silence cut-off (~0.2)
+    elapsed_ignored = _run(0.95)  # 0.9 < 0.95 -> no speech -> no-speech abort (~0.8)
+    assert elapsed_detected < elapsed_ignored
