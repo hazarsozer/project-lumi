@@ -16,13 +16,13 @@ export function SettingsRoot() {
   const [currentValues, setCurrentValues] = useState<Record<string, unknown> | undefined>();
   const [updateResult, setUpdateResult] = useState<ConfigUpdateResult | null>(null);
 
-  // Request config schema from Brain on mount, and listen for schema + update results.
+  // Register the EV_BRAIN listener BEFORE emitting config_schema_request so
+  // that a fast (synchronous) schema response from the Brain is never dropped.
   useEffect(() => {
     let cancelled = false;
 
-    // Ask Brain to send the current config schema.
-    void tauriEmit(EV_CONFIG_SCHEMA_REQUEST, {});
-
+    // 1. Register the listener first — then emit the request so the response
+    //    is guaranteed to be received even if the Brain replies immediately.
     const p = tauriListen<LumiBrainEvent>(EV_BRAIN, (evt) => {
       if (evt.event === "config_schema") {
         setConfigSchema(evt.payload.fields);
@@ -34,6 +34,9 @@ export function SettingsRoot() {
         setTimeout(() => { if (!cancelled) setUpdateResult(null); }, 4000);
       }
     });
+
+    // 2. Ask Brain to send the current config schema — listener is already set up.
+    void tauriEmit(EV_CONFIG_SCHEMA_REQUEST, {});
 
     return () => {
       cancelled = true;

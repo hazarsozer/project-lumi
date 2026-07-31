@@ -11,7 +11,9 @@
 
 ## Current Status
 
-**Phases 1–9.5 + Rings 1 / 1.5 / 2 / 2.5 / 3 / 3.5 complete (closed 2026-05-04). Persona v2 + Q5_K_M is the active shipping candidate (`models/llm/lumi-phi35-v2-Q5_K_M.gguf`, 0/23 token corruption verified, 78.3% pass rate). Persona v2.1 retrain for Phi-prior suppression on indirect prompts is a pre-MVP polish item, not ship-blocking.**
+**v1.0 hardening IN PROGRESS on branch `hardening/crucible-v1.0`.** Phases 1–9.5 + Rings 1–3.5 complete. A Crucible review (2026-05-27) found three live integration regressions (R1 audio orphan, R2 empty LLM replies, R3 IPC handshake race) and graded the project BLOCKED 4.0/10. All three regressions are fixed; Crucible findings (#3–#44) are being closed in priority order. The branch has NOT been merged to main — the product is NOT yet shipped. Ship gate: see `DEFINITION_OF_DONE.md` and ADR 0010 (`docs/wiki/decisions/0010-v1-hardening-release-and-persona-freeze.md`).
+
+**Persona frozen** (per ADR 0010): `models/llm/lumi-phi35-v2.1-abliterated-a15-Q5_K_M.gguf` + `identity_guard_enabled: true`. No retraining during hardening. Persona meets the MVP bar (54% overall / 92% Category A / 0 brand PHI_PRIOR strings).
 
 | Phase / Ring | Name | Status |
 |---|---|---|
@@ -144,13 +146,13 @@
 - [x] Web search + datetime/timer tools — `src/tools/web_search.py`, `src/tools/datetime_tool.py`, `src/tools/timer_tool.py`
 - [x] End-to-end smoke test — `tests/integration/test_brain_e2e.py`
 
-### Ring 3 — In Progress
+### Ring 3 — Complete (2026-05-04, `bf0e2fe`)
 
-- Privacy/threat-model docs (backing the "privacy-first" claim)
-- Conversation memory rotation + LLM summarisation
-- Avatar artwork or animated SVG fallback
-- Repository hygiene: delete `src/ipc/ws_bridge.py` stub, clean `.gitignore`, scrub committed binaries
-- Orchestrator decomposition
+- [x] Privacy/threat-model docs (`PRIVACY.md`, `docs/THREAT_MODEL.md`)
+- [x] Conversation memory rotation + LLM summarisation
+- [x] IPC bearer-token handshake fail-closed
+- [x] Repository hygiene: `ws_bridge.py` deleted, `.gitignore` cleaned
+- [ ] Orchestrator decomposition — deferred post-MVP (ADR 0010, tracked as #36–#41)
 
 ---
 
@@ -216,4 +218,6 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design.
 
 ## Pre-Alpha Notice
 
-This is a work-in-progress. Phases 1–9.5 and Rings 1–2 are complete: the full audio-to-speech pipeline, Tauri/React overlay, OS tools, personal knowledge base RAG, runtime settings UI, first-run setup screen, Brain sidecar bundling, persona LoRA v1 training pipeline, streaming TTS, web and datetime/timer tools, and an E2E smoke test are all functional. Active work is Ring 3: privacy/threat-model docs, conversation memory rotation, avatar artwork, and repository hygiene. See [TODO.md](TODO.md) and [MVP_REPORT.md](MVP_REPORT.md) for the active work backlog.
+This is a work-in-progress. Phases 1–9.5 and Rings 1–3.5 are complete: the full audio-to-speech pipeline, Tauri/React overlay, OS tools, personal knowledge base RAG, runtime settings UI, first-run setup screen, Brain sidecar bundling, persona fine-tuning pipeline, streaming TTS, web and datetime/timer tools, IPC bearer-token auth, conversation memory rotation, and an E2E smoke test are all functional.
+
+**Active work is v1.0 hardening** on branch `hardening/crucible-v1.0`: three integration regressions (R1/R2/R3) are fixed; 42 Crucible findings are being closed in priority order; the product is not yet merged to main or shipped. See `DEFINITION_OF_DONE.md` for the ship gate. See [TODO.md](TODO.md) and [MVP_REPORT.md](MVP_REPORT.md) for the full backlog.

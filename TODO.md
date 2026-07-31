@@ -88,6 +88,28 @@ First pass landed `bb7a4cc`; architect audit found 3 critical + 4 high-severity 
 
 ---
 
+## v1.0 Hardening — IN PROGRESS on `hardening/crucible-v1.0` (2026-05-27 → present)
+
+A Crucible review (2026-05-27) graded the project BLOCKED 4.0/10 and found three live integration regressions hiding between unit-green components. The scope-reset decision and persona freeze are recorded in **ADR 0010** (`docs/wiki/decisions/0010-v1-hardening-release-and-persona-freeze.md`). The end-to-end live-test gate and ship criteria are in **`DEFINITION_OF_DONE.md`** (repo root). The 42 Crucible findings are tracked as GitHub issues `#3–#44` (label `crucible-audit`).
+
+Full postmortem at [[docs/wiki/postmortems/2026-05-27-three-integration-regressions-found-on-first-live-test]].
+
+### Integration Regressions (found 2026-05-27 — FIXED on hardening branch)
+
+- [x] **R1 — Audio pipeline orphan** (`src/audio/ears.py`): `_consumer_loop` posted `WakeDetectedEvent` and immediately returned to wake-listening; never called `record_command_with_vad` and never posted `RecordingCompleteEvent`. State machine sat in LISTENING forever after the first wake. **Fixed on `hardening/crucible-v1.0`.**
+- [x] **R2 — Reasoning router empty-token streaming** (`src/llm/reasoning_router.py:152-195`): `create_completion(max_tokens=1)` loop's first call decoded to `""` (EOS-class special token), causing `if not token: break` to exit with no collected output. Every WS response carried `tts_start.text = ""`. **Fixed on `hardening/crucible-v1.0`.**
+- [x] **R3 — IPC handshake race** (`src/core/handshake.py:50`, `app/src/ipc/client.ts:89-104`): Brain's `HANDSHAKE_TIMEOUT_S = 3.0` was shorter than Tauri's cold-start `invoke("read_ipc_token")` path. Brain disconnected with WS 1008. **Fixed on `hardening/crucible-v1.0`.**
+
+**Status:** R1/R2/R3 fixed; most P0/P1 Crucible findings closed; P2/P3 in progress. Branch NOT yet merged to main — product NOT yet shipped.
+
+**Workaround scripts (remain useful for headless testing):**
+- `scripts/chat_ws.py` — Python WS REPL/batch client bypassing Tauri.
+- `scripts/probe_persona.py` — direct model call bypassing orchestrator + router.
+
+**Lesson (now codified in `DEFINITION_OF_DONE.md`):** every ship and refactor claim must run `uv run python -m src.main` and exchange at least one message end-to-end. Eval against the direct LLM is necessary but not sufficient.
+
+---
+
 ## ~~1. `time` Module Shadow in `_mic_callback`~~ — DONE
 * **Context:** The `time` argument in `sounddevice`'s `_mic_callback` shadows the global `import time`, meaning any use of `time.monotonic()` in that function will crash.
 * **Resolution:** `ears.py` now uses `import time as _time` and all calls use `_time.monotonic()`.

@@ -72,16 +72,15 @@ def _mock_speaker() -> MagicMock:
 
 def _make_model_loader_cls(tokens: list[str]) -> MagicMock:
     """Return a mock ModelLoader class whose instance yields *tokens* then stops."""
-    call_count = 0
 
-    def _create_completion(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        nonlocal call_count
-        if call_count < len(tokens):
-            tok = tokens[call_count]
-            call_count += 1
-            finish = "stop" if call_count == len(tokens) else None
-            return {"choices": [{"text": tok, "finish_reason": finish}]}
-        return {"choices": [{"text": "", "finish_reason": "stop"}]}
+    def _create_completion(*args: Any, **kwargs: Any):
+        # Return a one-shot generator that streams all tokens, matching the
+        # llama.cpp stream=True protocol expected by ReasoningRouter.
+        def _gen():
+            for idx, tok in enumerate(tokens):
+                finish = "stop" if idx == len(tokens) - 1 else None
+                yield {"choices": [{"text": tok, "finish_reason": finish}]}
+        return _gen()
 
     mock_model = MagicMock()
     mock_model.is_loaded = True
@@ -164,8 +163,7 @@ def test_user_text_e2e_produces_llm_token_tts_start_tts_stop() -> None:
     ):
         orch = Orchestrator(config, speaker=speaker, tts=None)
 
-        # Wait for WSTransport to bind so bound_port is available.
-        time.sleep(_BIND_SETTLE_S)
+        # WSTransport.start() blocks until bound (_ready event); bound_port is valid.
         port = orch._event_bridge.bound_port  # type: ignore[union-attr]
         assert port is not None, "EventBridge did not bind to a port"
 
@@ -180,7 +178,7 @@ def test_user_text_e2e_produces_llm_token_tts_start_tts_stop() -> None:
 
         try:
             with FakeWSClient(port) as client:
-                time.sleep(_CONNECT_SETTLE_S)
+                # do_handshake() reads the hello frame — synchronises on accept.
                 client.do_handshake()
 
                 client.send_frame("user_text", {"text": _USER_QUERY})

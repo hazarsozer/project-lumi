@@ -170,7 +170,14 @@ def test_resolve_returns_none_when_persona_missing_task_fallback(mock_llama_cpp:
 
 @pytest.mark.unit
 def test_vram_lock_acquired_per_load(mock_llama_cpp: MagicMock) -> None:
-    """VRAM lock is acquired once per load() call (enforced inside ModelLoader)."""
+    """VRAM lock is acquired for each load() and unload() call.
+
+    With CR-14 fix: unload() now also acquires _VRAM_LOCK.  The sequence
+    load("a") + load("b") results in 3 lock acquisitions:
+      1. load("a")  → 1 acquire
+      2. load("b")  → unload("a") first (1 acquire) then load("b") (1 acquire)
+      Total: 3 acquires
+    """
     registry = ModelRegistry()
     registry.register("a", _cfg("a.gguf"))
     registry.register("b", _cfg("b.gguf"))
@@ -188,4 +195,5 @@ def test_vram_lock_acquired_per_load(mock_llama_cpp: MagicMock) -> None:
         registry.load("a")
         registry.load("b")
 
-    assert lock_mock.__enter__.call_count == 2
+    # 3 acquires: load("a") + unload("a") inside load("b") + load("b")
+    assert lock_mock.__enter__.call_count == 3

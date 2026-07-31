@@ -7,10 +7,30 @@ All modules should obtain loggers via:
 
 Call setup_logging() once at application startup (e.g., in main.py).
 Repeated calls are silently ignored via the module-level guard.
+
+Per-turn observability
+----------------------
+``utterance_id_var`` is a ``contextvars.ContextVar`` that holds the active
+turn's utterance id (a UUID4 string) for the duration of an LLM inference
+call.  It is ``None`` when no turn is in progress.
+
+Usage in the inference dispatcher::
+
+    from src.core.logging_config import utterance_id_var
+    token = utterance_id_var.set(uid)
+    try:
+        …inference…
+    finally:
+        utterance_id_var.reset(token)
+
+When JSON logging is enabled (``json_format=True``), ``_JsonFormatter`` reads
+the var and emits an ``"utterance_id"`` field on every log record that is
+emitted from within a turn context.
 """
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import traceback
@@ -21,17 +41,29 @@ _LOGGING_CONFIGURED: bool = False
 _DEV_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
 
+# ---------------------------------------------------------------------------
+# Per-turn context variable
+# ---------------------------------------------------------------------------
+
+#: Holds the active turn's utterance id (UUID4 string) or None between turns.
+#: Set by LLMInferenceDispatcher at turn start; reset at turn end.
+utterance_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "utterance_id_var", default=None
+)
+
 
 class _JsonFormatter(logging.Formatter):
     """Formats each log record as a single JSON object on one line.
 
     Output fields:
-        timestamp  — ISO-8601 datetime string
-        level      — uppercase level name (INFO, WARNING, …)
-        logger     — logger name (typically the module __name__)
-        message    — the formatted log message
-        exc_info   — formatted traceback string, present only when an
-                     exception is attached to the record
+        timestamp    — ISO-8601 datetime string
+        level        — uppercase level name (INFO, WARNING, …)
+        logger       — logger name (typically the module __name__)
+        message      — the formatted log message
+        utterance_id — active turn id if set via ``utterance_id_var``
+                       (omitted when no turn is in progress)
+        exc_info     — formatted traceback string, present only when an
+                       exception is attached to the record
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -41,6 +73,10 @@ class _JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
+
+        uid = utterance_id_var.get(None)
+        if uid is not None:
+            payload["utterance_id"] = uid
 
         if record.exc_info:
             payload["exc_info"] = "".join(

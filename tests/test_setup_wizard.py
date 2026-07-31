@@ -55,7 +55,7 @@ def _make_config(tmp_path: Path, model_path: str = "models/llm/phi-3.5-mini.gguf
 
 
 @pytest.mark.unit
-def test_creates_missing_dirs(tmp_path: Path) -> None:
+def test_creates_missing_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Wizard creates models/llm/, data/, and eval_results/ when absent."""
     from scripts.setup_wizard import run_setup
 
@@ -66,15 +66,10 @@ def test_creates_missing_dirs(tmp_path: Path) -> None:
 
     cfg = _make_config(tmp_path, model_path="models/llm/model.gguf")
 
-    # Run from tmp_path so relative paths resolve there.
-    import os
-
-    orig = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        rc = run_setup(yes=True, config_path=str(cfg))
-    finally:
-        os.chdir(orig)
+    # Use monkeypatch.chdir so pytest restores the original CWD automatically
+    # after the test, even if the test is interrupted by a timeout signal.
+    monkeypatch.chdir(tmp_path)
+    rc = run_setup(yes=True, config_path=str(cfg))
 
     assert rc == 0
     assert (tmp_path / "models" / "llm").is_dir()
@@ -88,7 +83,7 @@ def test_creates_missing_dirs(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_model_found_skips_prompt(tmp_path: Path) -> None:
+def test_model_found_skips_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When the model file exists, the wizard exits 0 without asking for input."""
     from scripts.setup_wizard import run_setup
 
@@ -98,15 +93,9 @@ def test_model_found_skips_prompt(tmp_path: Path) -> None:
 
     cfg = _make_config(tmp_path, model_path="models/llm/model.gguf")
 
-    import os
-
-    orig = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        with patch("builtins.input") as mock_input:
-            rc = run_setup(yes=False, config_path=str(cfg))
-    finally:
-        os.chdir(orig)
+    monkeypatch.chdir(tmp_path)
+    with patch("builtins.input") as mock_input:
+        rc = run_setup(yes=False, config_path=str(cfg))
 
     assert rc == 0
     # input() must NOT have been called because the model was already present.
@@ -119,21 +108,15 @@ def test_model_found_skips_prompt(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_model_missing_yes_flag_exits_1(tmp_path: Path) -> None:
+def test_model_missing_yes_flag_exits_1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When model is missing and --yes is set, wizard exits 1 (can't auto-download)."""
     from scripts.setup_wizard import run_setup
 
     # Model file does NOT exist.
     cfg = _make_config(tmp_path, model_path="models/llm/nonexistent.gguf")
 
-    import os
-
-    orig = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        rc = run_setup(yes=True, config_path=str(cfg))
-    finally:
-        os.chdir(orig)
+    monkeypatch.chdir(tmp_path)
+    rc = run_setup(yes=True, config_path=str(cfg))
 
     assert rc == 1
 
@@ -144,7 +127,7 @@ def test_model_missing_yes_flag_exits_1(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_config_writeback(tmp_path: Path) -> None:
+def test_config_writeback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When user provides a new model path, config.yaml is updated."""
     from scripts.setup_wizard import run_setup
 
@@ -156,16 +139,10 @@ def test_config_writeback(tmp_path: Path) -> None:
     # Config points at a non-existent path so the wizard prompts.
     cfg = _make_config(tmp_path, model_path="models/llm/missing.gguf")
 
-    import os
-
-    orig = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        # Simulate user entering the path to the new model file.
-        with patch("builtins.input", return_value=str(new_model)):
-            rc = run_setup(yes=False, config_path=str(cfg))
-    finally:
-        os.chdir(orig)
+    monkeypatch.chdir(tmp_path)
+    # Simulate user entering the path to the new model file.
+    with patch("builtins.input", return_value=str(new_model)):
+        rc = run_setup(yes=False, config_path=str(cfg))
 
     assert rc == 0
     updated = cfg.read_text(encoding="utf-8")
@@ -178,7 +155,7 @@ def test_config_writeback(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_noninteractive_known_good_config(tmp_path: Path) -> None:
+def test_noninteractive_known_good_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With --yes and a valid model present, wizard exits 0."""
     from scripts.setup_wizard import run_setup
 
@@ -188,14 +165,8 @@ def test_noninteractive_known_good_config(tmp_path: Path) -> None:
 
     cfg = _make_config(tmp_path, model_path="models/llm/phi-3.5-mini.gguf")
 
-    import os
-
-    orig = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        rc = run_setup(yes=True, config_path=str(cfg))
-    finally:
-        os.chdir(orig)
+    monkeypatch.chdir(tmp_path)
+    rc = run_setup(yes=True, config_path=str(cfg))
 
     assert rc == 0
 

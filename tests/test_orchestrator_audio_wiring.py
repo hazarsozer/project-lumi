@@ -171,12 +171,12 @@ def test_recording_complete_dispatches_scribe():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
-    # Give the daemon thread time to complete
+    # Poll until TranscriptReadyEvent appears in the queue.
     deadline = time.monotonic() + 4.0
     while time.monotonic() < deadline:
         if not orch._event_queue.empty():
             break
-        time.sleep(0.02)
+        time.sleep(0.005)
 
     assert not orch._event_queue.empty(), "TranscriptReadyEvent was never posted"
     event = orch._event_queue.get_nowait()
@@ -204,6 +204,9 @@ def test_recording_complete_ignored_when_idle():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
+    # Legitimate negative-test window: wait briefly to confirm no event is posted.
+    # The _handle_recording_complete in IDLE is synchronous (no thread dispatched),
+    # so any erroneous async action would appear within this window.
     time.sleep(0.15)
 
     assert orch._event_queue.empty(), "No event should have been posted"
@@ -223,6 +226,8 @@ def test_recording_complete_ignored_when_processing():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
+    # Legitimate negative-test window: no thread is dispatched in PROCESSING
+    # state, but we wait briefly to confirm nothing posts unexpectedly.
     time.sleep(0.15)
 
     assert orch._event_queue.empty(), "No event should have been posted"
@@ -426,12 +431,12 @@ def test_scribe_failure_returns_to_idle():
     audio = _sample_audio()
     orch._handle_recording_complete(RecordingCompleteEvent(audio=audio))
 
-    # Give daemon thread time to finish
+    # Poll until state recovers to IDLE after the STT error.
     deadline = time.monotonic() + 4.0
     while time.monotonic() < deadline:
         if orch._state_machine.current_state == LumiState.IDLE:
             break
-        time.sleep(0.02)
+        time.sleep(0.005)
 
     assert orch._state_machine.current_state == LumiState.IDLE
     assert orch._event_queue.empty(), "No TranscriptReadyEvent should be posted on error"
@@ -453,3 +458,47 @@ def test_no_ears_text_only_mode_runs_without_crash():
     orch.post_event(ShutdownEvent())
     # Must not raise
     orch.run()
+
+
+# ---------------------------------------------------------------------------
+# R4 regression — orchestrator must build a real TTS in the production path.
+# main.py constructs the Orchestrator without a `tts=` argument; before this
+# fix the orchestrator did not auto-build one, so _tts stayed None, every reply
+# hit the `tts is None` fast-path, and the Brain shipped permanently silent
+# regardless of config.tts.enabled.  Caught only by the DoD §2 live-test gate.
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_builds_tts_when_enabled_and_audio_out_not_injected() -> None:
+    """No speaker and no tts injected (the main.py path) → orchestrator builds a
+    real KokoroTTS, wired to the auto-created SpeakerThread, so it can speak."""
+    from src.audio.mouth import KokoroTTS
+    from src.core.orchestrator import Orchestrator
+
+    config = _minimal_config()  # tts defaults to TTSConfig(enabled=True)
+    assert config.tts.enabled is True  # guard: this is the scenario under test
+
+    with (
+        patch("src.core.orchestrator.ModelLoader"),
+        patch("src.core.orchestrator.ConversationMemory") as mock_mem_cls,
+        patch("src.core.orchestrator.ReasoningRouter"),
+        patch("src.audio.speaker.sd.OutputStream"),  # no real audio device
+        patch.object(KokoroTTS, "_load_model", lambda self: None),  # skip 89MB load
+    ):
+        mock_mem_cls.return_value.load = MagicMock()
+        orch = Orchestrator(config)  # no speaker, no tts → production path
+        try:
+            assert isinstance(orch._tts, KokoroTTS), (
+                "Orchestrator must auto-build KokoroTTS when config.tts.enabled "
+                "and no audio-out is injected (R4: Brain shipped silent)."
+            )
+            assert orch._tts._speaker is orch._speaker  # wired to the real speaker
+        finally:
+            orch._speaker.stop()
+
+
+def test_orchestrator_no_tts_when_speaker_injected() -> None:
+    """Injecting a speaker (the test path) must NOT auto-build a real TTS — the
+    89MB model stays unloaded and existing fixtures keep their None behaviour."""
+    orch = _make_orchestrator()
+    assert orch._tts is None

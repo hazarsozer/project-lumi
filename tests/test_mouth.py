@@ -836,3 +836,80 @@ def test_pre_cancel_does_not_cascade_to_next_utterance():
     # Silent mode posts SpeechCompletedEvent — synthesize ran normally.
     assert isinstance(event, SpeechCompletedEvent)
     assert event.utterance_id == "utt-2"
+
+
+# ---------------------------------------------------------------------------
+# CR-29 / Issue #30 — Streaming: first audio emitted before last sentence synth
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_first_audio_emitted_before_last_sentence_synthesised():
+    """First audio chunk must be emitted BEFORE the last sentence is synthesised.
+
+    With the one-chunk-behind buffer design used to correctly set is_final:
+      - sentence 0 create() → buffer chunk 0
+      - sentence 1 create() → emit chunk 0 (is_final=False), buffer chunk 1
+      - sentence 2 create() (LAST) → happens after chunk 0 has been emitted
+      - loop ends → emit chunk 2 (is_final=True)
+
+    We gate the LAST sentence's create() call until AFTER the first emit is
+    recorded, then assert ordering:
+        first_emit_time < last_create_time
+
+    The gate on sentence 2 (idx 2) is released by the _emit_chunk wrapper at
+    chunk_id=0.  Since the ordering is:
+        create[0] → buffer, create[1] → emit chunk 0, create[2] → [gated here]
+    the gate will be released (by the emit of chunk 0) before create[2] is
+    allowed to proceed, guaranteeing the assertion holds deterministically.
+    """
+    audio1 = _make_audio(480)
+    audio2 = _make_audio(480)
+    audio3 = _make_audio(480)
+
+    # Timeline markers.
+    first_emit_time: list[float] = []
+    last_create_time: list[float] = []
+
+    # Gate: blocks the LAST sentence's create() until after first emit is observed.
+    gate_for_last_sentence = threading.Event()
+
+    call_index = [0]  # mutable counter shared via closure
+    audios = [audio1, audio2, audio3]
+
+    def instrumented_create(sentence, **kwargs):
+        idx = call_index[0]
+        call_index[0] += 1
+        if idx == len(audios) - 1:
+            # Last sentence: wait until the gate is released (first chunk emitted).
+            gate_for_last_sentence.wait(timeout=5.0)
+            last_create_time.append(time.monotonic())
+        return (audios[idx], 24_000)
+
+    mock_kokoro = MagicMock()
+    mock_kokoro.create.side_effect = instrumented_create
+
+    tts, event_q, mock_speaker = _make_tts(mock_kokoro=mock_kokoro)
+
+    original_emit_chunk = tts._emit_chunk
+
+    def instrumented_emit_chunk(audio, chunk_id, is_final, utterance_id):
+        if chunk_id == 0 and not first_emit_time:
+            first_emit_time.append(time.monotonic())
+            gate_for_last_sentence.set()  # release the last sentence's create()
+        original_emit_chunk(
+            audio, chunk_id=chunk_id, is_final=is_final, utterance_id=utterance_id
+        )
+
+    tts._emit_chunk = instrumented_emit_chunk  # type: ignore[method-assign]
+
+    # Three distinct sentences so _split_sentences produces exactly 3.
+    tts.synthesize("One sentence. Two sentence. Three sentence.", utterance_id="utt-stream")
+
+    assert first_emit_time, "first audio chunk was never emitted"
+    assert last_create_time, "last sentence was never synthesised"
+
+    assert first_emit_time[0] < last_create_time[0], (
+        "first audio chunk must be emitted BEFORE the last sentence is synthesised "
+        f"(first_emit={first_emit_time[0]:.6f}, last_create={last_create_time[0]:.6f})"
+    )

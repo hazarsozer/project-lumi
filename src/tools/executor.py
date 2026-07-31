@@ -78,7 +78,12 @@ class ToolExecutor:
             args: dict[str, Any] = call.get("args") or {}
 
             logger.info(
-                "ToolExecutor: attempting tool '%s' with args %s.",
+                "ToolExecutor: attempting tool '%s' with arg keys %s.",
+                tool_name,
+                sorted(args.keys()),
+            )
+            logger.debug(
+                "ToolExecutor: full args for tool '%s': %s.",
                 tool_name,
                 args,
             )

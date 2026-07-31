@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 import queue
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any
 
 # Optional RAG import — only resolved when a retriever is actually injected.
 # Using TYPE_CHECKING avoids a circular-import risk at module load time.
-from typing import TYPE_CHECKING, Any
 
 from src.core.config import LLMConfig, LumiConfig
 from src.core.events import LLMTokenEvent, RAGRetrievalEvent
@@ -24,11 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 class ReasoningRouter:
-    """Routes complex queries through the local LLM for token-by-token generation.
+    """Routes complex queries through the local LLM for streamed generation.
 
-    Generation proceeds one token at a time so the cancel flag can be
-    observed between tokens — enabling low-latency interruption during
-    long-running inference.
+    Generation uses a single :py:meth:`~llama_cpp.Llama.create_completion`
+    call with ``stream=True``.  Chunks are yielded by llama.cpp as they are
+    produced, reducing C-API round-trips from ~200/response to O(1)/sentence
+    while preserving per-sentence TTS streaming via the ``on_sentence``
+    callback and low-latency cancel-flag checks between chunks.
     """
 
     def __init__(
@@ -144,36 +146,54 @@ class ReasoningRouter:
         collected: list[str] = []
         sentence_buf = ""
         prev_token: str | None = None
-        remaining = self._config.max_tokens
 
         # Sentence boundary suffixes that trigger an on_sentence flush.
         _BOUNDARIES = (". ", "! ", "? ", ".\n", "!\n", "?\n")
 
-        while remaining > 0:
-            if cancel_flag.is_set():
-                raise InterruptedError("Generation cancelled mid-stream")
+        logit_bias = self._model_loader.get_identity_guard_logit_bias(self._config)
 
-            logit_bias = self._model_loader.get_identity_guard_logit_bias(self._config)
-            chunk = model.create_completion(
-                prompt,
-                max_tokens=1,
-                temperature=self._config.temperature,
-                top_p=self._config.top_p,
-                top_k=self._config.top_k,
-                min_p=self._config.min_p,
-                repeat_penalty=self._config.repeat_penalty,
-                logit_bias=logit_bias or None,
-            )
+        _completion_kwargs: dict[str, Any] = dict(
+            max_tokens=self._config.max_tokens,
+            temperature=self._config.temperature,
+            top_p=self._config.top_p,
+            top_k=self._config.top_k,
+            min_p=self._config.min_p,
+            repeat_penalty=self._config.repeat_penalty,
+            logit_bias=logit_bias or None,
+            stream=True,
+        )
+
+        # Issue ONE create_completion call with stream=True so llama.cpp drives
+        # the generation loop internally and yields token chunks as they are
+        # produced.  This drops C-API round-trips from ~200/response to O(1).
+        # The caller MUST ensure the mock/real implementation returns an iterator
+        # when stream=True; plain-dict returns are not supported.
+        chunk_iter: Iterator[dict[str, Any]] = model.create_completion(
+            prompt, **_completion_kwargs
+        )
+
+        for chunk in chunk_iter:
             token: str = chunk["choices"][0]["text"]
+            finish_reason = chunk["choices"][0].get("finish_reason")
 
             if not token:
+                # An empty chunk mid-stream (after output has been collected) or
+                # with an explicit finish_reason signals end-of-sequence — stop.
+                # An empty chunk before any output is collected is a prefix
+                # special token (e.g. BOS/EOS artefact from llama.cpp); skip it
+                # so the iterator can reach the first real content token.
+                if finish_reason in ("stop", "length") or collected:
+                    break
+                continue
+
+            # Repeated-token guard: only active for mocks that emit tokens
+            # without a finish_reason; real streaming stops via finish_reason.
+            # Guarded to avoid truncating legitimately repeated tokens in real
+            # output (real llama.cpp always sends finish_reason on the last
+            # chunk).
+            if token == prev_token and finish_reason is None:
                 break
 
-            # Repeated token signals EOS when finish_reason is absent (e.g. in mocks)
-            if token == prev_token:
-                break
-
-            finish_reason = chunk["choices"][0].get("finish_reason")
             collected.append(token)
             sentence_buf += token
 
@@ -189,15 +209,26 @@ class ReasoningRouter:
                     on_sentence(flushed)
 
             prev_token = token
-            remaining -= 1
 
             if finish_reason in ("stop", "length"):
                 break
 
-        # One final cancel check: if the flag was set during the last token
-        # call, the while loop may have exited via remaining==0 rather than
-        # raising InterruptedError.  Discard the partial response rather than
-        # committing an incomplete assistant turn to memory.
+            # Check the cancel flag AFTER processing this chunk and BEFORE
+            # requesting the next one from the iterator.  This mirrors the
+            # original per-token loop's pre-call cancel check: the flag was
+            # checked before each model call, which is semantically equivalent
+            # to checking it after the previous chunk's processing completes.
+            # Placing the check here (not at loop-top) ensures that a cancel set
+            # *during* the final chunk retrieval is handled by the post-loop
+            # check below (raising "final token") rather than this guard.
+            if cancel_flag.is_set():
+                raise InterruptedError("Generation cancelled mid-stream")
+
+        # Post-loop cancel check: if the cancel flag was set during retrieval of
+        # the last chunk (e.g. finish_reason="stop" arrived simultaneously with
+        # the flag being raised), the for loop exited normally without seeing the
+        # flag.  Discard the partial response rather than committing an incomplete
+        # assistant turn to memory.
         if cancel_flag.is_set():
             raise InterruptedError("Generation cancelled during final token")
 

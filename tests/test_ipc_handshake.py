@@ -21,6 +21,20 @@ import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+
+def _wait_for(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
+    """Poll *predicate* every *interval* seconds until it returns True or *timeout* expires.
+
+    Returns True if the predicate became True within the deadline, False otherwise.
+    Used to replace sleep-and-hope synchronisation with a deterministic bounded wait.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()  # one final check
+
 import pytest
 
 from src.core.handshake import (
@@ -170,8 +184,10 @@ def test_brain_logs_warning_on_handshake_timeout() -> None:
         with patch.object(logging.getLogger(logger_name), "warning") as mock_warn:
             handler.on_client_connected()
             # Do NOT call on_message_received — simulate missing ack.
-            # Wait for the background timeout thread to fire.
-            time.sleep(0.2)
+            # Poll for the handshake to complete (timer fires at 0.05 s).
+            assert _wait_for(handler.is_handshake_complete, timeout=2.0), (
+                "Handshake never completed via timeout"
+            )
 
         assert mock_warn.call_count >= 1
         warning_text = " ".join(str(a) for a in mock_warn.call_args[0])
@@ -304,8 +320,10 @@ def test_timeout_does_not_fire_when_ack_received() -> None:
             handler.on_client_connected()
             # Deliver ack immediately — well before the 0.2 s timeout.
             handler.on_message_received(_ack_frame(status="ok"))
-            # Wait past what would have been the timeout window.
-            time.sleep(0.35)
+            # Verify the timer was cancelled synchronously (Timer.finished set by cancel()).
+            assert _wait_for(
+                lambda: handler._timeout_timer is None, timeout=0.5
+            ), "Timer was not cancelled after ack was received"
 
         mock_warn.assert_not_called()
 
@@ -321,7 +339,11 @@ def test_timeout_does_not_fire_when_ack_received() -> None:
 
 @pytest.mark.unit
 def test_timer_cancelled_on_reconnect() -> None:
-    """A second on_client_connected() cancels the previous timer before starting a new one."""
+    """A second on_client_connected() cancels the previous timer before starting a new one.
+
+    Deterministic: checks Timer.finished (set synchronously by cancel()) rather
+    than is_alive() which races with thread teardown.
+    """
     transport = _make_transport()
 
     with patch("src.core.handshake.HANDSHAKE_TIMEOUT_S", 5.0):
@@ -334,9 +356,11 @@ def test_timer_cancelled_on_reconnect() -> None:
         # Simulate reconnect — second call should cancel the first timer.
         handler.on_client_connected()
 
-    # The previous timer object must have been cancelled (is_alive → False)
-    # and a new timer is now armed.
-    assert not first_timer.is_alive(), "First timer should have been cancelled on reconnect"
+    # Timer.finished is the internal threading.Event that cancel() sets
+    # synchronously.  Checking it is race-free (no dependency on thread exit).
+    assert first_timer.finished.is_set(), (
+        "First timer's cancel() was never called on reconnect"
+    )
     # Clean up
     if handler._timeout_timer is not None:
         handler._timeout_timer.cancel()
@@ -540,7 +564,10 @@ def test_timeout_with_token_disconnects() -> None:
     with patch("src.core.handshake.HANDSHAKE_TIMEOUT_S", 0.05):
         handler = HandshakeHandler(transport, expected_token="token")
         handler.on_client_connected()
-        time.sleep(0.2)  # let the timer fire
+        # Poll for the timeout timer to fire (timeout configured at 0.05 s).
+        assert _wait_for(handler.is_handshake_complete, timeout=2.0), (
+            "Handshake did not complete via timeout"
+        )
 
     transport.disconnect_client.assert_called_once()
 
@@ -558,7 +585,10 @@ def test_timeout_without_token_continues() -> None:
     with patch("src.core.handshake.HANDSHAKE_TIMEOUT_S", 0.05):
         handler = HandshakeHandler(transport)
         handler.on_client_connected()
-        time.sleep(0.2)
+        # Poll for the timeout timer to fire (timeout configured at 0.05 s).
+        assert _wait_for(handler.is_handshake_complete, timeout=2.0), (
+            "Handshake did not complete via timeout"
+        )
 
     transport.disconnect_client.assert_not_called()
     assert handler.is_handshake_complete()

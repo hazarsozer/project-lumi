@@ -43,6 +43,7 @@ from src.core.config import (
     ToolsConfig,
     TTSConfig,
     VisionConfig,
+    _validate_ipc_address,
 )
 from src.core.config_schema import FIELD_META
 from src.core.config_writer import write_config
@@ -203,20 +204,88 @@ class ConfigManager:
         manager = ConfigManager(load_config())
         manager.register_observer("llm", my_llm_engine)
         result = manager.apply({"audio.sensitivity": 0.6}, persist=False)
+
+    Atomicity guarantee (CR-13)
+    ----------------------------
+    ``current`` never returns a config snapshot while a notification round is
+    in progress.  Concretely: ``_notify_epoch`` is incremented (under
+    ``_lock``) right before the notification loop begins; ``_notify_done_epoch``
+    is incremented and ``_notify_cond`` is broadcast after the last observer
+    returns.  Any reader that finds ``_notify_epoch != _notify_done_epoch``
+    waits on ``_notify_cond`` before returning the config.
+
+    This eliminates the window between the config commit (end of Phase 2) and
+    the end of the observer notification loop (end of Phase 4) that was
+    identified in GitHub issue #14.
+
+    Deadlock freedom
+    ----------------
+    - ``_lock`` (RLock) is NEVER held while observers are called (snapshot
+      under lock, iterate outside).
+    - ``_notify_cond`` uses its own internal lock, separate from ``_lock``.
+      It is acquired only in ``current`` (readers) and at the very end of
+      Phase 4 (after all locks on ``_config`` have been released).
+    - Observers that call back into ``ConfigManager`` (e.g. reading
+      ``current``) will wait on ``_notify_cond`` until the notification
+      round completes — they will NOT deadlock because ``_lock`` is not held
+      during that wait, and Phase 4 will eventually release ``_notify_cond``.
     """
 
     def __init__(self, config: LumiConfig) -> None:
         self._config: LumiConfig = config
         self._lock: threading.RLock = threading.RLock()
         self._observers: dict[str, ConfigObserver] = {}
+        # Notification-round tracking for CR-13 atomicity.
+        self._notify_epoch: int = 0       # incremented when a round BEGINS
+        self._notify_done_epoch: int = 0  # incremented when a round ENDS
+        self._notify_cond: threading.Condition = threading.Condition()
+        # Public monotonic version counter (increments on each hot-field change).
+        self._config_version: int = 0
 
     # ------------------------------------------------------------------
     # Public properties
     # ------------------------------------------------------------------
 
     @property
+    def config_version(self) -> int:
+        """Monotonic counter that increments each time a hot-reloadable field
+        actually changes.  Stable (not incremented) for restart-required-only
+        or no-op applies."""
+        with self._lock:
+            return self._config_version
+
+    @property
     def current(self) -> LumiConfig:
-        """Return the current (possibly updated) config snapshot."""
+        """Return the current config snapshot.
+
+        Blocks briefly if a notification round is in progress so that no
+        caller ever observes a new config version whose observers have not
+        yet been notified (CR-13).
+        """
+        # Fast path: no notification round active — just grab the config.
+        with self._lock:
+            epoch = self._notify_epoch
+            done_epoch = self._notify_done_epoch
+            cfg = self._config
+
+        if epoch == done_epoch:
+            # No active notification round.
+            return cfg
+
+        # Slow path: a notification round is in progress.  Wait until it
+        # completes, then re-read the config.
+        #
+        # Liveness assumption: observers must not block indefinitely inside
+        # reconfigure().  The current observers are trivial attribute
+        # assignments, so this is safe.  A hung observer (one that blocks
+        # rather than raises) would stall every config reader here — there is
+        # no timeout-return because returning early would weaken the
+        # no-stale-read guarantee (CR-13).  If observers are ever extended to
+        # do I/O or lock acquisition, add an explicit timeout + cancellation
+        # mechanism in the observer contract rather than weakening this wait.
+        with self._notify_cond:
+            while self._notify_epoch != self._notify_done_epoch:
+                self._notify_cond.wait(timeout=1.0)
         with self._lock:
             return self._config
 
@@ -300,6 +369,27 @@ class ConfigManager:
             )
 
         # ------------------------------------------------------------------
+        # Phase 1b: Cross-field IPC address loopback validation.
+        #
+        # If ipc.address is being changed, enforce that it is loopback (or that
+        # ipc.allow_non_loopback is True — either already in the current config
+        # or in this same batch of changes).
+        # ------------------------------------------------------------------
+        if "ipc.address" in coerced:
+            effective_allow = coerced.get(
+                "ipc.allow_non_loopback",
+                self._config.ipc.allow_non_loopback,
+            )
+            try:
+                _validate_ipc_address(coerced["ipc.address"], effective_allow)
+            except ValueError as exc:
+                return ConfigUpdateResult(
+                    applied_live=[],
+                    pending_restart=[],
+                    errors={"ipc.address": str(exc)},
+                )
+
+        # ------------------------------------------------------------------
         # Phase 2: Build the updated config under the lock.
         # ------------------------------------------------------------------
         hot_changed_keys: list[str] = []
@@ -350,6 +440,22 @@ class ConfigManager:
             )
             self._config = new_config
 
+            # If any hot-reloadable field actually changed, bump the version
+            # and open a notification epoch BEFORE releasing the lock.  This
+            # ensures that any reader acquiring the lock after this point will
+            # see the new config AND the in-progress epoch, causing them to
+            # wait for the notification round to complete (CR-13).
+            #
+            # We capture the epoch value opened for THIS round so that Phase 4
+            # can close it precisely — even if a concurrent apply() call
+            # increments _notify_epoch further while observers are running, we
+            # only close our own round (setting _notify_done_epoch to our
+            # epoch, not bumping blindly with +=1 which could overshoot).
+            if hot_changed_keys:
+                self._config_version += 1
+                self._notify_epoch += 1
+                opened_epoch = self._notify_epoch
+
         # ------------------------------------------------------------------
         # Phase 3: Persist (outside the lock — IO should not block readers).
         # ------------------------------------------------------------------
@@ -368,20 +474,39 @@ class ConfigManager:
             with self._lock:
                 observers_snapshot = dict(self._observers)
 
-            for obs_name, observer in observers_snapshot.items():
-                try:
-                    observer.reconfigure(new_config)
-                    logger.debug(
-                        "ConfigManager: notified observer '%s' for keys %s.",
-                        obs_name,
-                        hot_changed_keys,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "ConfigManager: observer '%s' raised during " "reconfigure: %s",
-                        obs_name,
-                        exc,
-                    )
+            # The try/finally guarantees that _notify_done_epoch is ALWAYS
+            # advanced to match our opened_epoch and _notify_cond is ALWAYS
+            # broadcast — even if a BaseException (KeyboardInterrupt, etc.)
+            # fires during observer iteration, or if notify_all itself raises.
+            # Without this guard any such failure leaves _notify_done_epoch
+            # behind _notify_epoch permanently, causing every future
+            # manager.current slow-path caller to spin-wait forever.
+            #
+            # The done-epoch is SET to opened_epoch (not +=1) so that this
+            # round closes exactly its own slot even when a concurrent apply()
+            # has already bumped _notify_epoch further.
+            try:
+                for obs_name, observer in observers_snapshot.items():
+                    try:
+                        observer.reconfigure(new_config)
+                        logger.debug(
+                            "ConfigManager: notified observer '%s' for keys %s.",
+                            obs_name,
+                            hot_changed_keys,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "ConfigManager: observer '%s' raised during "
+                            "reconfigure: %s",
+                            obs_name,
+                            exc,
+                        )
+            finally:
+                # Close the notification epoch: mark the round complete and
+                # wake any readers that were waiting in current().
+                with self._notify_cond:
+                    self._notify_done_epoch = opened_epoch
+                    self._notify_cond.notify_all()
 
         logger.debug(
             "ConfigManager.apply(): live=%s restart=%s errors=%s",

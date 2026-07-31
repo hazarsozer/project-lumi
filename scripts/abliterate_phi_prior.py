@@ -310,17 +310,41 @@ def quantize(
 
 
 def run_identity_probe(output_gguf: Path, probe_output: Path, dry_run: bool) -> None:
+    """Run the identity probe using the shipping-candidate sampling config.
+
+    Sampling params are taken from ``eval_identity.SHIPPING_*`` constants,
+    which mirror production ``config.yaml`` values.  Passing them explicitly
+    keeps the probe aligned with the config the shipped model uses and ensures
+    the probe output JSON is a reproducible artifact.
+    """
     logger.info("Step 4 — Running identity probe (41 prompts)")
     if dry_run:
         logger.info("  [dry-run] skipping probe")
         return
 
-    probe_script = Path(__file__).parent / "eval_identity.py"
+    # Import shipping constants without importing the full src stack — the
+    # eval_identity script is a sibling file, importable via sys.path.
+    _scripts_dir = Path(__file__).parent
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("eval_identity", _scripts_dir / "eval_identity.py")
+    _ei = _ilu.module_from_spec(_spec)  # type: ignore[arg-type]
+    _spec.loader.exec_module(_ei)  # type: ignore[union-attr]
+
+    probe_script = _scripts_dir / "eval_identity.py"
     cmd = [
         sys.executable, str(probe_script),
         "--live",
         "--model-path", str(output_gguf),
         "--output", str(probe_output),
+        # Shipping-candidate sampling — aligned with production config.yaml and
+        # eval_identity.SHIPPING_* constants so the post-abliteration probe
+        # uses the same sampler config as the shipped metric.
+        "--temperature",    str(_ei.SHIPPING_TEMPERATURE),
+        "--top-p",          str(_ei.SHIPPING_TOP_P),
+        "--top-k",          str(_ei.SHIPPING_TOP_K),
+        "--min-p",          str(_ei.SHIPPING_MIN_P),
+        "--repeat-penalty", str(_ei.SHIPPING_REPEAT_PENALTY),
+        "--max-tokens",     str(_ei.SHIPPING_MAX_TOKENS),
     ]
     logger.info("  Running: %s", " ".join(cmd))
     result = subprocess.run(cmd, text=True)

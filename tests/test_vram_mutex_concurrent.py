@@ -1,37 +1,31 @@
 """
 VRAM mutex concurrency tests for ModelLoader + ScreenshotTool.
 
-This test file documents and verifies whether ModelLoader.load() and
-ScreenshotTool._describe() share a common threading.Lock that prevents
-concurrent VRAM use.
+This test file verifies that ModelLoader.load() and ScreenshotTool._describe()
+share a common threading.RLock (_VRAM_LOCK) that prevents concurrent VRAM use.
 
-## Findings (discovered while writing these tests)
+## Implementation (CR-14 — now fixed)
 
-- ScreenshotTool owns a private self._model_lock (threading.Lock) that
-  protects its own _describe() and _unload_vision_model() methods.
-- ModelLoader has NO threading.Lock whatsoever. Its load() / unload() /
-  is_loaded are entirely unprotected.
-- The "VRAM mutual exclusion" is one-directional: ScreenshotTool acquires
-  ITS OWN lock and then calls llm_loader.unload() — but if a second thread
-  is simultaneously calling ModelLoader.load(), no synchronisation blocks it.
+- ModelLoader exposes a module-level RLock via self._vram_lock (_VRAM_LOCK).
+  _load_gguf() and unload() both acquire it, serialising all GGUF lifecycle ops.
+- ScreenshotTool.__init__ assigns self._model_lock = llm_loader._vram_lock
+  (the same object) when an llm_loader is provided, falling back to a private
+  Lock when no llm_loader is given (tests without a real LLM loader).
+- RLock (re-entrant) prevents deadlock when ScreenshotTool._describe() holds
+  the lock and then calls ModelLoader.unload() (which also acquires it).
 
-## Test outcomes
+## Test outcomes (all PASS as of CR-14)
 
 - test_model_loader_and_vision_share_same_lock:
-    FAILS — the lock objects are different instances (ModelLoader has none).
+    PASSES — ModelLoader exposes _vram_lock; ScreenshotTool assigns _model_lock
+    to the same object.
 
 - test_concurrent_load_and_screenshot_serialize:
-    FAILS — ModelLoader.load() runs without acquiring any shared lock, so it
-    can overlap with ScreenshotTool._describe().
+    PASSES — instrumented_load acquires self._vram_lock; instrumented_describe
+    acquires self._model_lock (same object), so load_start >= describe_end.
 
 - test_no_deadlock_on_sequential_use:
-    PASSES — sequential use never deadlocks because ModelLoader never blocks
-    on a lock that ScreenshotTool holds.
-
-These failing tests are intentional regression markers.  The fix would be:
-  1. Add a module-level (or injected) threading.Lock to ModelLoader.
-  2. Acquire that same lock inside ModelLoader.load() / unload().
-  3. Pass the lock to ScreenshotTool so both classes use the same instance.
+    PASSES — RLock is re-entrant so nested acquisition does not deadlock.
 """
 
 from __future__ import annotations
@@ -79,12 +73,10 @@ def _make_llm_config() -> LLMConfig:
 def test_model_loader_and_vision_share_same_lock() -> None:
     """ModelLoader and ScreenshotTool must share the same threading.Lock instance.
 
-    This test FAILS with the current implementation because:
-    - ModelLoader has no threading.Lock at all.
-    - ScreenshotTool creates its own private self._model_lock.
-
-    The fix: expose a shared lock (e.g. passed via constructor or a
-    module-level singleton) so both classes acquire the same object.
+    Asserts the CR-14 fix:
+    - ModelLoader exposes self._vram_lock (the module-level _VRAM_LOCK RLock).
+    - ScreenshotTool.__init__ assigns self._model_lock = llm_loader._vram_lock
+      (the same object), so both classes acquire the same lock for VRAM ops.
     """
     loader = ModelLoader()
     tool = _make_vision_tool(llm_loader=loader)
@@ -114,16 +106,16 @@ def test_model_loader_and_vision_share_same_lock() -> None:
 def test_concurrent_load_and_screenshot_serialize() -> None:
     """ModelLoader.load() and ScreenshotTool._describe() must not overlap.
 
-    This test FAILS with the current implementation because ModelLoader.load()
-    acquires no lock, so both threads proceed simultaneously.
+    Asserts the CR-14 fix: both methods acquire the same RLock so their
+    critical sections are mutually exclusive.
 
     Mechanism:
     - Thread A calls ScreenshotTool._describe() which acquires _model_lock
-      and then sleeps 0.15 s (simulating slow GGUF load).
-    - Thread B calls ModelLoader.load() at the same time.
-    - If the mutex is shared, thread B must wait until A's 0.15 s sleep ends.
-    - We measure the start times of both critical sections; overlap means
-      B's critical section started before A's ended.
+      (= ModelLoader._vram_lock) and then sleeps 0.15 s.
+    - Thread B calls ModelLoader.load() at the same time; its instrumented
+      version acquires self._vram_lock (the same RLock) → must wait.
+    - We measure the start times of both critical sections; if the mutex is
+      shared, load_start >= describe_end (no overlap).
     """
     loader = ModelLoader()
     tool = _make_vision_tool(llm_loader=loader)
@@ -201,10 +193,9 @@ def test_concurrent_load_and_screenshot_serialize() -> None:
 def test_no_deadlock_on_sequential_use() -> None:
     """Sequential load() then ScreenshotTool.execute() must complete within 2s.
 
-    This test PASSES with the current implementation because ModelLoader never
-    blocks on a lock.  It is included as a regression guard: once the shared
-    lock is introduced, this test ensures the implementation does not deadlock
-    (e.g. via nested acquisition on the same non-reentrant Lock).
+    Regression guard: _VRAM_LOCK is a threading.RLock (re-entrant), so
+    nested acquisition from the same thread (e.g. ScreenshotTool._describe()
+    calling ModelLoader.unload() while holding the lock) does not deadlock.
     """
     loader = ModelLoader()
     tool = _make_vision_tool(llm_loader=loader)

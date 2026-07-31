@@ -110,9 +110,7 @@ def ipc_stack(
     )
     try:
         server.start()
-        # Give the accept loop thread time to reach the select() call so it
-        # is ready to accept connections before any test code connects.
-        time.sleep(0.05)
+        # start() blocks until the WS server is bound (_ready event); no sleep needed.
         port = server.bound_port
         assert port is not None, "EventBridge.bound_port is None after start()"
         yield server, port
@@ -148,7 +146,8 @@ def test_client_receives_state_change_on_connect(
 
     with FakeTCPClient(port) as client:
         # Let the accept loop register the new connection.
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame the server sends on connect;
+        # it synchronises on the connection being accepted before proceeding.
         client.do_handshake()
 
         state_machine.transition_to(LumiState.LISTENING)
@@ -186,7 +185,8 @@ def test_client_send_interrupt_posts_to_queue(
     _, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame the server sends on connect;
+        # it synchronises on the connection being accepted before proceeding.
         client.do_handshake()
         client.send_frame("interrupt", {})
 
@@ -220,7 +220,8 @@ def test_client_send_user_text_posts_to_queue(
     _, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame the server sends on connect;
+        # it synchronises on the connection being accepted before proceeding.
         client.do_handshake()
         client.send_frame("user_text", {"text": "hello"})
 
@@ -253,7 +254,8 @@ def test_client_send_rag_set_enabled_posts_to_queue(
     _, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame the server sends on connect;
+        # it synchronises on the connection being accepted before proceeding.
         client.do_handshake()
         client.send_frame("rag_set_enabled", {"enabled": True})
 
@@ -291,16 +293,15 @@ def test_malformed_frame_does_not_crash_server(
     zmq_server, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame the server sends on connect;
+        # it synchronises on the connection being accepted before proceeding.
         client.do_handshake()
 
         # Send a frame whose body is not valid JSON (raw ASCII, no braces).
         client.send_raw_frame(b"NOTJSON")
 
-        # Give the recv callback time to process the bad frame.
-        time.sleep(_RECV_SETTLE_S)
-
-        # Server must still be alive — trigger a state transition.
+        # Trigger a state change immediately after the bad frame.  If the
+        # server crashed, recv_frame() would timeout — that IS the assertion.
         state_machine.transition_to(LumiState.LISTENING)
 
         msg = client.recv_frame(timeout=_RECV_TIMEOUT_S)
@@ -333,7 +334,8 @@ def test_server_sends_tts_start(
     zmq_server, port = ipc_stack
 
     with FakeTCPClient(port) as client:
-        time.sleep(_CONNECT_SETTLE_S)
+        # do_handshake() reads the hello frame the server sends on connect;
+        # it synchronises on the connection being accepted before proceeding.
         client.do_handshake()
 
         zmq_server.on_tts_start(LLMResponseReadyEvent(text="hello"))

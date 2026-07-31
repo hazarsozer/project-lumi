@@ -11,6 +11,17 @@ import pytest
 
 pytest.importorskip("sentence_transformers")
 
+# Root of the repository — resolved once so subprocess.run can pin cwd= to it
+# regardless of any os.chdir() calls made by other tests in the full suite.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Each test in TestIngestScript spawns at least one subprocess that loads the
+# SentenceTransformer model (~7–20 s per call on a warm disk cache; longer
+# under memory pressure after other tests have run).  Two-subprocess tests
+# (idempotent, force, changed-file) need up to ~60 s total.  We use 120 s as
+# a conservative per-test timeout so the 30 s global backstop does not fire.
+_INGEST_TIMEOUT = 120
+
 
 def _run_ingest(
     corpus: Path, db: Path, extra_args: list[str] | None = None
@@ -23,7 +34,10 @@ def _run_ingest(
         "--db",
         str(db),
     ] + (extra_args or [])
-    return subprocess.run(cmd, capture_output=True, text=True)
+    # cwd= is pinned to the project root so the subprocess always finds
+    # scripts/ingest_docs.py and config.yaml via relative paths, independent
+    # of any os.chdir() calls made by other tests in the same pytest session.
+    return subprocess.run(cmd, capture_output=True, text=True, cwd=str(_PROJECT_ROOT))
 
 
 def _write_doc(directory: Path, name: str, content: str) -> Path:
@@ -33,6 +47,7 @@ def _write_doc(directory: Path, name: str, content: str) -> Path:
 
 
 class TestIngestScript:
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_exits_zero_on_success(self, tmp_path: Path):
         corpus = tmp_path / "docs"
         corpus.mkdir()
@@ -41,6 +56,7 @@ class TestIngestScript:
         result = _run_ingest(corpus, db)
         assert result.returncode == 0, result.stderr
 
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_ingests_md_and_txt(self, tmp_path: Path):
         corpus = tmp_path / "docs"
         corpus.mkdir()
@@ -51,6 +67,7 @@ class TestIngestScript:
         assert result.returncode == 0
         assert "OK" in result.stderr or "ok" in result.stderr.lower()
 
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_idempotent_second_run_skips(self, tmp_path: Path):
         corpus = tmp_path / "docs"
         corpus.mkdir()
@@ -62,6 +79,7 @@ class TestIngestScript:
         assert result2.returncode == 0
         assert "SKIPPED" in result2.stderr or "skipped" in result2.stderr.lower()
 
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_force_flag_reingest(self, tmp_path: Path):
         corpus = tmp_path / "docs"
         corpus.mkdir()
@@ -77,6 +95,7 @@ class TestIngestScript:
             or "0 skipped" in result.stderr.lower()
         )
 
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_changed_file_reingested(self, tmp_path: Path):
         corpus = tmp_path / "docs"
         corpus.mkdir()
@@ -89,6 +108,7 @@ class TestIngestScript:
         assert result.returncode == 0
         assert "OK" in result.stderr or "ok" in result.stderr.lower()
 
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_empty_corpus_exits_zero(self, tmp_path: Path):
         corpus = tmp_path / "empty"
         corpus.mkdir()
@@ -97,10 +117,12 @@ class TestIngestScript:
         assert result.returncode == 0
 
     def test_missing_corpus_exits_nonzero(self, tmp_path: Path):
+        # No model load — exits before reaching get_embedder(); default 30 s is fine.
         db = tmp_path / "rag.db"
         result = _run_ingest(tmp_path / "nonexistent", db)
         assert result.returncode != 0
 
+    @pytest.mark.timeout(_INGEST_TIMEOUT)
     def test_unsupported_files_ignored(self, tmp_path: Path):
         corpus = tmp_path / "docs"
         corpus.mkdir()

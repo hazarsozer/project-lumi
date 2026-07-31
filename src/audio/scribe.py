@@ -69,6 +69,7 @@ class Scribe:
         model_size: str = "tiny.en",
         device: str = "cpu",
         initial_prompt: str = "Lumi, Firefox, browser, desktop assistant.",
+        beam_size: int = 1,
     ):
         """
         Scribe converts audio to text.
@@ -76,8 +77,12 @@ class Scribe:
             model_size: The size of the model to use.
             device: The device to use for inference.
             initial_prompt: Context injection for the transcription model.
+            beam_size: Beam search width for Whisper. Default 1 (greedy) is
+                ~40-60% faster than beam_size=5 and sufficient for the
+                assistant query path.
         """
         self.initial_prompt = initial_prompt
+        self.beam_size = beam_size
         logger.info("Loading Whisper model: %s on %s...", model_size, device)
 
         # Load the model on int8 quantization
@@ -105,7 +110,7 @@ class Scribe:
 
         # Transcribe the audio
         segments, info = self.model.transcribe(
-            audio_data, beam_size=5, initial_prompt=prompt
+            audio_data, beam_size=self.beam_size, initial_prompt=prompt
         )
 
         # Combine segments into a single text string

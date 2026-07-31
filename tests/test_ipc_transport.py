@@ -25,6 +25,39 @@ import time
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
+
+# ---------------------------------------------------------------------------
+# Deterministic sync helpers
+# ---------------------------------------------------------------------------
+
+
+def _wait_for(predicate, timeout: float = 2.0, interval: float = 0.005) -> bool:
+    """Poll *predicate* every *interval* seconds until True or *timeout* expires.
+
+    Replaces thread-synchronisation time.sleep() calls with a bounded poll.
+    Returns True if the predicate became True within the deadline.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def _wait_connected(transport: "IPCTransport", timeout: float = 2.0) -> None:
+    """Block until transport.is_connected() is True or *timeout* expires."""
+    assert _wait_for(transport.is_connected, timeout=timeout), (
+        f"Transport did not become connected within {timeout}s"
+    )
+
+
+def _wait_disconnected(transport: "IPCTransport", timeout: float = 2.0) -> None:
+    """Block until transport.is_connected() is False or *timeout* expires."""
+    assert _wait_for(lambda: not transport.is_connected(), timeout=timeout), (
+        f"Transport did not become disconnected within {timeout}s"
+    )
+
 import pytest
 
 from src.core.ipc_transport import (
@@ -77,8 +110,9 @@ def transport() -> Generator[IPCTransport, None, None]:
     """
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    # Brief wait for the accept loop to start listening.
-    time.sleep(0.05)
+    # Wait for the accept thread to be alive (bound_port is set before thread launch,
+    # but the thread must be alive before we can accept connections).
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
     try:
         yield t
     finally:
@@ -103,8 +137,8 @@ def test_send_receive_roundtrip(transport: IPCTransport) -> None:
     payload = b'{"event": "state_change", "payload": {"state": "idle"}}'
     client = _connect(transport.bound_port)
     try:
-        # Give _accept_loop time to accept the connection and set _client_sock.
-        time.sleep(0.05)
+        # Wait for _accept_loop to accept the connection and set _client_sock.
+        _wait_connected(transport)
 
         transport.send(payload)
 
@@ -123,7 +157,7 @@ def test_receive_callback_fires(transport: IPCTransport) -> None:
 
     client = _connect(transport.bound_port)
     try:
-        time.sleep(0.05)  # Wait for accept
+        _wait_connected(transport)  # Wait for accept
 
         payload = b'{"event": "interrupt", "payload": {}}'
         client.sendall(_encode_frame(payload))
@@ -146,13 +180,13 @@ def test_partial_read_handling(transport: IPCTransport) -> None:
 
     client = _connect(transport.bound_port)
     try:
-        time.sleep(0.05)  # Wait for accept
+        _wait_connected(transport)  # Wait for accept
 
         # Send one byte at a time to exercise the accumulator in _recv_loop.
         for byte in frame:
             client.send(bytes([byte]))
             # Tiny sleep to prevent the OS from coalescing sends into one packet.
-            time.sleep(0.001)
+            time.sleep(0.001)  # Legitimate: prevents OS TCP coalescing, not thread-sync
 
         result = received_q.get(timeout=2.0)
     finally:
@@ -169,16 +203,16 @@ def test_client_disconnect_reconnect(transport: IPCTransport) -> None:
 
     # First client connects then disconnects.
     first = _connect(transport.bound_port)
-    time.sleep(0.05)
+    _wait_connected(transport)
     first.close()
 
-    # Give _recv_loop time to detect the close and clear _client_sock.
-    time.sleep(0.1)
+    # Poll until _recv_loop detects the close and clears _client_sock.
+    _wait_disconnected(transport)
 
     # Second client connects.
     second = _connect(transport.bound_port)
     try:
-        time.sleep(0.05)  # Wait for accept
+        _wait_connected(transport)  # Wait for accept
 
         payload = b'{"event": "user_text", "payload": {"text": "hello"}}'
         second.sendall(_encode_frame(payload))
@@ -199,7 +233,7 @@ def test_stop_joins_threads() -> None:
     """After stop(), both internal threads are no longer alive."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     accept_thread = t._accept_thread
     recv_thread = t._recv_thread  # None until a client connects
@@ -218,7 +252,7 @@ def test_send_without_client_does_not_raise() -> None:
     """send() before any client has connected must not raise."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
     try:
         # No exception must propagate.
         t.send(b'{"event": "tts_stop", "payload": {}}')
@@ -236,7 +270,7 @@ def test_large_message(transport: IPCTransport) -> None:
 
     client = _connect(transport.bound_port)
     try:
-        time.sleep(0.05)  # Wait for accept
+        _wait_connected(transport)  # Wait for accept
 
         client.sendall(_encode_frame(payload))
 
@@ -258,7 +292,7 @@ def test_start_while_already_running_is_idempotent() -> None:
     """start() called while accept thread is alive logs a warning and returns."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
     try:
         # Calling start() a second time must not raise and must not spawn
         # a duplicate thread.
@@ -276,7 +310,7 @@ def test_is_connected_returns_false_when_no_client() -> None:
     """is_connected() returns False before any client has connected."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
     try:
         assert t.is_connected() is False
     finally:
@@ -288,7 +322,7 @@ def test_is_connected_returns_true_when_client_present(transport: IPCTransport) 
     """is_connected() returns True while a client socket is active."""
     client = _connect(transport.bound_port)
     try:
-        time.sleep(0.05)  # Let _accept_loop store _client_sock
+        _wait_connected(transport)  # Let _accept_loop store _client_sock
         assert transport.is_connected() is True
     finally:
         client.close()
@@ -314,7 +348,7 @@ def test_stop_oserror_on_server_socket_close_is_swallowed() -> None:
     """stop() tolerates OSError when closing the server socket."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # Replace the server socket with one whose close() raises.
     bad_server = MagicMock(spec=socket.socket)
@@ -331,7 +365,7 @@ def test_stop_oserror_on_client_socket_close_is_swallowed() -> None:
     """stop() tolerates OSError when closing the client socket."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # Inject a fake client socket whose close() raises.
     bad_client = MagicMock(spec=socket.socket)
@@ -349,7 +383,7 @@ def test_stop_logs_warning_when_accept_thread_does_not_exit() -> None:
     """stop() logs a warning if the accept thread exceeds join timeout."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # Replace the accept thread with one that never dies.
     blocker_started = threading.Event()
@@ -381,7 +415,7 @@ def test_stop_logs_warning_when_recv_thread_does_not_exit() -> None:
     """stop() logs a warning if the recv thread exceeds join timeout."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # Replace the recv thread with one that never dies.
     blocker_started = threading.Event()
@@ -515,16 +549,26 @@ def test_accept_loop_evicts_existing_client_on_reconnect() -> None:
     """_accept_loop closes the previous client socket when a new client connects."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # Connect a first client.
     first = _connect(t.bound_port)
-    time.sleep(0.05)
+    _wait_connected(t)
     assert t.is_connected()
+
+    # Capture the current (first) recv thread so we can wait for it to be replaced.
+    first_recv = t._recv_thread
 
     # Connect a second client — the first should be evicted.
     second = _connect(t.bound_port)
-    time.sleep(0.1)
+    # Wait until _accept_loop has started a NEW recv thread for the second client.
+    _wait_for(
+        lambda: (
+            t._recv_thread is not None
+            and t._recv_thread is not first_recv
+            and t._recv_thread.is_alive()
+        )
+    )
 
     try:
         # After eviction the transport should still be connected (to the second client).
@@ -604,7 +648,7 @@ def test_recv_loop_callback_none_does_not_raise() -> None:
     """_recv_loop with no on_message callback silently drops received frames."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # No callback registered (default is None).
     payload = b'{"event": "test"}'
@@ -612,12 +656,13 @@ def test_recv_loop_callback_none_does_not_raise() -> None:
 
     client = _connect(t.bound_port)
     try:
-        time.sleep(0.05)
+        _wait_connected(t)
         client.sendall(frame)
-        # Brief sleep — if _recv_loop crashes it will take the test with it.
-        time.sleep(0.1)
-        # Transport should still be running with a connected client.
-        assert t.is_connected()
+        # Verify transport stays connected — if _recv_loop crashes, is_connected
+        # would become False or the recv thread would die.  Poll for a brief window.
+        assert _wait_for(t.is_connected, timeout=0.5), (
+            "_recv_loop crashed after receiving frame with no callback"
+        )
     finally:
         client.close()
         t.stop()
@@ -636,20 +681,22 @@ def test_recv_loop_callback_exception_is_caught() -> None:
 
     t.set_on_message(_boom)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     payload = b'{"event": "trigger_boom"}'
     frame = _encode_frame(payload)
 
     client = _connect(t.bound_port)
     try:
-        time.sleep(0.05)
+        _wait_connected(t)
         client.sendall(frame)
         assert boom_called.wait(timeout=2.0), "on_message callback was never invoked"
-        # Give _recv_loop time to log the error and continue.
-        time.sleep(0.05)
         # Transport must still be alive — exception must NOT have propagated.
-        assert t._recv_thread is not None and t._recv_thread.is_alive()
+        # Poll briefly to allow _recv_loop to return to its select() wait.
+        assert _wait_for(
+            lambda: t._recv_thread is not None and t._recv_thread.is_alive(),
+            timeout=1.0,
+        ), "_recv_loop died after callback exception"
     finally:
         client.close()
         t.stop()
@@ -686,16 +733,24 @@ def test_accept_loop_joins_lingering_recv_thread() -> None:
     """_accept_loop joins a still-alive recv thread before starting a new one."""
     t = IPCTransport("127.0.0.1", 0)
     t.start()
-    time.sleep(0.05)
+    _wait_for(lambda: t._accept_thread is not None and t._accept_thread.is_alive())
 
     # Connect first client to spawn a recv thread.
     first = _connect(t.bound_port)
-    time.sleep(0.05)
+    _wait_connected(t)
     assert t._recv_thread is not None
+    first_recv = t._recv_thread
 
     # Connect second client — _accept_loop should join the previous recv thread.
     second = _connect(t.bound_port)
-    time.sleep(0.1)
+    # Wait until _accept_loop has started a NEW recv thread for the second client.
+    _wait_for(
+        lambda: (
+            t._recv_thread is not None
+            and t._recv_thread is not first_recv
+            and t._recv_thread.is_alive()
+        )
+    )
 
     try:
         # The recv thread should be the new one for the second client.

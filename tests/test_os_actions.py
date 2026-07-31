@@ -180,15 +180,15 @@ def test_clipboard_write_file_not_found() -> None:
 
 
 @pytest.mark.unit
-def test_file_info_existing_file() -> None:
-    """Stat on an existing regular file returns size, is_dir=False, exists=True."""
-    fake_stat = MagicMock()
-    fake_stat.st_size = 1234
+def test_file_info_existing_file(tmp_path: Path) -> None:
+    """Stat on an existing regular file inside allowed root returns correct metadata."""
+    allowed_root = tmp_path / "docs"
+    allowed_root.mkdir()
+    target = allowed_root / "somefile.txt"
+    target.write_bytes(b"x" * 1234)
 
-    with patch("src.tools.os_actions.Path.stat", return_value=fake_stat), \
-         patch("src.tools.os_actions.Path.is_dir", return_value=False):
-        tool = FileInfoTool()
-        result = tool.execute({"path": "/tmp/somefile.txt"})
+    tool = FileInfoTool(allowed_roots=[allowed_root])
+    result = tool.execute({"path": str(target)})
 
     assert result.success is True
     assert result.data["exists"] is True
@@ -209,14 +209,121 @@ def test_file_info_path_traversal_rejected() -> None:
 
 
 @pytest.mark.unit
-def test_file_info_non_existent_path() -> None:
-    """FileNotFoundError from stat → returns exists=False with success=True."""
-    with patch("src.tools.os_actions.Path.stat", side_effect=FileNotFoundError):
-        tool = FileInfoTool()
-        result = tool.execute({"path": "/tmp/definitely_does_not_exist_xyz.txt"})
+def test_file_info_non_existent_path(tmp_path: Path) -> None:
+    """FileNotFoundError for a path inside the allowed root → exists=False."""
+    allowed_root = tmp_path / "docs"
+    allowed_root.mkdir()
+    nonexistent = allowed_root / "definitely_does_not_exist_xyz.txt"
+
+    tool = FileInfoTool(allowed_roots=[allowed_root])
+    result = tool.execute({"path": str(nonexistent)})
 
     assert result.success is True
     assert result.data["exists"] is False
+
+
+# ---------------------------------------------------------------------------
+# FileInfoTool — CR-05 security: allowlist + path redaction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_file_info_system_path_denied() -> None:
+    """A system path outside the allowlist (e.g. /etc/passwd) is denied."""
+    tool = FileInfoTool()
+    result = tool.execute({"path": "/etc/passwd"})
+
+    assert result.success is False
+    assert "not allowed" in result.output.lower() or "outside" in result.output.lower()
+    # The path contents are never accessed — no size/is_dir/exists in data.
+    assert result.data == {}
+
+
+@pytest.mark.unit
+def test_file_info_sensitive_dotfile_denied() -> None:
+    """A path under ~/.ssh is denied even though it is under home."""
+    ssh_path = str(Path.home() / ".ssh" / "id_rsa")
+    tool = FileInfoTool()
+    result = tool.execute({"path": ssh_path})
+
+    assert result.success is False
+    assert "not allowed" in result.output.lower() or "outside" in result.output.lower()
+    # The path contents are never accessed — no size/is_dir/exists in data.
+    assert result.data == {}
+
+
+@pytest.mark.unit
+def test_file_info_symlink_escape_denied(tmp_path: Path) -> None:
+    """A symlink inside the allowed root that points outside is denied."""
+    allowed_root = tmp_path / "docs"
+    allowed_root.mkdir()
+
+    # Create a real target outside the allowed root.
+    outside_target = tmp_path / "secret.txt"
+    outside_target.write_text("secret content")
+
+    # Symlink inside allowed root pointing to outside target.
+    evil_link = allowed_root / "escape.txt"
+    evil_link.symlink_to(outside_target)
+
+    tool = FileInfoTool(allowed_roots=[allowed_root])
+    result = tool.execute({"path": str(evil_link)})
+
+    assert result.success is False
+    assert "not allowed" in result.output.lower() or "outside" in result.output.lower()
+
+
+@pytest.mark.unit
+def test_file_info_no_absolute_path_in_output(tmp_path: Path) -> None:
+    """Tool output must NOT contain the absolute resolved filesystem path."""
+    allowed_root = tmp_path / "docs"
+    allowed_root.mkdir()
+    target = allowed_root / "report.txt"
+    target.write_text("hello")
+
+    tool = FileInfoTool(allowed_roots=[allowed_root])
+    result = tool.execute({"path": str(target)})
+
+    assert result.success is True
+    # The full absolute path must not appear in the output string.
+    assert str(target) not in result.output
+    assert str(allowed_root) not in result.output
+
+
+@pytest.mark.unit
+def test_file_info_allowed_root_happy_path(tmp_path: Path) -> None:
+    """A real file under the allowed root returns correct metadata, path redacted."""
+    allowed_root = tmp_path / "docs"
+    allowed_root.mkdir()
+    target = allowed_root / "notes.txt"
+    target.write_text("hello world")
+
+    tool = FileInfoTool(allowed_roots=[allowed_root])
+    result = tool.execute({"path": str(target)})
+
+    assert result.success is True
+    assert result.data["exists"] is True
+    assert result.data["is_dir"] is False
+    assert result.data["size"] == len("hello world")
+    # Output should contain the relative path or basename, not the absolute path.
+    assert "notes.txt" in result.output
+
+
+@pytest.mark.unit
+def test_file_info_path_outside_tmp_allowed_root_denied(tmp_path: Path) -> None:
+    """A path that is outside the allowed root (but not a system path) is denied."""
+    allowed_root = tmp_path / "docs"
+    allowed_root.mkdir()
+
+    outside = tmp_path / "other" / "secret.txt"
+    outside.parent.mkdir()
+    outside.write_text("top secret")
+
+    tool = FileInfoTool(allowed_roots=[allowed_root])
+    result = tool.execute({"path": str(outside)})
+
+    assert result.success is False
+    assert "not allowed" in result.output.lower() or "outside" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

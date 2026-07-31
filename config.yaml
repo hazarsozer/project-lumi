@@ -79,7 +79,9 @@ scribe:
   model_size: tiny.en
 
   # Beam search width.  Higher = better accuracy, slower inference.
-  beam_size: 5
+  # Default 1 (greedy) — ~40-60% STT latency reduction vs beam_size=5
+  # on the assistant query path. Increase to 3-5 for batch/accuracy-sensitive use.
+  beam_size: 1
 
   # Quantization strategy passed to WhisperModel.
   # "int8"   — fastest on CPU, slight quality loss
@@ -162,6 +164,12 @@ llm:
   lora_path: null          # path to .gguf LoRA adapter, or null for base model
   lora_scale: 1.0          # adapter strength (0.0–1.0+)
 
+  # ── Conversation history retention (Issue #10) ─────────────────────────────
+  # Retention is OPT-IN.  0.0 (default) keeps all history — no entries are
+  # ever purged.  Set to a positive number of days to enable automatic purging
+  # (e.g. 30.0 = discard entries older than 30 days on every load() and save()).
+  memory_max_age_days: 0.0
+
   # ── Persona-vector steering (Track 1.A, v2.2) ──────────────────────────────
   # When true: loads models/lumi-merged-v2.1 in fp16 via HF instead of GGUF
   # and subtracts alpha * phi_prior_direction[layer] from the residual stream.
@@ -197,7 +205,7 @@ llm:
 tts:
   # Whether TTS is active.  Set to false to run in silent mode without
   # loading any model files (useful for headless or CI environments).
-  enabled: false
+  enabled: true
 
   # Kokoro voice identifier.  "af_heart" is the default English voice.
   # Other available voices depend on the bundled voices.bin file.
@@ -231,6 +239,12 @@ ipc:
   # The Tauri frontend reads this file and includes the token in hello_ack.
   # File is created with chmod 0600 (owner read-only).
   token_path: "~/.lumi/ipc_token"
+
+  # Security opt-in: allow binding to non-loopback addresses (e.g. 0.0.0.0).
+  # Default false — keeps the Brain local-only (privacy-first posture).
+  # Set true ONLY if you understand the network-exposure risk
+  # (e.g. Brain and frontend on separate machines in a trusted LAN).
+  allow_non_loopback: false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # tools — OS action tool framework settings
@@ -307,3 +321,8 @@ rag:
   # Hard ceiling in seconds for a single retrieval call.
   # Exceeded → empty result, LLM still responds without context.
   retrieval_timeout_s: 0.4
+
+  # Maximum age (in days) for stored document chunks.  Chunks whose parent
+  # document was ingested more than this many days ago are deleted by
+  # DocumentStore.purge_expired_chunks().  0.0 disables age-based retention.
+  rag_max_age_days: 0.0

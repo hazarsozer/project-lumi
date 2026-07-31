@@ -77,20 +77,13 @@ from typing import Any
 # Make ``scripts`` importable when invoked as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.eval_identity import _LUMI_VOICE_PATTERNS, _PHI_PATTERNS  # noqa: E402
+from scripts.eval_identity import (  # noqa: E402
+    _ALT_OFFER_PATTERN,
+    _LUMI_VOICE_PATTERNS,
+    _PHI_PATTERNS,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Local constants (per v2.4-plan §Validator)
-# ---------------------------------------------------------------------------
-
-_ALT_OFFER_PATTERN = re.compile(
-    r"\b(I can|let me|I'?ll|here'?s)\b\s+"
-    r"(draft|find|look up|set up|open|show|check|put together|sketch)\b",
-    re.IGNORECASE,
-)
 # Reject pet-name address as a voice-mismatch hard constraint. Probe data
 # (2026-05-17) showed Gemini emitting "darling", "my dear", "you rascal",
 # "sweetie" etc. on ~16% of otherwise-valid responses; Lumi's voice is warm
@@ -318,6 +311,37 @@ PROMPT_POOLS: dict[str, tuple[PromptTriple, ...]] = {
     "knowledge_limit": _build_pool("knowledge_limit", _KNOWLEDGE_LIMIT_BASE),
     "memory_privacy": _build_pool("memory_privacy", _MEMORY_PRIVACY_BASE),
 }
+# DELIBERATE DESIGN NOTE — Categories A (direct identity) and E (edge/meta) are
+# INTENTIONALLY absent from PROMPT_POOLS and therefore absent from the SFT corpus.
+#
+# These two eval categories are covered by inference-time mechanisms, NOT by
+# training-data reinforcement:
+#
+#   • Track D abliteration (alpha=1.5, layers [12,28], output-only projection):
+#     permanently removes the Phi-prior direction from the v2.1 merged weights,
+#     yielding Category A 92% and Category E 100% on the shipping GGUF
+#     ``lumi-phi35-v2.1-abliterated-a15-Q5_K_M.gguf``.
+#
+#   • Track C identity guard (logit-bias suppression of " Phi" / " Microsoft"
+#     tokens at bias=−100.0, ``LLMConfig.identity_guard_enabled``): eliminates
+#     any residual brand-string leakage not caught by abliteration.
+#
+# Combined eval (Run 4 abliteration + identity guard):
+#   Overall 54% / Category A 92% / PHI_PRIOR 10% (0 brand strings) / headline 77.8%.
+#   MVP bar met on all three criteria.
+#
+# The persona is FROZEN under ADR 0010
+# (``docs/wiki/decisions/0010-v1-hardening-release-and-persona-freeze.md``):
+# no SFT/DPO/abliteration retraining or dataset regeneration for the v1.0
+# hardening release. This omission is therefore CORRECT for the current freeze.
+#
+# IF the persona freeze is ever lifted in a future ADR:
+#   Adding Category A (direct identity) and E (edge/meta) corpus examples here
+#   is a candidate improvement — it would give the SFT layer reinforcement signal
+#   for those categories rather than relying solely on abliteration + guard.
+#   See ``docs/wiki/personas/track-d-abliteration-findings.md`` for per-category
+#   details and ``docs/wiki/personas/track-c-identity-guard-findings.md`` for the
+#   guard implementation.
 
 
 # ---------------------------------------------------------------------------

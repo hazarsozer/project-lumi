@@ -26,6 +26,7 @@ def _make_config(*, rag_enabled=False, tools_enabled=False, vision_enabled=False
     cfg.llm.temperature = 0.7
     cfg.llm.context_length = 512
     cfg.llm.inference_timeout_s = 30.0
+    cfg.observability.heartbeat_interval_s = 0.0
     return cfg
 
 
@@ -103,8 +104,11 @@ class TestRAGIntentDispatch:
         event = TranscriptReadyEvent(text="search my docs")
         orch._handle_transcript(event)
 
-        # Wait briefly for daemon thread
-        import time; time.sleep(0.05)
+        # Poll until the daemon thread calls generate() or the deadline passes.
+        import time
+        deadline = time.monotonic() + 2.0
+        while orch._reasoning_router.generate.call_args is None and time.monotonic() < deadline:
+            time.sleep(0.005)
 
         generate_call = orch._reasoning_router.generate.call_args
         if generate_call:
@@ -122,7 +126,10 @@ class TestRAGIntentDispatch:
         event = TranscriptReadyEvent(text="search my docs for notes")
         orch._handle_transcript(event)
 
-        import time; time.sleep(0.1)
+        import time
+        deadline = time.monotonic() + 2.0
+        while orch._reasoning_router.generate.call_args is None and time.monotonic() < deadline:
+            time.sleep(0.005)
 
         generate_call = orch._reasoning_router.generate.call_args
         assert generate_call is not None
@@ -137,7 +144,10 @@ class TestRAGIntentDispatch:
         event = UserTextEvent(text="find my notes")
         orch._handle_user_text(event)
 
-        import time; time.sleep(0.1)
+        import time
+        deadline = time.monotonic() + 2.0
+        while orch._reasoning_router.generate.call_args is None and time.monotonic() < deadline:
+            time.sleep(0.005)
 
         generate_call = orch._reasoning_router.generate.call_args
         assert generate_call is not None

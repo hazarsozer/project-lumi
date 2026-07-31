@@ -481,9 +481,24 @@ FIELD_META: dict[str, dict[str, Any]] = {
         "label": "IPC Address",
         "help": (
             "Host address for the WebSocket IPC server. "
+            "Must be a loopback address (127.0.0.1 / localhost / ::1) "
+            "unless ipc.allow_non_loopback is enabled. "
             "For local-only use keep '127.0.0.1'."
         ),
         "control": "text",
+        "restart_required": True,
+    },
+    "ipc.allow_non_loopback": {
+        "label": "Allow Non-Loopback IPC Bind",
+        "help": (
+            "Security opt-in: permit ipc.address to be set to a non-loopback "
+            "address (e.g. 0.0.0.0 or a LAN IP). "
+            "Default is OFF — non-loopback binds expose the Brain to the local "
+            "network, contradicting Lumi's local-only privacy posture. "
+            "Enable ONLY if you understand and accept the network-exposure risk "
+            "(e.g. Brain and frontend on separate machines in a trusted LAN)."
+        ),
+        "control": "toggle",
         "restart_required": True,
     },
     "ipc.port": {

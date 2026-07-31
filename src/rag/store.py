@@ -253,24 +253,38 @@ class DocumentStore:
     def delete_document_chunks(self, document_id: int) -> int:
         """Delete all chunks (and their vectors) for a document.
 
+        Deletion is performed in a single transaction with no Python-side
+        round trip:
+          1. vec0 vectors are removed via a subquery (the virtual table does
+             not participate in SQLite FK cascades, so they must be deleted
+             explicitly).
+          2. chunk rows are deleted via a direct WHERE clause; the
+             ``chunks_ad`` AFTER-DELETE trigger fires for every row, keeping
+             the FTS index consistent.
+
         Returns the number of chunks deleted.
         """
         conn = self._conn()
-        chunk_ids = [
-            row[0]
-            for row in conn.execute(
-                "SELECT id FROM chunks WHERE document_id = ?", (document_id,)
-            ).fetchall()
-        ]
-        if chunk_ids:
-            placeholders = ",".join("?" * len(chunk_ids))
+        # Count first so we can return the deleted chunk count without a
+        # second round trip after the delete.
+        count: int = conn.execute(
+            "SELECT COUNT(*) FROM chunks WHERE document_id = ?", (document_id,)
+        ).fetchone()[0]
+
+        if count:
+            # Delete vec0 vector rows via subquery — no Python list needed.
             conn.execute(
-                f"DELETE FROM vectors WHERE chunk_id IN ({placeholders})",
-                chunk_ids,
+                "DELETE FROM vectors WHERE chunk_id IN "
+                "(SELECT id FROM chunks WHERE document_id = ?)",
+                (document_id,),
             )
-        conn.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+            # Delete chunk rows — chunks_ad trigger fires per row → FTS stays in sync.
+            conn.execute(
+                "DELETE FROM chunks WHERE document_id = ?", (document_id,)
+            )
+
         conn.commit()
-        return len(chunk_ids)
+        return count
 
     # ------------------------------------------------------------------
     # Vectors
@@ -417,6 +431,90 @@ class DocumentStore:
             (str(timestamp),),
         )
         conn.commit()
+
+    # ------------------------------------------------------------------
+    # Retention / purge
+    # ------------------------------------------------------------------
+
+    def purge_expired_chunks(
+        self,
+        max_age_s: float,
+        now: float | None = None,
+    ) -> int:
+        """Delete chunks (and their vectors) whose parent document is too old.
+
+        Age is measured against ``documents.ingested_at`` — the UNIX timestamp
+        set by ``upsert_document`` at ingest time.  Chunks share the age of
+        their parent document, so all chunks from a document that has aged out
+        are removed together.
+
+        The document row itself is also deleted (cascades to its chunks via the
+        ``ON DELETE CASCADE`` FK constraint; vectors are removed first because
+        the ``vec0`` virtual table does not participate in SQLite FK cascades).
+
+        Args:
+            max_age_s: Maximum document age in seconds.  Documents older than
+                       ``(now - max_age_s)`` are considered expired.
+                       Must be > 0; pass 0.0 or a negative value to skip
+                       (returns 0 immediately).
+            now: Reference timestamp (UNIX epoch).  Defaults to
+                 ``time.time()``.  Override in tests for deterministic
+                 behaviour without wall-clock sleeps.
+
+        Returns:
+            Number of *chunks* deleted (not documents).
+        """
+        if max_age_s <= 0.0:
+            return 0
+
+        reference = now if now is not None else time.time()
+        cutoff = reference - max_age_s
+
+        conn = self._conn()
+
+        # Find expired document IDs and their associated chunk IDs.
+        expired_docs = [
+            row[0]
+            for row in conn.execute(
+                "SELECT id FROM documents WHERE ingested_at < ?", (cutoff,)
+            ).fetchall()
+        ]
+
+        if not expired_docs:
+            return 0
+
+        total_chunks = 0
+        for doc_id in expired_docs:
+            chunk_ids = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT id FROM chunks WHERE document_id = ?", (doc_id,)
+                ).fetchall()
+            ]
+            if chunk_ids:
+                placeholders = ",".join("?" * len(chunk_ids))
+                conn.execute(
+                    f"DELETE FROM vectors WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+            conn.execute("DELETE FROM chunks WHERE document_id = ?", (doc_id,))
+            total_chunks += len(chunk_ids)
+
+        # Remove the expired document rows.
+        doc_placeholders = ",".join("?" * len(expired_docs))
+        conn.execute(
+            f"DELETE FROM documents WHERE id IN ({doc_placeholders})",
+            expired_docs,
+        )
+        conn.commit()
+
+        logger.info(
+            "Purged %d expired documents (%d chunks) older than %.0f s",
+            len(expired_docs),
+            total_chunks,
+            max_age_s,
+        )
+        return total_chunks
 
     # ------------------------------------------------------------------
     # Lifecycle

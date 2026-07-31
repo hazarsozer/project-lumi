@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from src.core.config import IPCConfig
+from src.core.config_schema import FIELD_META
 from src.core.events import (
     ConfigSchemaRequestEvent,
     ConfigUpdateEvent,
@@ -444,6 +445,32 @@ class EventBridge:
         ]
     )
 
+    # Filesystem-path config keys that must never be redirected over the wire.
+    # Allowing a compromised client to set these could point Lumi at an
+    # attacker-controlled GGUF / ONNX / SQLite file, achieving arbitrary
+    # model-behaviour substitution or data exfiltration.
+    #
+    # PRIMARY source: FIELD_META entries with control=="path" (schema-driven —
+    # new path keys added to config_schema.py are automatically covered).
+    #
+    # SUPPLEMENTAL set: path-valued fields that exist in config.py but are NOT
+    # exposed in the Settings UI (and therefore absent from FIELD_META), plus
+    # ipc.token_path which is UI-exposed as "text" but is a security-sensitive
+    # filesystem path.
+    _WIRE_BLOCKED_PATH_KEYS: frozenset[str] = frozenset(
+        # Schema-driven: all keys whose UI widget is "path".
+        [key for key, meta in FIELD_META.items() if meta.get("control") == "path"]
+        # Supplemental explicit additions (must include a comment for each).
+        + [
+            # ipc.token_path — path to bearer-token file; redirecting it lets an
+            # attacker make Brain write the token into an attacker-readable path.
+            "ipc.token_path",
+            # llm.lora_path — path to a LoRA adapter GGUF; redirecting it would
+            # load an arbitrary adapter without model validation.
+            "llm.lora_path",
+        ]
+    )
+
     def _handle_config_update(self, payload: dict[str, Any]) -> None:
         """Validate and post a ConfigUpdateEvent to the orchestrator queue.
 
@@ -484,6 +511,20 @@ class EventBridge:
                 "EventBridge: config_update attempted to mutate restricted IPC "
                 "field(s) %r over the wire; dropping entire request.",
                 sorted(blocked),
+            )
+            return
+
+        # Reject any attempt to redirect filesystem-path config keys over the wire.
+        # This closes the model-path hijack vector (Issue #6 / CR-04): a
+        # compromised client cannot point llm.model_path (or any other path key)
+        # at an attacker-controlled file by issuing a config_update command.
+        blocked_paths = self._WIRE_BLOCKED_PATH_KEYS.intersection(changes.keys())
+        if blocked_paths:
+            logger.warning(
+                "EventBridge: config_update attempted to set filesystem-path "
+                "field(s) %r over the wire; dropping entire request. "
+                "Path keys may only be changed via config.yaml.",
+                sorted(blocked_paths),
             )
             return
 

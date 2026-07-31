@@ -120,15 +120,14 @@ def test_generate_checks_cancel_flag_mid_generation(
 
     cancel = threading.Event()
 
-    call_count = 0
-
-    def _side_effect(*args: object, **kwargs: object) -> dict:
-        nonlocal call_count
-        call_count += 1
-        # Set the cancel flag on the second chunk to simulate mid-generation cancel.
-        if call_count >= 2:
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
+        # Return a single generator that yields chunk_a, then sets the cancel
+        # flag, then yields chunk_b — so the router sees the flag between tokens.
+        def _gen():
+            yield chunk_a
             cancel.set()
-        return chunk_b if call_count >= 2 else chunk_a
+            yield chunk_b
+        return _gen()
 
     mock_llama_cpp.return_value.side_effect = _side_effect
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
@@ -179,11 +178,14 @@ def test_generate_stops_on_empty_token(mock_llama_cpp: MagicMock, tmp_path: Path
     ]
     call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
         nonlocal call_count
-        result = responses[min(call_count, len(responses) - 1)]
-        call_count += 1
-        return result
+        def _gen():
+            nonlocal call_count
+            for chunk in responses:
+                call_count += 1
+                yield chunk
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
@@ -207,11 +209,14 @@ def test_generate_stops_on_repeated_token(mock_llama_cpp: MagicMock, tmp_path: P
     ]
     call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
         nonlocal call_count
-        result = responses[min(call_count, len(responses) - 1)]
-        call_count += 1
-        return result
+        def _gen():
+            nonlocal call_count
+            for chunk in responses:
+                call_count += 1
+                yield chunk
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
@@ -233,11 +238,14 @@ def test_generate_stops_on_finish_reason_stop(mock_llama_cpp: MagicMock, tmp_pat
     ]
     call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
         nonlocal call_count
-        result = responses[min(call_count, len(responses) - 1)]
-        call_count += 1
-        return result
+        def _gen():
+            nonlocal call_count
+            for chunk in responses:
+                call_count += 1
+                yield chunk
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
@@ -257,11 +265,14 @@ def test_generate_stops_on_finish_reason_length(mock_llama_cpp: MagicMock, tmp_p
     ]
     call_count = 0
 
-    def _side_effect(*args: object, **kwargs: object) -> dict:
+    def _side_effect(*args: object, **kwargs: object):  # noqa: ANN202
         nonlocal call_count
-        result = responses[min(call_count, len(responses) - 1)]
-        call_count += 1
-        return result
+        def _gen():
+            nonlocal call_count
+            for chunk in responses:
+                call_count += 1
+                yield chunk
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _side_effect
 
@@ -285,11 +296,15 @@ def test_generate_cancel_set_during_final_token_raises(
     """
     cancel = threading.Event()
 
-    def _complete_and_cancel(*args: object, **kwargs: object) -> dict:
+    def _complete_and_cancel(*args: object, **kwargs: object):  # noqa: ANN202
         # Simulate the cancel flag being set *during* the model call —
         # after the pre-call check passed but before the loop exits.
-        cancel.set()
-        return {"choices": [{"text": "partial", "finish_reason": "stop"}]}
+        # The generator sets the flag before yielding so the post-loop cancel
+        # check fires after the for-loop body runs the final chunk.
+        def _gen():
+            cancel.set()
+            yield {"choices": [{"text": "partial", "finish_reason": "stop"}]}
+        return _gen()
 
     mock_llama_cpp.return_value.create_completion.side_effect = _complete_and_cancel
 

@@ -257,7 +257,12 @@ class KokoroTTS:
             self._silent = True
 
     def _stream_text(self, text: str, utterance_id: str) -> bool:
-        """Synthesize *text* sentence-by-sentence and emit audio chunks.
+        """Synthesize *text* sentence-by-sentence, emitting each chunk immediately.
+
+        Each sentence is synthesised and its audio chunk emitted to the speaker
+        before the next sentence inference begins.  This reduces first-audio
+        latency to approximately one-sentence synthesis time instead of the
+        full utterance synthesis time.
 
         Returns:
             True if synthesis completed normally (all chunks emitted including
@@ -266,16 +271,32 @@ class KokoroTTS:
             (caller must arrange SpeechCompletedEvent itself).
         """
         sentences = _split_sentences(text)
-        chunks: list[np.ndarray] = []
+        n = len(sentences)
 
-        # Inference pass — collect all sentence audio, checking cancel each time.
-        for sentence in sentences:
+        # First pass: synthesise all sentences to count how many produce valid
+        # audio, so we can correctly set is_final on the last *successful* chunk.
+        # We use a generator-style approach: synthesise one sentence, emit its
+        # chunk immediately, then move to the next.  The total sentence count
+        # is known upfront, but we track the emitted-chunk index separately
+        # because failed sentences produce no chunk.
+        #
+        # is_final determination: we cannot know whether the current sentence is
+        # the last *successful* one until we have looked ahead.  We buffer exactly
+        # one chunk so we can mark it is_final when we confirm no more will follow.
+        pending_chunk: np.ndarray | None = None
+        chunk_id: int = 0
+
+        for sent_idx, sentence in enumerate(sentences):
             if self._cancel_flag.is_set():
                 logger.debug(
-                    "KokoroTTS: cancelled before synthesising %r (utterance_id=%s)",
-                    sentence,
+                    "KokoroTTS: cancelled before synthesising sentence %d/%d "
+                    "(utterance_id=%s)",
+                    sent_idx,
+                    n,
                     utterance_id,
                 )
+                # Flush any buffered chunk without is_final so the finally
+                # block posts SpeechCompletedEvent (return False path).
                 return False
 
             try:
@@ -291,10 +312,33 @@ class KokoroTTS:
                 )
                 continue
 
-            if isinstance(samples, np.ndarray) and samples.size > 0:
-                chunks.append(samples.astype(np.float32))
+            if not (isinstance(samples, np.ndarray) and samples.size > 0):
+                continue
 
-        if not chunks:
+            new_chunk = samples.astype(np.float32)
+
+            # Emit the previously buffered chunk (is_final=False — we know
+            # at least one more chunk is coming: *new_chunk*).
+            if pending_chunk is not None:
+                if self._cancel_flag.is_set():
+                    logger.debug(
+                        "KokoroTTS: cancelled at emit chunk_id=%d (utterance_id=%s)",
+                        chunk_id,
+                        utterance_id,
+                    )
+                    return False
+                self._emit_chunk(
+                    pending_chunk,
+                    chunk_id=chunk_id,
+                    is_final=False,
+                    utterance_id=utterance_id,
+                )
+                chunk_id += 1
+
+            pending_chunk = new_chunk
+
+        # Emit the final buffered chunk.
+        if pending_chunk is None:
             logger.warning(
                 "KokoroTTS: no audio produced for utterance_id=%s — emitting silence",
                 utterance_id,
@@ -302,28 +346,19 @@ class KokoroTTS:
             self._emit_silence(utterance_id)
             return True  # SpeechCompletedEvent posted by _emit_silence
 
-        # Emit pass — send each chunk, checking cancel between chunks.
-        # NOTE: a cancel that fires *during* _emit_chunk (not between chunks) will
-        # not be caught until the next loop iteration.  The orchestrator's interrupt
-        # path calls speaker.flush() after cancel(), so any already-enqueued chunks
-        # from the current iteration will be discarded at the speaker level.
-        for chunk_id, chunk in enumerate(chunks):
-            if self._cancel_flag.is_set():
-                logger.debug(
-                    "KokoroTTS: cancelled at emit %d/%d for utterance_id=%s",
-                    chunk_id,
-                    len(chunks),
-                    utterance_id,
-                )
-                return False
-
-            is_final = chunk_id == len(chunks) - 1
-            self._emit_chunk(
-                chunk,
-                chunk_id=chunk_id,
-                is_final=is_final,
-                utterance_id=utterance_id,
+        if self._cancel_flag.is_set():
+            logger.debug(
+                "KokoroTTS: cancelled before emitting final chunk (utterance_id=%s)",
+                utterance_id,
             )
+            return False
+
+        self._emit_chunk(
+            pending_chunk,
+            chunk_id=chunk_id,
+            is_final=True,
+            utterance_id=utterance_id,
+        )
 
         return True  # all chunks emitted; speaker will fire SpeechCompletedEvent
 

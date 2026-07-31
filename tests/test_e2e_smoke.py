@@ -107,12 +107,14 @@ def _build_orchestrator(
     mock_model = MagicMock()
     mock_model.is_loaded = True
     mock_model.model = MagicMock()
-    # create_completion returns a single token then stops on the next call by
-    # returning an empty text — the loop in ReasoningRouter.generate() exits
-    # when token == "" (or when finish_reason=="stop").
-    mock_model.model.create_completion.side_effect = [
-        {"choices": [{"text": llm_response, "finish_reason": "stop"}]},
-    ]
+    # create_completion returns a streaming generator — stream=True protocol.
+    # (ReasoningRouter is fully mocked here so this path is not exercised, but
+    # the mock is kept consistent so it would work if the patch were removed.)
+    def _smoke_completion(*args, **kwargs):
+        def _gen():
+            yield {"choices": [{"text": llm_response, "finish_reason": "stop"}]}
+        return _gen()
+    mock_model.model.create_completion.side_effect = _smoke_completion
 
     mock_mem = MagicMock()
     mock_mem.load = MagicMock()

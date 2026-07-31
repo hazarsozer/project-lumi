@@ -96,12 +96,16 @@ class IPCTransport:
         self._shutdown.clear()
 
         server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_sock.bind((self._host, self._port))
-        server_sock.listen(1)
-        server_sock.setblocking(False)
-        self._server_sock = server_sock
-        self._bound_port = server_sock.getsockname()[1]
+        try:
+            server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_sock.bind((self._host, self._port))
+            server_sock.listen(1)
+            server_sock.setblocking(False)
+            self._server_sock = server_sock
+            self._bound_port = server_sock.getsockname()[1]
+        except Exception:
+            server_sock.close()
+            raise
 
         logger.info("IPCTransport listening on %s:%d", self._host, self._bound_port)
 

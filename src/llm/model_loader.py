@@ -18,11 +18,16 @@ from src.core.config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
-# Shared across all ModelLoader instances and ScreenshotTool so that LLM load
-# and vision-model load are serialised — prevents two GGUF models from occupying
-# VRAM simultaneously.  Using a module-level lock (not a class attribute) means
-# the same object is reachable from both modules without a circular import.
-_VRAM_LOCK: threading.Lock = threading.Lock()
+# Shared across all ModelLoader instances and ScreenshotTool so that LLM load,
+# unload, and vision-model load are serialised — prevents two GGUF models from
+# occupying VRAM simultaneously.  Using a module-level lock (not a class
+# attribute) means the same object is reachable from both modules without a
+# circular import.
+#
+# RLock (re-entrant) is required because ScreenshotTool._describe() acquires
+# this lock and then calls ModelLoader.unload() — which also acquires it.  A
+# plain threading.Lock() would deadlock on the same thread's second acquire.
+_VRAM_LOCK: threading.RLock = threading.RLock()
 
 
 class ModelLoader:
@@ -31,7 +36,7 @@ class ModelLoader:
     def __init__(self) -> None:
         self._model: Any | None = None
         # Expose the shared lock so ScreenshotTool can acquire the same object.
-        self._vram_lock: threading.Lock = _VRAM_LOCK
+        self._vram_lock: threading.RLock = _VRAM_LOCK
         # Holds the numpy cvec buffer alive for the lifetime of the GGUF context.
         # ctypes data_as() does NOT extend the numpy array's lifetime — if this
         # attribute is not set, the GC can free the buffer while llama.cpp holds
@@ -195,7 +200,12 @@ class ModelLoader:
 
         buf = np.fromfile(bin_path, dtype=np.float32)
         il_start, il_end = config.persona_steering_layer_range
-        n_layers_total = 32  # Phi-3.5-mini; consistent with export convention
+        # Derive layer count from the loaded model's metadata so the buffer
+        # layout stays correct if the architecture changes.  For the current
+        # shipping model (Phi-3.5-mini, 32 layers) this yields 32 — identical
+        # to the previous hardcoded value, so application semantics are
+        # unchanged (persona freeze, ADR 0010).
+        n_layers_total = int(llama_cpp.llama_model_n_layer(self._model.model))
         n_embd = buf.size // n_layers_total
         if buf.size != n_layers_total * n_embd:
             raise RuntimeError(
@@ -254,8 +264,20 @@ class ModelLoader:
         return bias
 
     def unload(self) -> None:
-        """Release the model reference so memory can be reclaimed."""
-        self._model = None
+        """Release the model reference so memory can be reclaimed.
+
+        Acquires ``_VRAM_LOCK`` to prevent a double-occupancy race with a
+        concurrent ``load()`` or wake call (another thread could start loading
+        a new model while the old one is still being cleared, resulting in two
+        GGUF models resident in VRAM simultaneously).
+
+        Also frees ``_cvec_buffer`` so the numpy control-vector array is not
+        retained across hibernate/wake cycles — without this the buffer leaks
+        once per cycle because the numpy array stays alive indefinitely.
+        """
+        with self._vram_lock:
+            self._model = None
+            self._cvec_buffer = None
         self._identity_guard_cache = None
         logger.info("Model unloaded")
 

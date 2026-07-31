@@ -22,6 +22,8 @@ Usage:
     ears.stop()
 """
 
+from __future__ import annotations
+
 import logging
 import queue
 import threading
@@ -33,7 +35,12 @@ import sounddevice as sd
 from openwakeword.model import Model
 from openwakeword.vad import VAD
 
-from src.core.events import EarsErrorCode, EarsErrorEvent, WakeDetectedEvent
+from src.core.events import (
+    EarsErrorCode,
+    EarsErrorEvent,
+    RecordingCompleteEvent,
+    WakeDetectedEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,15 +53,31 @@ _RETRY_DELAY_S = 0.25  # seconds to wait between retries
 
 
 class Ears:
-    def __init__(self, sensitivity: float = 0.5, model_paths: list[str] | None = None):
+    def __init__(
+        self,
+        sensitivity: float = 0.5,
+        model_paths: list[str] | None = None,
+        vad_threshold: float = 0.5,
+        silence_timeout_s: float = 1.5,
+        recording_timeout_s: float = 10.0,
+        no_speech_timeout_s: float = 3.0,
+    ):
         """
         Implementation of the threaded microphone listener.
         Args:
             sensitivity: The sensitivity of the wake word detector.
             model_paths: Optional list of paths to wake word models.
+            vad_threshold: VAD score above which a recorded chunk counts as speech.
+            silence_timeout_s: Seconds of silence after speech before recording stops.
+            recording_timeout_s: Hard upper bound on a single command recording.
+            no_speech_timeout_s: Seconds to wait for speech to begin before aborting.
         """
 
         self.sensitivity = sensitivity
+        self._vad_threshold = vad_threshold
+        self._silence_timeout_s = silence_timeout_s
+        self._recording_timeout_s = recording_timeout_s
+        self._no_speech_timeout_s = no_speech_timeout_s
         self.listening = False
         self._event_queue: queue.Queue[Any] | None = None
 
@@ -114,6 +137,12 @@ class Ears:
         # Cooldown timestamp (monotonic seconds) to ignore audio after a wake event
         self._cooldown_until = 0.0
 
+        # When True, wake-word inference is skipped (the mic still drains).  Set
+        # by the orchestrator while Lumi is SPEAKING so her own TTS cannot
+        # re-trigger the wake word (R5).  Plain bool: written from the
+        # orchestrator thread, read from the consumer thread; atomic under GIL.
+        self._wake_paused = False
+
     def _mic_callback(
         self, indata: np.ndarray, frames: int, time: Any, status: Any
     ) -> None:
@@ -127,30 +156,45 @@ class Ears:
         self.audio_queue.put(indata.copy())
 
     def record_command_with_vad(
-        self, timeout: float = 10.0, silence_limit: float = 1.5
+        self, timeout: float | None = None, silence_limit: float | None = None
     ) -> np.ndarray:
         """
         Records audio from the queue until VAD detects silence or timeout is reached.
         Args:
-            timeout: Maximum recording time in seconds.
-            silence_limit: How many seconds of silence to wait before stopping.
+            timeout: Maximum recording time in seconds.  Defaults to the
+                configured recording_timeout_s when None.
+            silence_limit: Seconds of silence to wait before stopping.  Defaults
+                to the configured silence_timeout_s when None.
         Returns:
             The recorded audio as a numpy array.
         """
+        timeout = self._recording_timeout_s if timeout is None else timeout
+        silence_limit = (
+            self._silence_timeout_s if silence_limit is None else silence_limit
+        )
         recorded_chunks = []
 
         start_time = _time.monotonic()
         last_voice_time = _time.monotonic()
         speech_detected = False
+        # Cooperative cancellation: only interrupt if stop() is called *during*
+        # recording (i.e. self.listening was True when we entered this method).
+        # When called directly with listening=False (unit tests, standalone use),
+        # the flag is ignored so normal VAD/timeout logic governs exit.
+        was_listening = self.listening
 
         while True:
+            # Cooperative cancellation: exit promptly when stop() is called.
+            if was_listening and not self.listening:
+                break
+
             now = _time.monotonic()
             if now - start_time > timeout:
                 break
             # Silence/no-speech checks run every iteration, even when queue is empty
             if speech_detected and (now - last_voice_time > silence_limit):
                 break
-            if not speech_detected and (now - start_time > 3.0):
+            if not speech_detected and (now - start_time > self._no_speech_timeout_s):
                 break
 
             try:
@@ -169,7 +213,7 @@ class Ears:
                 # VAD expects 16kHz 16-bit PCM; CHUNK_SIZE=1280 (80ms) is fine.
                 vad_score = self.vad.predict(chunk_flat)
 
-                if vad_score > 0.5:
+                if vad_score > self._vad_threshold:
                     speech_detected = True
                     last_voice_time = now
 
@@ -184,7 +228,9 @@ class Ears:
     def _consumer_loop(self) -> None:
         """
         This runs in the background thread and processes the audio data.
-        Posts WakeDetectedEvent to the event queue on wake word detection.
+        Posts WakeDetectedEvent to the event queue on wake word detection,
+        then calls record_command_with_vad to capture the voice command and
+        posts RecordingCompleteEvent with the captured audio.
 
         Transient InputStream failures (PortAudioError, USB hiccups) are
         retried up to _MAX_RETRIES times with a short delay between attempts.
@@ -220,9 +266,11 @@ class Ears:
                                 chunk = chunk.reshape(-1)
                             chunk = chunk.astype(np.int16, copy=False)
 
-                        # Respect cooldown window: keep draining queue but skip inference
+                        # Skip wake inference while paused (Lumi is speaking) or
+                        # within the post-wake / post-speaking cooldown window;
+                        # keep draining the queue so it does not back up.
                         now = _time.monotonic()
-                        if now < self._cooldown_until:
+                        if self._wake_paused or now < self._cooldown_until:
                             continue
 
                         try:
@@ -255,6 +303,23 @@ class Ears:
 
                                 self.model.reset()
                                 self._cooldown_until = _time.monotonic() + 2.0
+
+                                # Record the voice command and post the result.
+                                # record_command_with_vad blocks this thread while
+                                # recording — this intentionally prevents wake-word
+                                # re-detection during the command.  The InputStream
+                                # context manager remains active so _mic_callback
+                                # continues filling audio_queue.
+                                logger.info("Ears: recording command after wake…")
+                                audio = self.record_command_with_vad()
+                                logger.info(
+                                    "Ears: recording complete (%d samples)", len(audio)
+                                )
+                                if self._event_queue is not None:
+                                    self._event_queue.put(
+                                        RecordingCompleteEvent(audio=audio)
+                                    )
+
                                 break
 
             except sd.PortAudioError:
@@ -313,5 +378,30 @@ class Ears:
         """
         self.listening = False
         if hasattr(self, "thread"):
-            self.thread.join()
+            self.thread.join(timeout=2.0)
+            if self.thread.is_alive():
+                logger.warning(
+                    "Ears: consumer thread did not exit within 2 s after stop()"
+                )
+
+    def pause_wake(self) -> None:
+        """Suspend wake-word inference (e.g. while Lumi is SPEAKING).
+
+        The microphone stays open and the audio queue keeps draining; only
+        wake-word detection is skipped.  Used to stop Lumi's own TTS output
+        from re-triggering the wake word (R5 feedback-loop band-aid).
+        """
+        self._wake_paused = True
+
+    def resume_wake(self, cooldown_s: float = 0.0) -> None:
+        """Re-enable wake-word inference, optionally after a short cooldown.
+
+        Args:
+            cooldown_s: Seconds to keep inference suppressed after resuming, to
+                let the tail of TTS playback clear the acoustic path before the
+                wake word can fire again.
+        """
+        self._wake_paused = False
+        if cooldown_s > 0.0:
+            self._cooldown_until = _time.monotonic() + cooldown_s
 

@@ -60,6 +60,17 @@ class AudioConfig:
     # Hard upper bound on command recording duration in seconds.
     recording_timeout_s: float = 10.0
 
+    # Seconds to wait for speech to begin after recording starts.  If no speech
+    # is detected within this window the command capture aborts and returns an
+    # empty array (prevents a long hang when the wake word fires on noise).
+    no_speech_timeout_s: float = 3.0
+
+    # Seconds to keep wake-word detection suppressed after Lumi finishes
+    # speaking (the SPEAKING->IDLE transition).  Wake detection is fully paused
+    # *during* SPEAKING and re-armed with this cooldown afterwards, so the tail
+    # of her own TTS cannot re-trigger the wake word (R5 feedback-loop band-aid).
+    wake_resume_cooldown_s: float = 1.0
+
     # Path to the custom "hey Lumi" ONNX wake-word model.
     wake_word_model_path: str = "models/hey_lumi.onnx"
 
@@ -93,7 +104,9 @@ class ScribeConfig:
     model_size: str = "tiny.en"
 
     # Beam search width; higher values improve accuracy at the cost of speed.
-    beam_size: int = 5
+    # Default 1 (greedy) gives ~40-60% STT latency reduction vs beam_size=5
+    # on the assistant query path where speed matters more than peak accuracy.
+    beam_size: int = 1
 
     # Quantization type passed to WhisperModel — "int8" for CPU inference.
     compute_type: str = "int8"
@@ -253,6 +266,15 @@ class LLMConfig:
     # while leaving lone "Phi" (e.g. in a user's sentence) free to appear.
     identity_guard_tokens: tuple[str, ...] = (" Phi", " Microsoft")
 
+    # ── Conversation history retention ────────────────────────────────────────
+    # Maximum age (in days) for persisted conversation entries.  Entries older
+    # than this are purged automatically on load() and save().
+    # 0.0 (default) disables age-based retention entirely — retention is OPT-IN.
+    # Set to a positive value (e.g. 30.0) to enable automatic purging.
+    # Entries without a timestamp (loaded from pre-retention JSON files) are
+    # never purged — they have no age information, so they are always preserved.
+    memory_max_age_days: float = 0.0
+
 
 @dataclass(frozen=True)
 class TTSConfig:
@@ -285,6 +307,8 @@ class IPCConfig:
     enabled: bool = False
 
     # Host address for the TCP socket — port is appended as ":PORT".
+    # Must be a loopback address (127.0.0.1 / localhost / ::1) unless
+    # allow_non_loopback is explicitly set to True.
     address: str = "127.0.0.1"
 
     # Port number for the TCP socket.
@@ -294,6 +318,13 @@ class IPCConfig:
     # token on each startup and writes it here (chmod 0600).  The Tauri
     # frontend reads this file and presents the token in its hello_ack frame.
     token_path: str = "~/.lumi/ipc_token"
+
+    # Security opt-in: allow binding to non-loopback addresses (e.g. 0.0.0.0).
+    # Default is False — non-loopback binds expose the Brain to the local
+    # network, contradicting Lumi's local-only, privacy-first posture.
+    # Set to True ONLY if you understand and accept the network-exposure risk
+    # (e.g. running Brain and frontend on separate machines in a trusted LAN).
+    allow_non_loopback: bool = False
 
 
 @dataclass(frozen=True)
@@ -400,6 +431,26 @@ class RAGConfig:
     # warning, so the LLM still responds — without retrieved context.
     retrieval_timeout_s: float = 0.4
 
+    # Maximum age (in days) for stored document chunks.  Chunks whose parent
+    # document's ingested_at timestamp is older than this are purged by
+    # DocumentStore.purge_expired_chunks().  0.0 disables age-based retention.
+    rag_max_age_days: float = 0.0
+
+
+@dataclass(frozen=True)
+class ObservabilityConfig:
+    """Configuration for the process observability subsystem.
+
+    Controls the process heartbeat — a periodic log line that proves the Brain
+    is alive.  A stalled Brain (e.g. deadlocked inference thread) produces no
+    heartbeat signal, making the liveness gap immediately visible in logs.
+    """
+
+    # Interval in seconds between heartbeat log lines.
+    # 0.0 (default) disables the heartbeat entirely.
+    # Typical production value: 30.0 – 60.0 s.
+    heartbeat_interval_s: float = 0.0
+
 
 @dataclass(frozen=True)
 class LumiConfig:
@@ -418,6 +469,7 @@ class LumiConfig:
     vision: VisionConfig = field(default_factory=VisionConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     persona: PersonaConfig = field(default_factory=PersonaConfig)
+    observability: ObservabilityConfig = field(default_factory=ObservabilityConfig)
 
     # Root-logger level forwarded to setup_logging().
     log_level: str = "INFO"
@@ -485,6 +537,55 @@ def detect_edition() -> str:
 
     logger.debug("Detected %d MiB VRAM → edition '%s'.", vram_mib, edition)
     return edition
+
+
+# ---------------------------------------------------------------------------
+# IPC address validation
+# ---------------------------------------------------------------------------
+
+#: Addresses that are always accepted as loopback binds.
+_LOOPBACK_ADDRESSES: frozenset[str] = frozenset(
+    ["127.0.0.1", "localhost", "::1"]
+)
+
+
+def _validate_ipc_address(address: str, allow_non_loopback: bool) -> None:
+    """Raise ``ValueError`` if *address* is not a loopback address and
+    *allow_non_loopback* is ``False``.
+
+    Loopback addresses are: ``127.0.0.1``, ``localhost``, ``::1``.  Any
+    other value (e.g. ``0.0.0.0``, a public IP, or a hostname) is rejected
+    unless the explicit opt-in flag is set.
+
+    Args:
+        address:            The IPC bind address string.
+        allow_non_loopback: If ``True``, the restriction is lifted.  This
+                            is a deliberate security trade-off: the caller
+                            accepts that the Brain will be reachable from
+                            the local network.
+
+    Raises:
+        ValueError: If the address is non-loopback and opt-in is not set.
+    """
+    if address in _LOOPBACK_ADDRESSES:
+        return
+    if allow_non_loopback:
+        logger.warning(
+            "ipc.address is set to a non-loopback address (%r) and "
+            "ipc.allow_non_loopback is True.  The Brain IPC server will "
+            "be reachable from the local network — ensure this is "
+            "intentional.",
+            address,
+        )
+        return
+    raise ValueError(
+        f"ipc.address {address!r} is not a loopback address "
+        f"(127.0.0.1 / localhost / ::1).  Binding to non-loopback "
+        f"addresses exposes the Brain to the local network, which "
+        f"contradicts Lumi's local-only, privacy-first posture.  "
+        f"Set ipc.allow_non_loopback: true in config.yaml to opt in "
+        f"(security trade-off: accept network exposure)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -584,6 +685,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
     llm_cfg = LLMConfig(**llm_raw)
     tts_cfg = TTSConfig(**_merge_section(TTSConfig(), raw.get("tts", {})))
     ipc_cfg = IPCConfig(**_merge_section(IPCConfig(), raw.get("ipc", {})))
+    _validate_ipc_address(ipc_cfg.address, ipc_cfg.allow_non_loopback)
 
     # ToolsConfig: YAML lists parse as Python list; convert allowed_tools to tuple.
     tools_raw = _merge_section(ToolsConfig(), raw.get("tools", {}))
@@ -596,6 +698,10 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
 
     persona_cfg = PersonaConfig(
         **_merge_section(PersonaConfig(), raw.get("persona", {}))
+    )
+
+    observability_cfg = ObservabilityConfig(
+        **_merge_section(ObservabilityConfig(), raw.get("observability", {}))
     )
 
     # Top-level scalar overrides.
@@ -615,6 +721,7 @@ def load_config(path: str = "config.yaml") -> LumiConfig:
         vision=vision_cfg,
         rag=rag_cfg,
         persona=persona_cfg,
+        observability=observability_cfg,
         log_level=log_level,
         json_logs=json_logs,
     )

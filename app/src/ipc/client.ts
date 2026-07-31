@@ -3,6 +3,17 @@ import type { LumiBrainEvent, OutboundEvent, WireMessage } from "./events";
 
 export type ConnectionState = "connecting" | "connected" | "disconnected";
 
+// Pre-read the IPC bearer token at module load so the first connect() call
+// finds it already resolved. Without this, _sendHelloAck() would issue a cold
+// Tauri invoke ON the WebSocket critical path, which can exceed the Brain's
+// 3 s HANDSHAKE_TIMEOUT_S and trigger a 1008 disconnect before the ack lands.
+//
+// The promise is kept module-level so all BrainClient instances share it.
+// If the token file is missing the promise resolves to null (dev mode / race).
+let _cachedTokenPromise: Promise<string | null> = Promise.resolve(
+  invoke<string>("read_ipc_token")
+).catch(() => null);
+
 /** Public API shared by BrainClient and MockBrainClient. */
 export interface IBrainClient {
   readonly state: ConnectionState;
@@ -59,7 +70,13 @@ export class BrainClient implements IBrainClient {
       this._setState("disconnected");
       // Code 1008 = policy violation (auth failure). Do not retry — the token
       // file may be missing or stale; a retry loop would be pointless noise.
-      if (ev.code !== 1008) {
+      // Re-prime the cached token promise so that if the Brain restarts with a
+      // new token, the next manual connect() will send the fresh token.
+      if (ev.code === 1008) {
+        _cachedTokenPromise = Promise.resolve(
+          invoke<string>("read_ipc_token")
+        ).catch(() => null);
+      } else {
         this._scheduleReconnect();
       }
     };
@@ -70,29 +87,46 @@ export class BrainClient implements IBrainClient {
   }
 
   private _dispatch(data: string): void {
-    let raw: Record<string, unknown>;
-    try { raw = JSON.parse(data) as Record<string, unknown>; } catch { return; }
+    let raw: unknown;
+    try { raw = JSON.parse(data); } catch { return; }
+
+    if (typeof raw !== "object" || raw === null) {
+      console.warn("[BrainClient] received non-object frame, discarding");
+      return;
+    }
+
+    const obj = raw as Record<string, unknown>;
 
     // Brain's hello frame uses "type" not "event" — intercept it and respond
     // with hello_ack carrying the IPC bearer token for authentication.
-    if (raw["type"] === "hello") {
+    if (obj["type"] === "hello") {
       void this._sendHelloAck();
       return;
     }
 
-    const wire = raw as WireMessage;
+    // Runtime validation: require event (string) and payload (object).
+    if (typeof obj["event"] !== "string" || typeof obj["payload"] !== "object" || obj["payload"] === null) {
+      console.warn("[BrainClient] received frame missing required fields, discarding:", obj["event"]);
+      return;
+    }
+
+    const wire: WireMessage = {
+      event: obj["event"],
+      payload: obj["payload"] as Record<string, unknown>,
+      timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0,
+      version: "1.0",
+    };
+
     if (!isLumiBrainEvent(wire)) return;
     const narrowed = wire as unknown as LumiBrainEvent;
     for (const h of this.handlers) h(narrowed);
   }
 
   private async _sendHelloAck(): Promise<void> {
-    let token: string | null = null;
-    try {
-      token = await invoke<string>("read_ipc_token");
-    } catch {
-      // Token file not found — dev mode or Brain/frontend startup race.
-    }
+    // Await the module-level pre-fetched token promise. On first connect the
+    // token is usually already resolved; subsequent reconnects always find it
+    // resolved. This keeps the Tauri invoke OFF the WS handshake critical path.
+    const token = await _cachedTokenPromise;
     const ack: Record<string, unknown> = {
       type: "hello_ack",
       version: "1.0",

@@ -434,6 +434,37 @@ class ClipboardTool:
 # FileInfoTool
 # ---------------------------------------------------------------------------
 
+# Sensitive subtrees that must be denied even when they fall under home.
+# These are checked against the RESOLVED path so symlink escapes are caught.
+_SENSITIVE_HOME_SUBTREES: tuple[str, ...] = (
+    ".ssh",
+    ".gnupg",
+    ".lumi",
+    ".aws",
+    ".azure",
+    ".config/gcloud",
+    ".kube",
+    ".netrc",
+    ".gitconfig",
+)
+
+# Default safe roots: common user document directories.  Tilde is expanded at
+# FileInfoTool construction time so Path.home() is called once per instance.
+_DEFAULT_SAFE_ROOT_NAMES: tuple[str, ...] = (
+    "Documents",
+    "Downloads",
+    "Desktop",
+    "Music",
+    "Pictures",
+    "Videos",
+)
+
+
+def _build_default_allowed_roots() -> list[Path]:
+    """Return the default set of allowlisted roots under the user's home dir."""
+    home = Path.home()
+    return [home / name for name in _DEFAULT_SAFE_ROOT_NAMES]
+
 
 class FileInfoTool:
     """Return stat information about a filesystem path.
@@ -442,23 +473,93 @@ class FileInfoTool:
         name: "file_info"
         args:
             path (str, required): Absolute or relative path to inspect.
+                                  Must resolve to a path inside one of the
+                                  configured allowed roots.
 
     Returns:
         ToolResult(
             success=True,
-            output="<human-readable summary>",
+            output="<human-readable summary — path relative to allowed root>",
             data={"size": int, "is_dir": bool, "exists": bool}
         )
 
-    Security: paths containing ".." are rejected before any os.stat() call.
+    Security:
+      - Paths containing ".." are rejected before any filesystem operation.
+      - The resolved (symlink-followed) path is checked against an allowlist
+        of safe roots.  Anything outside the allowlist — including system
+        paths (/etc, /proc, /sys, /root) and sensitive home subtrees
+        (~/.ssh, ~/.lumi, etc.) — is denied.
+      - Absolute filesystem paths are NOT included in tool output; the path
+        is reported relative to its allowed root so it never reaches the LLM
+        or UI in expanded form.
     Cross-platform: uses pathlib — works on Linux, macOS, and Windows.
     """
 
     name: str = "file_info"
     description: str = (
         "Return filesystem metadata for a path (size, type, exists). "
-        'Args: {"path": "<absolute or relative path>"}.'
+        'Args: {"path": "<path inside allowed documents/downloads directory>"}.'
     )
+
+    def __init__(
+        self, allowed_roots: list[Path] | None = None
+    ) -> None:
+        """Initialise the tool.
+
+        Args:
+            allowed_roots: Override the default safe-root list.  Each entry
+                should be an absolute Path.  Pass a custom list in tests to
+                avoid depending on the real home directory layout.
+        """
+        self._allowed_roots: list[Path] = (
+            allowed_roots if allowed_roots is not None else _build_default_allowed_roots()
+        )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _find_allowed_root(self, resolved: Path) -> Path | None:
+        """Return the first allowed root that ``resolved`` is under, or None.
+
+        Symlinks have already been resolved by the caller.  We check
+        ``resolved`` (not the raw input) so symlink-escape attempts are
+        caught.
+        """
+        home = Path.home()
+
+        # Deny sensitive home subtrees regardless of whether they fall inside
+        # an allowed root.
+        for subtree in _SENSITIVE_HOME_SUBTREES:
+            sensitive = home / subtree
+            try:
+                resolved.relative_to(sensitive)
+                return None  # inside a sensitive subtree — deny
+            except ValueError:
+                pass
+
+        # Check against the configured allowlist.
+        for root in self._allowed_roots:
+            try:
+                resolved.relative_to(root)
+                return root
+            except ValueError:
+                pass
+
+        return None
+
+    @staticmethod
+    def _relative_display(resolved: Path, root: Path) -> str:
+        """Return the path relative to ``root`` for safe display."""
+        try:
+            return str(resolved.relative_to(root))
+        except ValueError:
+            # Should not happen — caller already confirmed root membership.
+            return resolved.name
+
+    # ------------------------------------------------------------------
+    # execute
+    # ------------------------------------------------------------------
 
     def execute(self, args: dict[str, Any]) -> ToolResult:
         raw_path: Any = args.get("path", "")
@@ -472,38 +573,57 @@ class FileInfoTool:
             logger.warning("FileInfoTool: path traversal rejected for '%s'.", raw_path)
             return ToolResult(success=False, output="Invalid path", data={})
 
+        # Resolve symlinks fully so all subsequent checks operate on the real
+        # filesystem location (not the link target name).
         resolved = Path(raw_path).resolve()
+
+        # Allowlist gate — must pass before any stat() call.
+        matched_root = self._find_allowed_root(resolved)
+        if matched_root is None:
+            logger.warning(
+                "FileInfoTool: path outside allowed roots rejected: '%s'.", raw_path
+            )
+            return ToolResult(
+                success=False,
+                output="Path not allowed: outside permitted directories",
+                data={},
+            )
+
+        display_path = self._relative_display(resolved, matched_root)
 
         try:
             stat_result = resolved.stat()
         except FileNotFoundError:
-            logger.info("FileInfoTool: path '%s' does not exist.", resolved)
+            logger.info("FileInfoTool: path '%s' does not exist.", display_path)
             return ToolResult(
                 success=True,
-                output=f"Path does not exist: {resolved}",
+                output=f"Path does not exist: {display_path}",
                 data={"size": 0, "is_dir": False, "exists": False},
             )
         except PermissionError as exc:
             logger.warning(
-                "FileInfoTool: permission denied for '%s': %s.", resolved, exc
+                "FileInfoTool: permission denied for '%s': %s.", display_path, exc
             )
             return ToolResult(
                 success=False,
-                output=f"Permission denied: {resolved}",
+                output=f"Permission denied: {display_path}",
                 data={},
             )
         except OSError as exc:
-            logger.error("FileInfoTool: OSError for '%s': %s.", resolved, exc)
+            logger.error("FileInfoTool: OSError for '%s': %s.", display_path, exc)
+            # Redact: str(exc) can embed the absolute path via OSError.filename;
+            # surface the strerror reason (no filename) + the relativized path only.
+            reason = exc.strerror or type(exc).__name__
             return ToolResult(
                 success=False,
-                output=f"Error accessing path: {exc}",
+                output=f"Error accessing path: {display_path} ({reason})",
                 data={},
             )
 
         is_dir = resolved.is_dir()
         size = stat_result.st_size
         kind = "directory" if is_dir else "file"
-        output = f"{kind}: {resolved} ({size} bytes)"
+        output = f"{kind}: {display_path} ({size} bytes)"
         logger.info("FileInfoTool: %s", output)
 
         return ToolResult(

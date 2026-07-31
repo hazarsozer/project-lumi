@@ -105,6 +105,7 @@ def _flatten_config(config: LumiConfig) -> dict[str, Any]:
         "vision": config.vision,
         "rag": config.rag,
         "persona": config.persona,
+        "observability": config.observability,
     }
     for section_name, section_obj in sections.items():
         for f in dataclasses.fields(section_obj):
@@ -133,6 +134,7 @@ class Orchestrator:
         ears: Ears | None = None,
         scribe: Scribe | None = None,
         missing_setup_items: list[str] | None = None,
+        error_tracker: Callable[[BaseException], None] | None = None,
     ) -> None:
         self._config: LumiConfig = config
         self._config_manager: ConfigManager = ConfigManager(config)
@@ -141,6 +143,37 @@ class Orchestrator:
         self._shutdown: bool = False
         self._handlers: dict[type, list[Callable[..., None]]] = {}
 
+        # Optional error-tracker hook (Callable[[BaseException], None]).
+        # Called on unhandled handler exceptions so they can be surfaced beyond
+        # local logs (e.g. Sentry, a custom sink).  Default is None (no-op).
+        # Lumi is local-first — no cloud SDK is imported by default.
+        self._error_tracker: Callable[[BaseException], None] | None = error_tracker
+
+        # Guard flags used by _cleanup_partial_init() to release only resources
+        # that were successfully acquired before a mid-init exception.
+        self._speaker_started: bool = False
+        self._bridge_started: bool = False
+
+        # Heartbeat timer handle — set in _init_subsystems when the interval > 0.
+        self._heartbeat_timer: threading.Timer | None = None
+
+        try:
+            self._init_subsystems(config, speaker, tts, event_bridge, ears, scribe, missing_setup_items)
+        except BaseException:
+            self._cleanup_partial_init()
+            raise
+
+    def _init_subsystems(
+        self,
+        config: LumiConfig,
+        speaker: SpeakerThread | None,
+        tts: KokoroTTS | None,
+        event_bridge: EventBridge | None,
+        ears: Ears | None,
+        scribe: Scribe | None,
+        missing_setup_items: list[str] | None,
+    ) -> None:
+        """Inner init — called from __init__ inside a try/except for cleanup safety."""
         # LLM subsystem — components are created here; the model itself is
         # loaded on first use (ModelLoader.load() is deferred until inference).
         self._reflex_router: ReflexRouter = ReflexRouter()
@@ -149,6 +182,7 @@ class Orchestrator:
         self._memory: ConversationMemory = ConversationMemory(
             config.llm.memory_dir,
             summariser=self._make_summariser(config.llm),
+            max_age_s=config.llm.memory_max_age_days * 86_400.0,
         )
         self._memory.load()
         # RAG subsystem — built only when enabled in config.
@@ -163,6 +197,16 @@ class Orchestrator:
                 self._rag_store = DocumentStore(config.rag)
                 self._rag_retriever = RAGRetriever(self._rag_store, config.rag)
                 logger.info("RAG subsystem initialised (db=%s)", config.rag.db_path)
+                # Purge RAG chunks older than the configured retention window.
+                # rag_max_age_days=0.0 (default) disables purge — DocumentStore.
+                # purge_expired_chunks also guards on <= 0, so this is doubly safe.
+                _rag_max_age_s: float = config.rag.rag_max_age_days * 86_400.0
+                if _rag_max_age_s > 0.0:
+                    self._rag_store.purge_expired_chunks(_rag_max_age_s)
+                    logger.info(
+                        "RAG startup purge: removed chunks older than %.1f days",
+                        config.rag.rag_max_age_days,
+                    )
             except Exception:
                 logger.exception("RAG subsystem failed to initialise; disabling RAG")
                 self._rag_runtime_enabled = False
@@ -234,10 +278,28 @@ class Orchestrator:
             speaker if speaker is not None else SpeakerThread(self._event_queue)
         )
         self._speaker.start()
+        self._speaker_started = True
 
-        # TTS engine — injectable for testing; None means no TTS (state machine
-        # still transitions correctly via a synthetic SpeechCompletedEvent).
-        self._tts: KokoroTTS | None = tts
+        # TTS engine.  Injectable for testing.  When neither a speaker nor a tts
+        # is injected (the main.py production path), build the real KokoroTTS
+        # alongside the auto-created SpeakerThread above so the Brain can speak.
+        # config.tts.enabled gates it; KokoroTTS self-degrades to silent mode if
+        # the model/package is unavailable.  When a speaker IS injected (tests),
+        # the caller owns audio-out and injects a tts only if it needs one, so we
+        # leave _tts=None and avoid loading the model in the test suite.
+        self._tts: KokoroTTS | None
+        if tts is not None:
+            self._tts = tts
+        elif config.tts.enabled and speaker is None:
+            self._tts = KokoroTTS(
+                model_path=config.tts.model_path,
+                voices_path=config.tts.voices_path,
+                voice=config.tts.voice,
+                speaker=self._speaker,
+                event_queue=self._event_queue,
+            )
+        else:
+            self._tts = None
 
         # Guards _current_utterance_id and _tts_pending_count so that interrupt
         # and multi-sentence completion can atomically read and modify TTS state.
@@ -252,6 +314,12 @@ class Orchestrator:
         self._ears: Ears | None = ears
         self._scribe: Scribe | None = scribe
         self._missing_setup_items: list[str] = missing_setup_items or []
+
+        # R5: pause Ears wake detection while Lumi is SPEAKING (and briefly
+        # after) so her own TTS can't re-trigger the wake word.  PTT is
+        # unaffected — it posts WakeDetectedEvent directly, bypassing inference.
+        self._wake_resume_cooldown_s: float = config.audio.wake_resume_cooldown_s
+        self._state_machine.register_observer(self._on_state_change_audio)
 
         # Push-to-talk listener — optional; created when config.audio.ptt_enabled.
         self._ptt_listener = None
@@ -301,6 +369,7 @@ class Orchestrator:
                 config.ipc, self._event_queue, self._state_machine
             )
             self._event_bridge.start()
+            self._bridge_started = True
 
         if self._event_bridge is not None:
             # Injected instances have not had on_state_change registered against
@@ -319,10 +388,95 @@ class Orchestrator:
             self.register_handler(RAGStatusEvent, self._event_bridge.on_rag_status)
             self.register_handler(SystemStatusEvent, self._event_bridge.on_system_status)
 
+        # Heartbeat — optional periodic liveness signal.
+        # Fires a log line at the configured interval so a stalled Brain produces
+        # a visible gap in logs.  Disabled (default) when interval is 0.0.
+        _hb_interval = config.observability.heartbeat_interval_s
+        if _hb_interval > 0.0:
+            self._heartbeat_timer = self._schedule_heartbeat(_hb_interval)
+
+    def _cleanup_partial_init(self) -> None:
+        """Release resources acquired before a mid-__init__ exception.
+
+        Called from the except clause in __init__ when _init_subsystems raises.
+        Only stops resources that were marked as successfully started; never
+        calls stop() on something that was never started.
+
+        Errors during cleanup are logged and suppressed to avoid masking the
+        original exception.
+        """
+        if self._heartbeat_timer is not None:
+            self._heartbeat_timer.cancel()
+
+        if self._bridge_started and self._event_bridge is not None:
+            try:
+                self._event_bridge.stop()
+            except Exception:
+                logger.warning("Error stopping EventBridge during init cleanup", exc_info=True)
+
+        if self._speaker_started:
+            try:
+                self._speaker.stop()
+            except Exception:
+                logger.warning("Error stopping SpeakerThread during init cleanup", exc_info=True)
+
     @property
     def state_machine(self) -> StateMachine:
         """Expose the state machine for observer registration."""
         return self._state_machine
+
+    # ------------------------------------------------------------------
+    # Heartbeat
+    # ------------------------------------------------------------------
+
+    def _schedule_heartbeat(self, interval_s: float) -> threading.Timer:
+        """Schedule a single heartbeat log line and then reschedule itself.
+
+        Uses a daemon threading.Timer so the heartbeat never prevents process
+        exit.  The timer is re-armed from within its own callback, which means
+        the period is ``interval_s`` *after each fire* (not wall-clock drift).
+
+        Args:
+            interval_s: Seconds between heartbeat log lines.  Must be > 0.
+
+        Returns:
+            The newly scheduled ``threading.Timer``.
+        """
+        def _fire() -> None:
+            if self._shutdown:
+                return
+            logger.info(
+                "Heartbeat — Brain is alive (interval=%.1f s)", interval_s
+            )
+            # Reschedule — store handle so stop() can cancel the next tick.
+            self._heartbeat_timer = self._schedule_heartbeat(interval_s)
+
+        timer = threading.Timer(interval_s, _fire)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _beat(self) -> None:
+        """Fire the heartbeat immediately (useful for tests without real sleeps)."""
+        logger.info(
+            "Heartbeat — Brain is alive (interval=%.1f s)",
+            self._config.observability.heartbeat_interval_s,
+        )
+
+    # ------------------------------------------------------------------
+    # Error-tracker hook
+    # ------------------------------------------------------------------
+
+    def set_error_tracker(self, hook: Callable[[BaseException], None] | None) -> None:
+        """Replace the error-tracker hook at runtime.
+
+        Passing ``None`` resets to the default no-op behaviour.
+
+        Args:
+            hook: Callable invoked with the exception on unhandled handler
+                  errors.  May be called from the event-loop thread.
+        """
+        self._error_tracker = hook
 
     def _make_summariser(
         self, llm_config: LLMConfig
@@ -438,12 +592,19 @@ class Orchestrator:
         for handler in handlers:
             try:
                 handler(event)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Handler %s raised an exception for %s",
                     handler.__name__,
                     event_type.__name__,
                 )
+                if self._error_tracker is not None:
+                    try:
+                        self._error_tracker(exc)
+                    except Exception:
+                        logger.warning(
+                            "error_tracker hook raised; ignoring", exc_info=True
+                        )
 
     def _handle_transcript(self, event: TranscriptReadyEvent) -> None:
         """Handle TranscriptReadyEvent: route text to reflex or LLM.
@@ -747,6 +908,23 @@ class Orchestrator:
 
         logger.debug("WakeDetectedEvent received in state %s; ignoring.", current.value)
 
+    def _on_state_change_audio(
+        self, old_state: LumiState, new_state: LumiState
+    ) -> None:
+        """State observer that gates the wake word around SPEAKING (R5).
+
+        Pauses Ears wake detection on entry to SPEAKING and re-arms it (after a
+        short cooldown) when leaving SPEAKING, so Lumi's own TTS output cannot
+        re-trigger the wake word.  No-op in text-only mode (no Ears).  PTT
+        barge-in is unaffected — it posts WakeDetectedEvent directly.
+        """
+        if self._ears is None:
+            return
+        if new_state == LumiState.SPEAKING:
+            self._ears.pause_wake()
+        elif old_state == LumiState.SPEAKING:
+            self._ears.resume_wake(self._wake_resume_cooldown_s)
+
     def _handle_recording_complete(self, event: RecordingCompleteEvent) -> None:
         """Handle RecordingCompleteEvent: invoke Scribe in a daemon thread.
 
@@ -833,6 +1011,11 @@ class Orchestrator:
             event: The shutdown event.
         """
         logger.info("Shutdown requested")
+        # Cancel the heartbeat timer before setting _shutdown so the timer
+        # callback's early-exit guard (_shutdown check) is not needed for
+        # correctness, but still fires correctly even if the two race.
+        if self._heartbeat_timer is not None:
+            self._heartbeat_timer.cancel()
         self._speaker.stop()
         if self._ears is not None:
             self._ears.stop()
@@ -896,20 +1079,29 @@ class Orchestrator:
     def _drain_event_types(self, type_names: set[str]) -> None:
         """Remove events of the given type names from the queue.
 
-        This is best-effort: events may arrive after the drain. The
-        orchestrator re-checks state before dispatching anyway.
+        The snapshot, filter, and re-insertion are performed atomically under
+        the queue's internal mutex so that a concurrent producer cannot
+        interleave its events into the retained set.  Retained events are
+        placed at the front of the deque in their original relative order;
+        any events enqueued by producers while the lock is held will arrive
+        after them.
 
         Args:
             type_names: Set of event class names to discard.
         """
-        retained: list[Any] = []
-        try:
-            while True:
-                item = self._event_queue.get_nowait()
-                if type(item).__name__ not in type_names:
-                    retained.append(item)
-        except queue.Empty:
-            pass
-
-        for item in retained:
-            self._event_queue.put(item)
+        q = self._event_queue
+        with q.mutex:
+            # Snapshot the entire deque, filter out drained types, and
+            # re-populate the deque atomically.
+            all_items: list[Any] = list(q.queue)
+            retained: list[Any] = [
+                item for item in all_items if type(item).__name__ not in type_names
+            ]
+            q.queue.clear()
+            # appendleft from the *end* of retained preserves original order
+            # at the front of the deque.
+            for item in reversed(retained):
+                q.queue.appendleft(item)
+            # Wake any consumer blocked on get() if items are present.
+            if retained:
+                q.not_empty.notify()
